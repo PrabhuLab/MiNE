@@ -1,0 +1,6 @@
+{
+  "name": "MiNE Application",
+  "description": "Mineral Network Explorer using Next.js and D3.js",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
