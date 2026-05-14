@@ -11,6 +11,8 @@ interface D3GraphProps {
   communityMap: Record<string, string>;
   nodeSizeMult: number;
   edgeWeightMult?: number;
+  nodeOpacity?: number;
+  edgeOpacity?: number;
   nodeSizeBase?: string;
   edgeWeightBase?: string;
   forceStrength: number;
@@ -23,7 +25,7 @@ interface D3GraphProps {
   onRefresh?: () => void;
 }
 
-export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edgeWeightMult = 1, nodeSizeBase = 'abundance', edgeWeightBase = 'weight_raw', forceStrength, directed, bipartite, livePhysics, isFrozen, isDarkMode, refreshKey, onRefresh }: D3GraphProps) {
+export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edgeWeightMult = 1, nodeOpacity = 1, edgeOpacity = 0.8, nodeSizeBase = 'abundance', edgeWeightBase = 'weight_raw', forceStrength, directed, bipartite, livePhysics, isFrozen, isDarkMode, refreshKey, onRefresh }: D3GraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const simulationRef = useRef<d3.Simulation<any, any> | null>(null);
@@ -244,13 +246,8 @@ export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edge
     const strokeWidthScale = d3.scaleLinear().domain([0, maxWeight]).range([0.5, 4]);
 
     const simulation = d3.forceSimulation(graphNodes as d3.SimulationNodeDatum[])
-      .velocityDecay(0.5) // Add friction to prevent wild bouncing
-      .force('link', d3.forceLink(graphLinks)
-        .id((d: any) => d.id)
-        .distance((d: any) => 300 - (Math.min(d.weight / maxWeight, 1) * (200 + forceStrength)))
-        // Lower max strength to prevent overshooting, and halve it for directed graphs to account for bidirectional springs
-        .strength((d: any) => (0.05 + Math.min(d.weight / maxWeight, 1) * 0.25) / (directed ? 2 : 1)))
-      .force('charge', d3.forceManyBody().strength(forceStrength).distanceMax((200 - (-forceStrength / 2)) * 1.5))
+      .force('link', d3.forceLink(graphLinks).id((d: any) => d.id).distance(30))
+      .force('charge', d3.forceManyBody().strength(forceStrength))
       .force('center', d3.forceCenter(width / 2, height / 2))
       .force('collide', d3.forceCollide().radius((d: any) => d.currentRadius + 2).iterations(2));
 
@@ -504,9 +501,9 @@ export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edge
       if (isNodeHidden(d)) return 0;
       if (clickedNode) {
         const neighbors = adjacencyList[clickedNode.id] || new Set();
-        return (d.id === clickedNode.id || neighbors.has(d.id)) ? 1 : 0.1;
+        return (d.id === clickedNode.id || neighbors.has(d.id)) ? nodeOpacity : nodeOpacity * 0.1;
       }
-      return 1;
+      return nodeOpacity;
     }).style('display', (d: any) => isNodeHidden(d) ? 'none' : '');
 
     link.style('opacity', (d: any) => {
@@ -515,9 +512,9 @@ export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edge
       const tgtId = typeof d.target === 'object' ? d.target.id : d.target;
 
       if (clickedNode) {
-        return (srcId === clickedNode.id || tgtId === clickedNode.id) ? 1 : 0.05;
+        return (srcId === clickedNode.id || tgtId === clickedNode.id) ? edgeOpacity : edgeOpacity * 0.1;
       }
-      return isDarkMode ? 0.4 : 0.2;
+      return edgeOpacity;
     }).style('display', (d: any) => {
       if (hiddenItems.has('element:edges')) return 'none';
       return '';
@@ -560,7 +557,7 @@ export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edge
         tickDrawRef.current();
     }
 
-  }, [clickedNode, hiddenItems, communityMap, nodes, bipartite, refreshKey, isDarkMode, directed, edges.length]);
+  }, [clickedNode, hiddenItems, communityMap, nodes, bipartite, refreshKey, isDarkMode, directed, edges.length, nodeOpacity, edgeOpacity]);
 
   return (
     <div ref={containerRef} className="w-full h-full relative cursor-crosshair">

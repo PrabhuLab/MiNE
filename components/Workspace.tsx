@@ -553,6 +553,22 @@ export default function Workspace() {
                 onChange={(v: number) => setFilter('nodeSize', v)}
                 isDarkMode={isDarkMode}
               />
+
+              <label className={`flex items-center justify-between text-[10px] font-bold uppercase tracking-widest mb-2 mt-4 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
+                <span>Node Opacity</span>
+                <SyncInput 
+                  className={`w-12 bg-transparent border-b text-right font-mono outline-none ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0]' : 'border-[#ccc] focus:border-[#141414] text-[#141414]'}`}
+                  value={filters.nodeOpacity}
+                  onChange={(v: number) => setFilter('nodeOpacity', v)}
+                  step="0.1"
+                />
+              </label>
+              <CustomSlider
+                min="0.1" max="1.0" step="0.1"
+                value={filters.nodeOpacity}
+                onChange={(v: number) => setFilter('nodeOpacity', v)}
+                isDarkMode={isDarkMode}
+              />
             </div>
 
             <div className="group">
@@ -580,6 +596,22 @@ export default function Workspace() {
                 min="0.5" max="10" step="0.5"
                 value={filters.edgeWeight}
                 onChange={(v: number) => setFilter('edgeWeight', v)}
+                isDarkMode={isDarkMode}
+              />
+              
+              <label className={`flex items-center justify-between text-[10px] font-bold uppercase tracking-widest mb-2 mt-4 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
+                <span>Edge Opacity</span>
+                <SyncInput 
+                  className={`w-12 bg-transparent border-b text-right font-mono outline-none ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0]' : 'border-[#ccc] focus:border-[#141414] text-[#141414]'}`}
+                  value={filters.edgeOpacity}
+                  onChange={(v: number) => setFilter('edgeOpacity', v)}
+                  step="0.1"
+                />
+              </label>
+              <CustomSlider
+                min="0.1" max="1.0" step="0.1"
+                value={filters.edgeOpacity}
+                onChange={(v: number) => setFilter('edgeOpacity', v)}
                 isDarkMode={isDarkMode}
               />
             </div>
@@ -667,6 +699,8 @@ export default function Workspace() {
                   communityMap={communityMap}
                   nodeSizeMult={filters.nodeSize || 3}
                   edgeWeightMult={filters.edgeWeight || 1}
+                  nodeOpacity={filters.nodeOpacity}
+                  edgeOpacity={filters.edgeOpacity}
                   nodeSizeBase={filters.nodeSizeBase || 'abundance'}
                   edgeWeightBase={filters.edgeWeightBase || 'weight_raw'}
                   forceStrength={filters.forceStrength || -100}

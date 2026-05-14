@@ -23,6 +23,8 @@ export interface WorkspaceFilters {
   resolution: number;
   nodeSize: number;
   edgeWeight: number;
+  nodeOpacity: number;
+  edgeOpacity: number;
   forceStrength: number;
   livePhysics: boolean;
   isFrozen: boolean;
@@ -65,6 +67,8 @@ export const useStore = create<AppState>((set) => ({
     resolution: 1.0,
     nodeSize: 3,
     edgeWeight: 1.0,
+    nodeOpacity: 1.0,
+    edgeOpacity: 0.8,
     forceStrength: -100,
     livePhysics: false,
     isFrozen: false,
@@ -91,6 +95,8 @@ export const useStore = create<AppState>((set) => ({
       resolution: 1.0,
       nodeSize: 3,
       edgeWeight: 1.0,
+      nodeOpacity: 1.0,
+      edgeOpacity: 0.8,
       forceStrength: -100,
       livePhysics: false,
       isFrozen: false,
