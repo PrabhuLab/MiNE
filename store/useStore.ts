@@ -5,6 +5,7 @@ export interface RawNode {
   name: string;
   label?: string;
   type?: string;
+  community?: string | number;
   abundance: number;
 }
 
@@ -26,6 +27,7 @@ export interface WorkspaceFilters {
   nodeOpacity: number;
   edgeOpacity: number;
   forceStrength: number;
+  louvainSeed: number;
   livePhysics: boolean;
   isFrozen: boolean;
   edgeWeightBase: string;
@@ -70,6 +72,7 @@ export const useStore = create<AppState>((set) => ({
     nodeOpacity: 1.0,
     edgeOpacity: 0.8,
     forceStrength: -100,
+    louvainSeed: 42,
     livePhysics: false,
     isFrozen: false,
     edgeWeightBase: 'weight_raw',
@@ -98,6 +101,7 @@ export const useStore = create<AppState>((set) => ({
       nodeOpacity: 1.0,
       edgeOpacity: 0.8,
       forceStrength: -100,
+      louvainSeed: 42,
       livePhysics: false,
       isFrozen: false,
       edgeWeightBase: 'weight_raw',

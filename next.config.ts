@@ -1,4 +1,4 @@
-import type { NextConfig } from 'next';
+import type {NextConfig} from 'next';
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
@@ -8,14 +8,8 @@ const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: false,
   },
-  
-  basePath: '/MiNE',
-
-  // Changed from 'standalone' to 'export' to generate static HTML/CSS/JS
-  output: 'export', 
-  
+  // Allow access to remote image placeholder.
   images: {
-    unoptimized: true, 
     remotePatterns: [
       {
         protocol: 'https',
@@ -25,10 +19,9 @@ const nextConfig: NextConfig = {
       },
     ],
   },
-  
+  output: 'standalone',
   transpilePackages: ['motion'],
-  
-  webpack: (config, { dev }) => {
+  webpack: (config, {dev}) => {
     // Disable file watching to prevent flickering when DISABLE_HMR is set
     if (dev && process.env.DISABLE_HMR === 'true') {
       config.watchOptions = {

@@ -42,6 +42,7 @@ export default function SmartUploadWizard() {
   const [nodeIdCol, setNodeIdCol] = useState('');
   const [nodeLabelCol, setNodeLabelCol] = useState('');
   const [nodeTypeCol, setNodeTypeCol] = useState('');
+  const [nodeCommunityCol, setNodeCommunityCol] = useState('');
   const [nodeAbundCol, setNodeAbundCol] = useState('');
 
   const [rowHeadersCol, setRowHeadersCol] = useState<number | ''>(0);
@@ -136,6 +137,7 @@ export default function SmartUploadWizard() {
             setNodeLabelCol(nodeData[0][1] || '');
             setNodeAbundCol(nodeData[0][2] || '');
             setNodeTypeCol(nodeData[0][3] || '');
+            setNodeCommunityCol(nodeData[0][4] || '');
           }
         }
       } else if (isFormatAdjList) {
@@ -336,6 +338,7 @@ export default function SmartUploadWizard() {
           const idIdx = nHeaders.indexOf(nodeIdCol);
           const lblIdx = nHeaders.indexOf(nodeLabelCol);
           const typIdx = nHeaders.indexOf(nodeTypeCol);
+          const commIdx = nHeaders.indexOf(nodeCommunityCol);
           const abnIdx = nHeaders.indexOf(nodeAbundCol);
 
           if (idIdx !== -1) {
@@ -345,10 +348,11 @@ export default function SmartUploadWizard() {
               if (!id) continue;
               const name = lblIdx !== -1 && row[lblIdx] ? row[lblIdx] : id;
               const type = typIdx !== -1 ? row[typIdx] : undefined;
+              const comm = (commIdx !== -1 && row[commIdx]) ? row[commIdx] : undefined;
               const abund = abnIdx !== -1 ? parseFloat(row[abnIdx]) : 10;
               
               if (nodesMap.has(id)) {
-                nodesMap.set(id, { id, name, type, abundance: isNaN(abund) ? 10 : abund });
+                nodesMap.set(id, { id, name, type, community: comm, abundance: isNaN(abund) ? 10 : abund });
               }
             }
           }
@@ -385,7 +389,7 @@ export default function SmartUploadWizard() {
     }
 
     return { nodes: finalNodes, edges };
-  }, [parsedData, format, step, sourceCol, targetCol, weightRawCol, weightSecCol, nodeIdCol, nodeLabelCol, nodeTypeCol, nodeAbundCol, rowHeadersCol, colHeadersRow, dataStartRow, dataStartCol, isDirected, topology, isFormatDualMatrix, isFormatEdgeList, isFormatMatrix, isFormatAdjList]);
+  }, [parsedData, format, step, sourceCol, targetCol, weightRawCol, weightSecCol, nodeIdCol, nodeLabelCol, nodeTypeCol, nodeCommunityCol, nodeAbundCol, rowHeadersCol, colHeadersRow, dataStartRow, dataStartCol, isDirected, topology, isFormatDualMatrix, isFormatEdgeList, isFormatMatrix, isFormatAdjList]);
 
   const handleFinalize = () => {
     setRawData(previewGraph.nodes, previewGraph.edges, isDirected, topology === 'Bipartite');
@@ -664,7 +668,7 @@ export default function SmartUploadWizard() {
             {isFormatEdgeList && parsedData.edges && (
                <div className="space-y-6">
                  {renderTablePreview(parsedData.edges, 'Edges Dataset')}
-                 <div className={`grid grid-cols-2 lg:grid-cols-4 gap-4 p-4 border mb-6 ${isDarkMode ? 'border-[#333] bg-[#222]/30' : 'border-[#141414] bg-[#E4E3E0]/30'}`}>
+                 <div className={`grid grid-cols-2 lg:grid-cols-5 gap-4 p-4 border mb-6 ${isDarkMode ? 'border-[#333] bg-[#222]/30' : 'border-[#141414] bg-[#E4E3E0]/30'}`}>
                    {renderDropdown('Source Col', sourceCol, setSourceCol, parsedData.edges[0] || [])}
                    {renderDropdown('Target Col', targetCol, setTargetCol, parsedData.edges[0] || [])}
                    {renderDropdown('Weight Col', weightRawCol, setWeightRawCol, parsedData.edges[0] || [])}
@@ -676,10 +680,11 @@ export default function SmartUploadWizard() {
             {isFormatEdgeList && parsedData.nodes && (
                <div className="space-y-6">
                  {renderTablePreview(parsedData.nodes, 'Nodes Dataset')}
-                 <div className={`grid grid-cols-2 lg:grid-cols-4 gap-4 p-4 border mb-6 ${isDarkMode ? 'border-[#333] bg-[#222]/30' : 'border-[#141414] bg-[#E4E3E0]/30'}`}>
+                 <div className={`grid grid-cols-2 lg:grid-cols-5 gap-4 p-4 border mb-6 ${isDarkMode ? 'border-[#333] bg-[#222]/30' : 'border-[#141414] bg-[#E4E3E0]/30'}`}>
                    {renderDropdown('Node ID Col', nodeIdCol, setNodeIdCol, parsedData.nodes[0] || [])}
                    {renderDropdown('Label Col', nodeLabelCol, setNodeLabelCol, parsedData.nodes[0] || [])}
-                   {renderDropdown('Type/Partition Col', nodeTypeCol, setNodeTypeCol, parsedData.nodes[0] || [])}
+                   {renderDropdown('Type Col', nodeTypeCol, setNodeTypeCol, parsedData.nodes[0] || [])}
+                   {renderDropdown('Community Col', nodeCommunityCol, setNodeCommunityCol, parsedData.nodes[0] || [])}
                    {renderDropdown('Size/Abundance Col', nodeAbundCol, setNodeAbundCol, parsedData.nodes[0] || [])}
                  </div>
                </div>

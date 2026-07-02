@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import * as d3 from 'd3';
 import { RawNode, RawEdge } from '@/store/useStore';
 import { ChevronUp, ChevronDown } from 'lucide-react';
+import { COMMUNITY_COLORS, getCommunityColor } from '@/lib/communityUtils';
 
 interface D3GraphProps {
   nodes: RawNode[];
@@ -116,8 +117,16 @@ export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edge
     )}
   ];
   const elementLegendIds = elementLegendItems.map(item => item.id);
-  const communityColors = Array.from(new Set(Object.values(communityMap))) as string[];
-  const communityLegendIds = communityColors.map(c => `community:${c}`);
+  const communityLabels = Array.from(new Set(Object.values(communityMap))) as string[];
+  const communityLegendIds = communityLabels.map(c => `community:${c}`);
+  
+  const communityColorMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    communityLabels.forEach((label, i) => {
+      map[label] = COMMUNITY_COLORS[i % COMMUNITY_COLORS.length] || COMMUNITY_COLORS[0];
+    });
+    return map;
+  }, [communityLabels]);
 
   const handleZoomFit = () => {
     if (!svgRef.current || !zoomBehaviorRef.current || !simulationRef.current || !containerRef.current) return;
@@ -290,7 +299,7 @@ export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edge
           .attr('y', (d: any) => -d.currentRadius)
           .attr('width', (d: any) => d.currentRadius * 2)
           .attr('height', (d: any) => d.currentRadius * 2)
-          .attr('fill', (d: any) => communityMap[d.id] || defaultNodeColor)
+          .attr('fill', (d: any) => communityColorMap[communityMap[d.id]] || defaultNodeColor)
           .attr('stroke', isDarkMode ? '#222' : '#141414')
           .attr('stroke-width', 0.5)
           .style('cursor', 'pointer');
@@ -298,7 +307,7 @@ export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edge
         return selection.append('circle')
           .attr('class', 'node-shape')
           .attr('r', (d: any) => d.currentRadius)
-          .attr('fill', (d: any) => communityMap[d.id] || defaultNodeColor)
+          .attr('fill', (d: any) => communityColorMap[communityMap[d.id]] || defaultNodeColor)
           .attr('stroke', isDarkMode ? '#222' : '#141414')
           .attr('stroke-width', 0.5)
           .style('cursor', 'pointer');
@@ -440,11 +449,12 @@ export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edge
     const sim = simulationRef.current;
     if (!sim) return;
     
-    if (livePhysics && !isFrozen) {
-      sim.alpha(1).restart();
-    } else {
+    if (isFrozen) {
       sim.stop();
+    } else if (livePhysics) {
+      sim.alpha(1).restart();
     }
+    // If not livePhysics but not frozen, let it settle naturally.
   }, [livePhysics, isFrozen]);
 
   // 3. Fast Dark Mode Styling Update
@@ -458,7 +468,7 @@ export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edge
       .attr('stroke', isDarkMode ? '#eeeeee' : '#141414');
 
     svg.selectAll('.node-shape')
-      .attr('fill', (d: any) => communityMap[d.id] || defaultNodeColor)
+      .attr('fill', (d: any) => communityColorMap[communityMap[d.id]] || defaultNodeColor)
       .attr('stroke', isDarkMode ? '#222' : '#141414');
 
     svg.selectAll('.node-label')
@@ -467,7 +477,7 @@ export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edge
     svg.selectAll('.arrowhead-path')
       .attr("fill", isDarkMode ? "#eeeeee" : "#141414")
       .attr("opacity", isDarkMode ? 0.9 : 0.6);
-  }, [isDarkMode, communityMap]);
+  }, [isDarkMode, communityMap, communityColorMap]);
 
   // 4. Highlight Node Effect & Legend Visibility
   useEffect(() => {
@@ -561,7 +571,7 @@ export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edge
 
   return (
     <div ref={containerRef} className="w-full h-full relative cursor-crosshair">
-      <svg ref={svgRef} className="w-full h-full block" />
+      <svg ref={svgRef} id="network-graph-svg" className="w-full h-full block" />
       
       {/* Tools Menu */}
       <div className="absolute top-6 right-6 flex flex-col space-y-2">
@@ -620,7 +630,7 @@ export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edge
                     <div className="flex justify-between text-[10px]">
                         <span className="opacity-50 uppercase font-bold">COMMUNITY</span>
                         <span className="font-mono font-bold">
-                            <div className="w-3 h-3 inline-block align-middle ml-1" style={{backgroundColor: communityMap[clickedNode.id] || (isDarkMode ? '#bbbbbb' : '#141414')}}></div>
+                            <div className="w-3 h-3 inline-block align-middle ml-1" style={{backgroundColor: communityColorMap[communityMap[clickedNode.id]] || (isDarkMode ? '#bbbbbb' : '#141414')}}></div>
                         </span>
                     </div>
                 </div>
@@ -659,14 +669,14 @@ export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edge
               </div>
             </div>
 
-            {communityColors.length > 0 && (
+            {communityLabels.length > 0 && (
             <div>
               <div className="opacity-50 uppercase font-bold mb-1 flex items-center justify-between">
                 <span>Communities</span>
               </div>
               <div className="space-y-1 max-h-[150px] overflow-y-auto pr-1">
-                {communityColors.map((color, i) => {
-                  const id = `community:${color}`;
+                {communityLabels.map((label, i) => {
+                  const id = `community:${label}`;
                   const isHidden = hiddenItems.has(id);
                   return (
                     <div 
@@ -674,8 +684,8 @@ export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edge
                       className={`flex items-center space-x-2 cursor-pointer p-1 -mx-1 rounded-sm transition-opacity ${isHidden ? 'opacity-40 line-through' : 'opacity-100 hover:bg-black/5 dark:hover:bg-white/10'}`}
                       onClick={(e) => handleLegendClick(e, id, communityLegendIds)}
                     >
-                      <div className="w-3 h-3 rounded-full" style={{ backgroundColor: color }}></div>
-                      <span>Cluster {i + 1}</span>
+                      <div className="w-3 h-3 rounded-full" style={{ backgroundColor: communityColorMap[label] }}></div>
+                      <span>{label}</span>
                     </div>
                   );
                 })}

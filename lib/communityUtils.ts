@@ -78,3 +78,9 @@ export const COMMUNITY_COLORS = [
   "#457b9d",
   "#7f7f7f"
 ];
+
+export function getCommunityColor(community: string | number, allCommunities: string[]): string {
+  const index = allCommunities.indexOf(String(community));
+  if (index === -1) return COMMUNITY_COLORS[0];
+  return COMMUNITY_COLORS[index % COMMUNITY_COLORS.length];
+}

@@ -5,14 +5,19 @@ import dynamic from 'next/dynamic';
 import { useStore, RawNode, RawEdge } from '@/store/useStore';
 import Graph from 'graphology';
 import louvainPkg from 'graphology-communities-louvain';
+import pagerankPkg from 'graphology-metrics/centrality/pagerank';
+import eigenvectorPkg from 'graphology-metrics/centrality/eigenvector';
 import * as d3 from 'd3';
 import seedrandomPkg from 'seedrandom';
-import { normalize_communities } from '@/lib/communityUtils';
-import { ChevronLeft, ChevronRight, Sun, Moon } from 'lucide-react';
 
-// Handle Next.js ESM/CJS interop for graphology-communities-louvain
+// Handle Next.js ESM/CJS interop for graphology plugins
 const louvain = (typeof louvainPkg === 'function') ? louvainPkg : (louvainPkg as any).default || louvainPkg;
+const pagerank = (typeof pagerankPkg === 'function') ? pagerankPkg : (pagerankPkg as any).default || pagerankPkg;
+const eigenvector = (typeof eigenvectorPkg === 'function') ? eigenvectorPkg : (eigenvectorPkg as any).default || eigenvectorPkg;
 const seedrandom = (typeof seedrandomPkg === 'function') ? seedrandomPkg : (seedrandomPkg as any).default || seedrandomPkg;
+import { normalize_communities, COMMUNITY_COLORS, getCommunityColor } from '@/lib/communityUtils';
+import { ChevronLeft, ChevronRight, Sun, Moon, Download } from 'lucide-react';
+import { exportSvg, exportImage, exportCsv, exportJson, exportCsvZip, exportGraphML } from '@/lib/exportUtils';
 
 
 // Dynamically import D3Graph so it only runs on the client due to canvas/SVG dependencies
@@ -69,14 +74,32 @@ const SegmentedToggle = ({ checked, onChange, isDarkMode }: any) => {
 };
 
 const CustomSlider = ({ min, max, step, value, onChange, isDarkMode }: any) => {
+  const [localVal, setLocalVal] = useState(value);
+  
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => setLocalVal(value), [value]);
+
+  const handleChange = (e: any) => {
+    setLocalVal(Number(e.target.value));
+  };
+
+  const handleRelease = () => {
+    if (localVal !== value) {
+      onChange(localVal);
+    }
+  };
+
   return (
     <input
       type="range"
       min={min}
       max={max}
       step={step}
-      value={value}
-      onChange={(e) => onChange(Number(e.target.value))}
+      value={localVal}
+      onChange={handleChange}
+      onMouseUp={handleRelease}
+      onTouchEnd={handleRelease}
+      onKeyUp={handleRelease}
       className={`w-full h-1 appearance-none outline-none cursor-pointer rounded-full ${
         isDarkMode
           ? 'bg-[#555] [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-[#b4ff39] [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-[#b4ff39] [&::-webkit-slider-thumb]:rounded-full [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:bg-[#b4ff39] [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:rounded-full'
@@ -87,29 +110,22 @@ const CustomSlider = ({ min, max, step, value, onChange, isDarkMode }: any) => {
 };
 
 export default function Workspace() {
-  const colorScale = d3.scaleOrdinal(d3.schemeCategory10);
-
   const { rawNodes, rawEdges, filters, setFilter, communityMap, setCommunityMap, directed, bipartite, isDarkMode, setIsDarkMode } = useStore();
   
   const [refreshKey, setRefreshKey] = useState(0);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [nodeMetrics, setNodeMetrics] = useState<any[]>([]);
   const [networkMetrics, setNetworkMetrics] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<'graph' | 'data'>('graph');
+  const [modularity, setModularity] = useState<number | null>(null);
+  const [activeTab, setActiveTab] = useState<"graph" | "data">("graph");
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [sortConfig, setSortConfig] = useState<{ key: string, direction: "asc" | "desc" } | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
-  // When live physics is toggled, force a full refresh (reset layout)
-  useEffect(() => {
-    rawNodes.forEach((n: any) => {
-      n.x = undefined;
-      n.y = undefined;
-      n.vx = undefined;
-      n.vy = undefined;
-      n.fx = undefined;
-      n.fy = undefined;
-    });
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setRefreshKey(k => k + 1);
-  }, [filters.livePhysics, rawNodes]);
+
+
+
+
 
   // Compute max relative weight for slider dynamically
   const maxRelWeight = useMemo(() => {
@@ -151,55 +167,59 @@ export default function Workspace() {
       nodesWithEdges.has(n.id) && !removedSet.has(n.id)
     );
 
-    return { validNodes: filteredNodes, validEdges: filteredEdges };
+    const validNodeIds = new Set(filteredNodes.map(n => n.id));
+    const strictlyValidEdges = filteredEdges.filter(e => validNodeIds.has(e.source) && validNodeIds.has(e.target));
+
+    return { validNodes: filteredNodes, validEdges: strictlyValidEdges };
   }, [rawNodes, rawEdges, filters.relCutoff, filters.absCutoff, filters.removedNodes]);
 
-  // Compute Communities
+  // Compute Communities and Metrics
   useEffect(() => {
-    if (!filters.recalculateCommunities) return;
     if (validNodes.length === 0 || validEdges.length === 0) return;
 
     try {
-      const graph = new Graph({ type: directed ? 'directed' : 'undirected', multi: false, allowSelfLoops: false });
+      const graph = new Graph({ type: directed ? "directed" : "undirected", multi: false, allowSelfLoops: false });
       
       validNodes.forEach(n => {
-        if (!graph.hasNode(n.id)) graph.addNode(n.id);
+        if (!graph.hasNode(n.id)) graph.addNode(n.id, { ...n });
       });
-
+      
       validEdges.forEach(e => {
         if (graph.hasNode(e.source) && graph.hasNode(e.target)) {
-          let weight = 1;
-          if (filters.edgeWeightBase === 'weight_raw') weight = Number(e.weight_raw);
-          else if (filters.edgeWeightBase === 'weight_secondary') weight = Number(e.weight_secondary);
-
           if (!graph.hasEdge(e.source, e.target)) {
-            graph.addEdge(e.source, e.target, { weight });
-          } else {
-            // If the edge already exists (e.g., reverse direction in an undirected graph), 
-            // sum the weights to preserve total interaction strength.
-            const existingWeight = graph.getEdgeAttribute(e.source, e.target, 'weight');
-            graph.setEdgeAttribute(e.source, e.target, 'weight', existingWeight + weight);
+            graph.addEdge(e.source, e.target, { weight: e.weight_raw || 1 });
           }
         }
       });
 
-      const options = { 
-        rng: seedrandom(42), // Use the default seed 42 as in the observable notebook
-        resolution: filters.resolution || 1.0, 
-        getEdgeWeight: 'weight',
-        fastLocalMoves: true
-      };
-      
-      const details = louvain.detailed(graph, options);
-      const communities = normalize_communities(details.communities as Record<string, number>);
-      
-      const newCommunityMap: Record<string, string> = {};
-      
-      // Assign deterministic color based on community ID
-      for (const [nodeId, communityId] of Object.entries(communities)) {
-        newCommunityMap[nodeId] = colorScale(communityId.toString());
+      let newCommunityMap: Record<string, any> = {};
+      let modularityVal = null;
+
+      if (filters.recalculateCommunities) {
+        const options = { 
+          rng: seedrandom(filters.louvainSeed || 42),
+          resolution: filters.resolution || 1.0, 
+          getEdgeWeight: "weight",
+          fastLocalMoves: true
+        };
+        const details = louvain.detailed(graph, options);
+        const norm = normalize_communities(details.communities as Record<string, number>);
+        Object.keys(norm).forEach(k => {
+          newCommunityMap[k] = `Cluster ${norm[k] + 1}`;
+        });
+        modularityVal = details.modularity;
+      } else {
+        // Use pre-existing communities from nodes if present
+        validNodes.forEach(n => {
+          if (n.community !== undefined && n.community !== null && n.community !== "") {
+            newCommunityMap[n.id] = String(n.community);
+          }
+        });
       }
 
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setModularity(modularityVal);
+       
       setCommunityMap(newCommunityMap);
 
       // Delta Q Calculation
@@ -207,7 +227,7 @@ export default function Workspace() {
       graph.forEachEdge((e, atts) => { sumWeights += (atts.weight || 1); });
       
       const metrics = graph.nodes().map(nodeId => {
-        const comm = newCommunityMap[nodeId] || '';
+        const comm = newCommunityMap[nodeId] || "";
         
         if (directed) {
           const totalWeight = sumWeights;
@@ -282,79 +302,31 @@ export default function Workspace() {
       
       // sort by deltaQ descending
       metrics.sort((a,b) => parseFloat(b.deltaQ) - parseFloat(a.deltaQ));
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setNodeMetrics(metrics);
+
+      // Network Metrics (Degree, Eigenvector, PageRank)
+      let pr: Record<string, number> = {};
+      let eig: Record<string, number> = {};
+      try { pr = pagerank(graph); } catch (e) { console.warn("PageRank failed", e); }
+      try { eig = eigenvector(graph); } catch (e) { console.warn("Eigenvector failed", e); }
+      
+      const netMetrics = graph.nodes().map(nodeId => {
+        return {
+          id: nodeId,
+          degree: graph.degree ? graph.degree(nodeId) : 0,
+          inDegree: directed && graph.inDegree ? graph.inDegree(nodeId) : 0,
+          outDegree: directed && graph.outDegree ? graph.outDegree(nodeId) : 0,
+          pagerank: pr[nodeId] ? pr[nodeId].toFixed(6) : "0",
+          eigenvector: eig[nodeId] ? eig[nodeId].toFixed(6) : "0",
+        };
+      });
+      setNetworkMetrics(netMetrics);
     } catch (err) {
       console.warn("Community calculation skipped/failed:", err);
     }
-  }, [validNodes, validEdges, filters.recalculateCommunities, filters.resolution, filters.edgeWeightBase, directed, setCommunityMap]);
+  }, [validNodes, validEdges, filters.recalculateCommunities, filters.resolution, filters.edgeWeightBase, directed, setCommunityMap, filters.louvainSeed]);
 
-  // Compute Network Metrics
-  useEffect(() => {
-    if (validNodes.length === 0 || validEdges.length === 0) return;
-    
-    try {
-      const graph = new Graph({ type: directed ? 'directed' : 'undirected', multi: false, allowSelfLoops: false });
-      
-      validNodes.forEach(n => {
-        if (!graph.hasNode(n.id)) graph.addNode(n.id);
-      });
-
-      validEdges.forEach(e => {
-        if (graph.hasNode(e.source) && graph.hasNode(e.target)) {
-          let weight = 1;
-          if (filters.edgeWeightBase === 'weight_raw') weight = Number(e.weight_raw);
-          else if (filters.edgeWeightBase === 'weight_secondary') weight = Number(e.weight_secondary);
-
-          if (!graph.hasEdge(e.source, e.target)) {
-            graph.addEdge(e.source, e.target, { weight });
-          } else {
-            const existingWeight = graph.getEdgeAttribute(e.source, e.target, 'weight');
-            graph.setEdgeAttribute(e.source, e.target, 'weight', existingWeight + weight);
-          }
-        }
-      });
-
-      const pagerankValue = require('graphology-metrics/centrality/pagerank')(graph, {
-        attributes: { weight: 'weight' },
-        maxIterations: 1000
-      });
-
-      let eigenvectorValue: Record<string, number> = {};
-      try {
-        eigenvectorValue = require('graphology-metrics/centrality/eigenvector')(graph, {
-          attributes: { weight: 'weight' },
-          maxIterations: 1000,
-          tolerance: 1e-4
-        });
-      } catch (err) {
-        console.warn("Eigenvector calculation failed:", err);
-      }
-
-      const metrics = graph.nodes().map(nodeId => {
-        const degree = graph.degree(nodeId);
-        const inDegree = directed ? graph.inDegree(nodeId) : degree;
-        const outDegree = directed ? graph.outDegree(nodeId) : degree;
-        const pr = pagerankValue[nodeId] || 0;
-        const ev = eigenvectorValue[nodeId] || 0;
-        
-        return {
-          id: nodeId,
-          degree,
-          inDegree,
-          outDegree,
-          pagerank: pr.toFixed(6),
-          eigenvector: ev.toFixed(6)
-        };
-      });
-
-      metrics.sort((a,b) => parseFloat(b.pagerank) - parseFloat(a.pagerank));
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setNetworkMetrics(metrics);
-    } catch (err) {
-      console.warn("Network metrics calculation failed:", err);
-    }
-  }, [validNodes, validEdges, filters.edgeWeightBase, directed]);
+  const allCommunityLabels = useMemo(() => Array.from(new Set(Object.values(communityMap))) as string[], [communityMap]);
 
   const { removedNodesString, removedNodesCount } = useMemo(() => {
     const visibleNodeIds = new Set(validNodes.map(n => n.id));
@@ -366,6 +338,88 @@ export default function Workspace() {
       removedNodesCount: removedNodesList.length
     };
   }, [rawNodes, validNodes]);
+
+
+  const tableData = useMemo(() => {
+    let data = validNodes.map(node => {
+      const net = networkMetrics.find(m => m.id === node.id) || {};
+      const mod = nodeMetrics.find(m => m.id === node.id) || {};
+      const comm = mod.community || communityMap[node.id] || "";
+      return { ...node, net, mod, comm };
+    });
+
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      data = data.filter(d => 
+        String(d.id).toLowerCase().includes(q) || 
+        String(d.label || d.name || "").toLowerCase().includes(q)
+      );
+    }
+
+    if (sortConfig) {
+      data.sort((a, b) => {
+        let aVal: any = a.id;
+        let bVal: any = b.id;
+
+        if (sortConfig.key === "id") {
+          aVal = a.id; bVal = b.id;
+        } else if (sortConfig.key === "label") {
+          aVal = a.label || a.name || ""; bVal = b.label || b.name || "";
+        } else if (sortConfig.key === "abundance") {
+          aVal = a.abundance || 0; bVal = b.abundance || 0;
+        } else if (sortConfig.key === "degree") {
+          aVal = a.net.degree || 0; bVal = b.net.degree || 0;
+        } else if (sortConfig.key === "inDegree") {
+          aVal = a.net.inDegree || 0; bVal = b.net.inDegree || 0;
+        } else if (sortConfig.key === "outDegree") {
+          aVal = a.net.outDegree || 0; bVal = b.net.outDegree || 0;
+        } else if (sortConfig.key === "eigenvector") {
+          aVal = parseFloat(a.net.eigenvector) || 0; bVal = parseFloat(b.net.eigenvector) || 0;
+        } else if (sortConfig.key === "pagerank") {
+          aVal = parseFloat(a.net.pagerank) || 0; bVal = parseFloat(b.net.pagerank) || 0;
+        } else if (sortConfig.key === "community") {
+          aVal = a.comm; bVal = b.comm;
+        } else if (sortConfig.key === "deltaQ") {
+          aVal = parseFloat(a.mod.deltaQ) || 0; bVal = parseFloat(b.mod.deltaQ) || 0;
+        }
+
+        if (aVal < bVal) return sortConfig.direction === "asc" ? -1 : 1;
+        if (aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1;
+        return 0;
+      });
+    }
+
+    return data;
+  }, [validNodes, networkMetrics, nodeMetrics, communityMap, sortConfig, searchQuery]);
+
+  const handleExport = (format: string) => {
+    setShowExportMenu(false);
+    if (activeTab === "graph") {
+      const svgElement = document.getElementById('network-graph-svg') as SVGSVGElement | null;
+      if (format === 'svg') exportSvg(svgElement, 'network.svg');
+      else if (format === 'png') exportImage(svgElement, 'png', 'network.png', isDarkMode);
+      else if (format === 'jpeg') exportImage(svgElement, 'jpeg', 'network.jpg', isDarkMode);
+      else if (format === 'json') {
+        exportJson({ nodes: validNodes, edges: validEdges }, 'network.json');
+      } else if (format === 'csvzip') {
+        exportCsvZip(validNodes, validEdges, 'network_data.zip');
+      } else if (format === 'graphml') {
+        exportGraphML(validNodes, validEdges, directed, 'network.graphml');
+      }
+    } else {
+      if (format === 'csv') {
+        exportCsv(tableData, 'table_data.csv');
+      }
+    }
+  };
+
+  const handleSort = (key: string) => {
+    let direction: "asc" | "desc" = "asc";
+    if (sortConfig && sortConfig.key === key && sortConfig.direction === "asc") {
+      direction = "desc";
+    }
+    setSortConfig({ key, direction });
+  };
 
   return (
     <div className={`flex flex-1 overflow-hidden h-full w-full transition-colors ${isDarkMode ? 'bg-[#141414] text-[#E4E3E0]' : 'bg-[#E4E3E0] text-[#141414]'}`}>
@@ -478,7 +532,7 @@ export default function Workspace() {
           
           <div className="space-y-5">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-bold uppercase text-[10px]">Louvain Colors</label>
+              <label className="text-xs font-bold uppercase text-[10px]">Auto-Detect Communities (Louvain)</label>
               <SegmentedToggle 
                 checked={filters.recalculateCommunities}
                 onChange={(v: boolean) => setFilter('recalculateCommunities', v)}
@@ -553,22 +607,6 @@ export default function Workspace() {
                 onChange={(v: number) => setFilter('nodeSize', v)}
                 isDarkMode={isDarkMode}
               />
-
-              <label className={`flex items-center justify-between text-[10px] font-bold uppercase tracking-widest mb-2 mt-4 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
-                <span>Node Opacity</span>
-                <SyncInput 
-                  className={`w-12 bg-transparent border-b text-right font-mono outline-none ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0]' : 'border-[#ccc] focus:border-[#141414] text-[#141414]'}`}
-                  value={filters.nodeOpacity}
-                  onChange={(v: number) => setFilter('nodeOpacity', v)}
-                  step="0.1"
-                />
-              </label>
-              <CustomSlider
-                min="0.1" max="1.0" step="0.1"
-                value={filters.nodeOpacity}
-                onChange={(v: number) => setFilter('nodeOpacity', v)}
-                isDarkMode={isDarkMode}
-              />
             </div>
 
             <div className="group">
@@ -598,27 +636,11 @@ export default function Workspace() {
                 onChange={(v: number) => setFilter('edgeWeight', v)}
                 isDarkMode={isDarkMode}
               />
-              
-              <label className={`flex items-center justify-between text-[10px] font-bold uppercase tracking-widest mb-2 mt-4 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
-                <span>Edge Opacity</span>
-                <SyncInput 
-                  className={`w-12 bg-transparent border-b text-right font-mono outline-none ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0]' : 'border-[#ccc] focus:border-[#141414] text-[#141414]'}`}
-                  value={filters.edgeOpacity}
-                  onChange={(v: number) => setFilter('edgeOpacity', v)}
-                  step="0.1"
-                />
-              </label>
-              <CustomSlider
-                min="0.1" max="1.0" step="0.1"
-                value={filters.edgeOpacity}
-                onChange={(v: number) => setFilter('edgeOpacity', v)}
-                isDarkMode={isDarkMode}
-              />
             </div>
 
             <div className="group">
               <label className={`flex items-center justify-between text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
-                <span>Radial Force</span>
+                <span>Node Repulsion</span>
                 <SyncInput 
                   className={`w-14 bg-transparent border-b text-right font-mono outline-none ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0]' : 'border-[#ccc] focus:border-[#141414] text-[#141414]'}`}
                   value={filters.forceStrength}
@@ -642,7 +664,7 @@ export default function Workspace() {
               <span>Active Nodes</span>
               <span className="font-mono">{validNodes.length} / {rawNodes.length}</span>
             </div>
-            <div className="flex justify-between text-[11px]">
+            <div className="flex justify-between text-[11px] mb-1">
               <span>Active Edges</span>
               <span className="font-mono">{validEdges.length} / {rawEdges.length}</span>
             </div>
@@ -672,37 +694,92 @@ export default function Workspace() {
       )}
 
       {/* MAIN VIEWPORT */}
-      <section className={`flex-1 relative overflow-hidden h-full flex flex-col transition-colors ${isDarkMode ? 'bg-[#000]' : 'bg-white'}`}>
-        {/* Toggle Graph / Data */}
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 flex text-[10px] uppercase font-bold tracking-widest bg-white dark:bg-[#141414] border border-[#141414] dark:border-[#333] shadow-sm">
-          <button 
-            className={`px-6 py-2 transition-colors ${activeTab === 'graph' ? (isDarkMode ? 'bg-[#333] text-white' : 'bg-[#141414] text-white') : (isDarkMode ? 'text-[#888] hover:bg-[#222]' : 'text-[#888] hover:bg-[#f5f5f5]')}`}
-            onClick={() => setActiveTab('graph')}
-          >
-            Graph
-          </button>
-          <button 
-            className={`px-6 py-2 transition-colors border-l border-[#141414] dark:border-[#333] ${activeTab === 'data' ? (isDarkMode ? 'bg-[#333] text-white' : 'bg-[#141414] text-white') : (isDarkMode ? 'text-[#888] hover:bg-[#222]' : 'text-[#888] hover:bg-[#f5f5f5]')}`}
-            onClick={() => setActiveTab('data')}
-          >
-            Data
-          </button>
+      <section className={`flex-1 relative overflow-hidden h-full flex flex-col transition-colors ${isDarkMode ? "bg-[#000]" : "bg-white"}`}>
+        {/* Top Navigation Bar */}
+        <div className={`flex items-center justify-between px-6 py-3 border-b z-10 ${isDarkMode ? "bg-[#222] border-[#444]" : "bg-[#f0f0f0] border-[#ccc]"}`}>
+          <div className="flex text-[10px] uppercase font-bold tracking-widest bg-white dark:bg-[#141414] border border-[#141414] dark:border-[#333] shadow-sm">
+            <button 
+              className={`px-6 py-2 transition-colors ${activeTab === "graph" ? (isDarkMode ? "bg-[#333] text-white" : "bg-[#141414] text-white") : (isDarkMode ? "text-[#888] hover:bg-[#222]" : "text-[#888] hover:bg-[#f5f5f5]")}`}
+              onClick={() => setActiveTab("graph")}
+            >
+              Graph
+            </button>
+            <button 
+              className={`px-6 py-2 transition-colors border-l border-[#141414] dark:border-[#333] ${activeTab === "data" ? (isDarkMode ? "bg-[#333] text-white" : "bg-[#141414] text-white") : (isDarkMode ? "text-[#888] hover:bg-[#222]" : "text-[#888] hover:bg-[#f5f5f5]")}`}
+              onClick={() => setActiveTab("data")}
+            >
+              Data
+            </button>
+          </div>
+          
+          <div className="flex items-center space-x-6">
+            {activeTab === "data" && (
+              <>
+                {typeof modularity === "number" && !isNaN(modularity) && (
+                  <div className="flex items-center space-x-2 text-[10px] font-bold uppercase tracking-widest">
+                    <span className="opacity-60">Modularity (Q):</span>
+                    <span className={`font-mono px-2 py-1 rounded ${isDarkMode ? "bg-white/10" : "bg-black/5"}`}>
+                      {modularity.toFixed(4)}
+                    </span>
+                  </div>
+                )}
+                <input
+                  type="text"
+                  placeholder="SEARCH NODES..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className={`text-[10px] uppercase font-bold tracking-widest px-3 py-2 border outline-none w-64 transition-colors ${isDarkMode ? "bg-[#141414] border-[#333] text-[#E4E3E0] focus:border-[#E4E3E0] placeholder-[#666]" : "bg-white border-[#ccc] text-[#141414] focus:border-[#141414] placeholder-[#999]"}`}
+                />
+              </>
+            )}
+            
+            <div className="relative">
+              <button
+                onClick={() => setShowExportMenu(!showExportMenu)}
+                className={`flex items-center space-x-2 px-4 py-2 border text-[10px] uppercase font-bold tracking-widest transition-colors shadow-sm ${isDarkMode ? "bg-[#141414] border-[#333] text-[#E4E3E0] hover:bg-[#333]" : "bg-white border-[#141414] text-[#141414] hover:bg-black/5"}`}
+              >
+                <Download size={14} />
+                <span>Export</span>
+              </button>
+              
+              {showExportMenu && (
+                <div 
+                  className={`absolute right-0 mt-2 w-48 border shadow-lg z-50 flex flex-col text-[10px] uppercase font-bold tracking-widest ${isDarkMode ? 'bg-[#141414] border-[#333]' : 'bg-white border-[#ccc]'}`}
+                  onMouseLeave={() => setShowExportMenu(false)}
+                >
+                  {activeTab === 'graph' ? (
+                    <>
+                      <button onClick={() => handleExport('svg')} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>Export as SVG</button>
+                      <button onClick={() => handleExport('png')} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>Export as PNG</button>
+                      <button onClick={() => handleExport('jpeg')} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>Export as JPG</button>
+                      <div className={`h-px w-full ${isDarkMode ? 'bg-[#333]' : 'bg-[#eee]'}`}></div>
+                      <button onClick={() => handleExport('json')} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>Export JSON</button>
+                      <button onClick={() => handleExport('graphml')} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>Export GraphML</button>
+                      <button onClick={() => handleExport('csvzip')} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>Export Node/Edge CSV (ZIP)</button>
+                    </>
+                  ) : (
+                    <>
+                      <button onClick={() => handleExport('csv')} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>Export Table CSV</button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
         {validNodes.length > 0 ? (
           <>
-            {activeTab === 'graph' && (
-              <div className="flex-1 w-full h-full">
+            {activeTab === "graph" && (
+              <div className="flex-1 w-full h-full relative">
                 <D3Graph 
                   nodes={validNodes} 
                   edges={validEdges} 
                   communityMap={communityMap}
                   nodeSizeMult={filters.nodeSize || 3}
                   edgeWeightMult={filters.edgeWeight || 1}
-                  nodeOpacity={filters.nodeOpacity}
-                  edgeOpacity={filters.edgeOpacity}
-                  nodeSizeBase={filters.nodeSizeBase || 'abundance'}
-                  edgeWeightBase={filters.edgeWeightBase || 'weight_raw'}
+                  nodeSizeBase={filters.nodeSizeBase || "abundance"}
+                  edgeWeightBase={filters.edgeWeightBase || "weight_raw"}
                   forceStrength={filters.forceStrength || -100}
                   directed={directed}
                   bipartite={bipartite}
@@ -715,56 +792,72 @@ export default function Workspace() {
               </div>
             )}
             
-            {activeTab === 'data' && (
-              <div className="flex-1 w-full h-full pt-16 overflow-auto">
-                <table className={`w-full text-left text-xs border-collapse ${isDarkMode ? 'text-[#ddd]' : 'text-[#333]'}`}>
-                  <thead className={`sticky top-0 shadow-sm z-10 ${isDarkMode ? 'bg-[#222] border-b border-[#444]' : 'bg-[#f0f0f0] border-b border-[#ccc]'}`}>
+            {activeTab === "data" && (
+              <div className="flex-1 w-full h-full overflow-auto">
+                <table className={`w-full text-left text-xs border-collapse ${isDarkMode ? "text-[#ddd]" : "text-[#333]"}`}>
+                  <thead className={`sticky top-0 shadow-sm z-10 ${isDarkMode ? "bg-[#222] border-b border-[#444]" : "bg-[#f0f0f0] border-b border-[#ccc]"}`}>
                     <tr>
-                      <th className="p-3 font-bold uppercase tracking-wider">Node ID</th>
-                      <th className="p-3 font-bold uppercase tracking-wider">Label</th>
-                      <th className="p-3 font-bold uppercase tracking-wider">Abundance</th>
+                      <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("id")}>
+                        Node ID {sortConfig?.key === "id" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                      </th>
+                      <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("label")}>
+                        Label {sortConfig?.key === "label" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                      </th>
+                      <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("abundance")}>
+                        Abundance {sortConfig?.key === "abundance" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                      </th>
                       {directed ? (
                         <>
-                          <th className="p-3 font-bold uppercase tracking-wider">In Degree</th>
-                          <th className="p-3 font-bold uppercase tracking-wider">Out Degree</th>
+                          <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("inDegree")}>
+                            In Degree {sortConfig?.key === "inDegree" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                          </th>
+                          <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("outDegree")}>
+                            Out Degree {sortConfig?.key === "outDegree" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                          </th>
                         </>
                       ) : (
-                        <th className="p-3 font-bold uppercase tracking-wider">Degree</th>
+                        <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("degree")}>
+                          Degree {sortConfig?.key === "degree" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                        </th>
                       )}
-                      <th className="p-3 font-bold uppercase tracking-wider">Eigenvector</th>
-                      <th className="p-3 font-bold uppercase tracking-wider">PageRank</th>
-                      <th className="p-3 font-bold uppercase tracking-wider">Community</th>
-                      <th className="p-3 font-bold uppercase tracking-wider">ΔQ</th>
+                      <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("eigenvector")}>
+                        Eigenvector {sortConfig?.key === "eigenvector" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                      </th>
+                      <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("pagerank")}>
+                        PageRank {sortConfig?.key === "pagerank" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                      </th>
+                      <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("community")}>
+                        Community {sortConfig?.key === "community" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                      </th>
+                      <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("deltaQ")}>
+                        ΔQ {sortConfig?.key === "deltaQ" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
-                    {validNodes.map(node => {
-                      const net = networkMetrics.find(m => m.id === node.id) || {};
-                      const mod = nodeMetrics.find(m => m.id === node.id) || {};
-                      const comm = mod.community || communityMap[node.id] || '';
-                      
+                    {tableData.map(node => {
                       return (
-                        <tr key={node.id} className={`border-b ${isDarkMode ? 'border-[#333] hover:bg-[#1a1a1a]' : 'border-[#eee] hover:bg-[#fcfcfc]'}`}>
+                        <tr key={node.id} className={`border-b ${isDarkMode ? "border-[#333] hover:bg-[#1a1a1a]" : "border-[#eee] hover:bg-[#fcfcfc]"}`}>
                           <td className="p-2 font-mono font-bold">{node.id}</td>
-                          <td className="p-2">{node.label || node.name || '-'}</td>
-                          <td className="p-2 font-mono">{node.abundance || '-'}</td>
+                          <td className="p-2">{node.label || node.name || "-"}</td>
+                          <td className="p-2 font-mono">{node.abundance || "-"}</td>
                           {directed ? (
                             <>
-                              <td className="p-2 font-mono">{net.inDegree || 0}</td>
-                              <td className="p-2 font-mono">{net.outDegree || 0}</td>
+                              <td className="p-2 font-mono">{node.net.inDegree || 0}</td>
+                              <td className="p-2 font-mono">{node.net.outDegree || 0}</td>
                             </>
                           ) : (
-                            <td className="p-2 font-mono">{net.degree || 0}</td>
+                            <td className="p-2 font-mono">{node.net.degree || 0}</td>
                           )}
-                          <td className="p-2 font-mono">{net.eigenvector || 0}</td>
-                          <td className="p-2 font-mono">{net.pagerank || 0}</td>
+                          <td className="p-2 font-mono">{node.net.eigenvector || 0}</td>
+                          <td className="p-2 font-mono">{node.net.pagerank || 0}</td>
                           <td className="p-2">
                             <div className="flex items-center space-x-2">
-                              {comm && <div className="w-3 h-3 rounded-full" style={{ backgroundColor: colorScale(comm.toString()) }} />}
-                              <span>{comm || '-'}</span>
+                              {node.comm && <div className="w-3 h-3 rounded-full" style={{ backgroundColor: getCommunityColor(node.comm, allCommunityLabels) }} />}
+                              <span>{node.comm || "-"}</span>
                             </div>
                           </td>
-                          <td className="p-2 font-mono">{mod.deltaQ || '-'}</td>
+                          <td className="p-2 font-mono">{node.mod.deltaQ || "-"}</td>
                         </tr>
                       );
                     })}
