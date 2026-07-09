@@ -24,9 +24,13 @@ interface D3GraphProps {
   isDarkMode?: boolean;
   refreshKey?: number;
   onRefresh?: () => void;
+  onElementDoubleClick?: (id: string, type: "node" | "edge") => void;
+  onClearSelection?: () => void;
+  searchQuery?: string;
+  selectedElement?: string | null;
 }
 
-export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edgeWeightMult = 1, nodeOpacity = 1, edgeOpacity = 0.8, nodeSizeBase = 'abundance', edgeWeightBase = 'weight_raw', forceStrength, directed, bipartite, livePhysics, isFrozen, isDarkMode, refreshKey, onRefresh }: D3GraphProps) {
+export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edgeWeightMult = 1, nodeOpacity = 1, edgeOpacity = 0.8, nodeSizeBase = 'abundance', edgeWeightBase = 'weight_raw', forceStrength, directed, bipartite, livePhysics, isFrozen, isDarkMode, refreshKey, onRefresh, onElementDoubleClick, onClearSelection, searchQuery = "", selectedElement = null }: D3GraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const simulationRef = useRef<d3.Simulation<any, any> | null>(null);
@@ -39,22 +43,58 @@ export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edge
 
   const [clickedNode, setClickedNode] = useState<RawNode | null>(null);
   const [clickedDegree, setClickedDegree] = useState<number>(0);
+  const [clickedEdge, setClickedEdge] = useState<RawEdge | null>(null);
   
   const [hiddenItems, setHiddenItems] = useState<Set<string>>(new Set());
   const [isLegendMinimized, setIsLegendMinimized] = useState(false);
   const clickTimers = useRef<{[key: string]: NodeJS.Timeout}>({});
   const clickedNodeRef = useRef<RawNode | null>(null);
+  const clickedEdgeRef = useRef<RawEdge | null>(null);
   const tickDrawRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     clickedNodeRef.current = clickedNode;
   }, [clickedNode]);
 
+  useEffect(() => {
+    clickedEdgeRef.current = clickedEdge;
+  }, [clickedEdge]);
+
+  useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect */
+    if (selectedElement) {
+      if (!selectedElement.includes('-')) {
+        const node = nodes.find(n => n.id === selectedElement);
+        if (node) {
+          setClickedNode(node);
+          setClickedEdge(null);
+          return;
+        }
+      } else {
+        const parts = selectedElement.split('-');
+        if (parts.length >= 2) {
+           const src = parts[0];
+           const tgt = parts[1];
+           const edge = edges.find(e => (e.source === src && e.target === tgt) || (!directed && e.source === tgt && e.target === src));
+           if (edge) {
+             setClickedEdge(edge);
+             setClickedNode(null);
+             return;
+           }
+        }
+      }
+      setClickedNode(null);
+      setClickedEdge(null);
+    }
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [selectedElement, nodes, edges, directed]);
+
   
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    /* eslint-disable react-hooks/set-state-in-effect */
     setHiddenItems(new Set());
     setClickedNode(null);
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [refreshKey]);
 
   const adjacencyListRef = useRef<Record<string, Set<string>>>({});
@@ -207,6 +247,8 @@ export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edge
       .style("fill", "transparent")
       .on("click", () => {
         setClickedNode(null);
+        setClickedEdge(null);
+        if (onClearSelection) onClearSelection();
       });
 
     const degreeMap: Record<string, number> = {};
@@ -271,11 +313,28 @@ export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edge
       .data(graphLinks)
       .join('path')
       .attr('class', 'graph-link')
+      .style('cursor', 'pointer')
       .attr('stroke-width', (d: any) => {
          d._defaultStrokeWidth = Math.min(strokeWidthScale(d.weight || 1), 4) * edgeWeightMult;
-         return d._defaultStrokeWidth;
+         return Math.max(d._defaultStrokeWidth, 2); // Ensure it's thick enough to click easily
       })
-      .attr("marker-end", (directed && graphLinks.length < 500) ? "url(#arrowhead)" : null);
+      .attr("marker-end", (directed && graphLinks.length < 500) ? "url(#arrowhead)" : null)
+      .on("click", (e: any, d: any) => {
+        e.stopPropagation();
+        setClickedEdge(prev => {
+           if (prev && prev.source === d.source && prev.target === d.target) return null;
+           setClickedNode(null);
+           return d;
+        });
+      })
+      .on("dblclick", (e: any, d: any) => {
+        e.stopPropagation();
+        if (onElementDoubleClick) {
+          const srcId = typeof d.source === 'object' ? d.source.id : d.source;
+          const tgtId = typeof d.target === 'object' ? d.target.id : d.target;
+          onElementDoubleClick(`${srcId}-${tgtId}`, "edge");
+        }
+      });
 
     // Draw circles container
     const nodeGroup = zoomGroup.append('g')
@@ -325,6 +384,11 @@ export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edge
            setClickedDegree(adjacencyList[d.id]?.size || 0);
            return d;
         });
+        setClickedEdge(null);
+      });
+      selection.on("dblclick", (e: any, d: any) => {
+        e.stopPropagation();
+        if (onElementDoubleClick) onElementDoubleClick(d.id, "node");
       });
     };
 
@@ -358,6 +422,12 @@ export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edge
           const srcId = typeof d.source === 'object' ? d.source.id : d.source;
           const tgtId = typeof d.target === 'object' ? d.target.id : d.target;
           showArrow = directed && (srcId === clickedNodeRef.current.id || tgtId === clickedNodeRef.current.id);
+        } else if (clickedEdgeRef.current) {
+          const srcId = typeof d.source === 'object' ? d.source.id : d.source;
+          const tgtId = typeof d.target === 'object' ? d.target.id : d.target;
+          const cEdgeSrc = typeof clickedEdgeRef.current.source === 'object' ? (clickedEdgeRef.current.source as any).id : clickedEdgeRef.current.source;
+          const cEdgeTgt = typeof clickedEdgeRef.current.target === 'object' ? (clickedEdgeRef.current.target as any).id : clickedEdgeRef.current.target;
+          showArrow = directed && (srcId === cEdgeSrc && tgtId === cEdgeTgt);
         }
 
         if (directed) {
@@ -506,12 +576,32 @@ export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edge
 
     const adjacencyList = adjacencyListRef.current;
     const showLabels = nodes.length < 300;
+    
+    const q = searchQuery.toLowerCase();
 
     nodeGroup.style('opacity', (d: any) => {
       if (isNodeHidden(d)) return 0;
       if (clickedNode) {
         const neighbors = adjacencyList[clickedNode.id] || new Set();
         return (d.id === clickedNode.id || neighbors.has(d.id)) ? nodeOpacity : nodeOpacity * 0.1;
+      }
+      if (clickedEdge) {
+        const cSrc = typeof clickedEdge.source === 'object' ? (clickedEdge.source as any).id : clickedEdge.source;
+        const cTgt = typeof clickedEdge.target === 'object' ? (clickedEdge.target as any).id : clickedEdge.target;
+        return (d.id === cSrc || d.id === cTgt) ? nodeOpacity : nodeOpacity * 0.1;
+      }
+      if (selectedElement) {
+        if (d.id === selectedElement) return nodeOpacity;
+        if (selectedElement.includes('-')) {
+          const parts = selectedElement.split('-');
+          // Best effort to check if node is part of selected edge
+          if (parts.includes(String(d.id))) return nodeOpacity;
+        }
+        return nodeOpacity * 0.1;
+      }
+      if (q) {
+        const matches = String(d.id).toLowerCase().includes(q) || String(d.label || d.name || "").toLowerCase().includes(q);
+        return matches ? nodeOpacity : nodeOpacity * 0.1;
       }
       return nodeOpacity;
     }).style('display', (d: any) => isNodeHidden(d) ? 'none' : '');
@@ -524,24 +614,67 @@ export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edge
       if (clickedNode) {
         return (srcId === clickedNode.id || tgtId === clickedNode.id) ? edgeOpacity : edgeOpacity * 0.1;
       }
+      if (clickedEdge) {
+        const cSrc = typeof clickedEdge.source === 'object' ? (clickedEdge.source as any).id : clickedEdge.source;
+        const cTgt = typeof clickedEdge.target === 'object' ? (clickedEdge.target as any).id : clickedEdge.target;
+        return (srcId === cSrc && tgtId === cTgt) ? edgeOpacity : edgeOpacity * 0.1;
+      }
+      if (selectedElement) {
+        if (`${srcId}-${tgtId}` === selectedElement || `${tgtId}-${srcId}` === selectedElement) return edgeOpacity;
+        if (srcId === selectedElement || tgtId === selectedElement) return edgeOpacity;
+        return edgeOpacity * 0.1;
+      }
+      if (q) {
+        const matches = String(srcId).toLowerCase().includes(q) || String(tgtId).toLowerCase().includes(q);
+        return matches ? edgeOpacity : edgeOpacity * 0.1;
+      }
       return edgeOpacity;
     }).style('display', (d: any) => {
       if (hiddenItems.has('element:edges')) return 'none';
       return '';
     }).style('stroke-width', (d: any) => {
-      if (clickedNode) {
-        const src = typeof d.source === 'object' ? d.source.id : d.source;
-        const tgt = typeof d.target === 'object' ? d.target.id : d.target;
-        return (src === clickedNode.id || tgt === clickedNode.id) ? `${Math.min((d._defaultStrokeWidth || 1) * 1.5, 6)}px` : null;
+      const srcId = typeof d.source === 'object' ? d.source.id : d.source;
+      const tgtId = typeof d.target === 'object' ? d.target.id : d.target;
+      if (clickedNode && (srcId === clickedNode.id || tgtId === clickedNode.id)) {
+        return `${Math.min((d._defaultStrokeWidth || 1) * 1.5, 6)}px`;
+      }
+      if (clickedEdge) {
+        const cSrc = typeof clickedEdge.source === 'object' ? (clickedEdge.source as any).id : clickedEdge.source;
+        const cTgt = typeof clickedEdge.target === 'object' ? (clickedEdge.target as any).id : clickedEdge.target;
+        if (srcId === cSrc && tgtId === cTgt) {
+          return `${Math.min((d._defaultStrokeWidth || 1) * 1.5, 6)}px`;
+        }
+      }
+      if (selectedElement) {
+        if (`${srcId}-${tgtId}` === selectedElement || `${tgtId}-${srcId}` === selectedElement || srcId === selectedElement || tgtId === selectedElement) {
+          return `${Math.min((d._defaultStrokeWidth || 1) * 1.5, 6)}px`;
+        }
+      }
+      if (q && (String(srcId).toLowerCase().includes(q) || String(tgtId).toLowerCase().includes(q))) {
+        return `${Math.min((d._defaultStrokeWidth || 1) * 1.5, 6)}px`;
       }
       return null;
     }).attr('marker-end', (d: any) => {
       if (!directed) return null;
-      if (clickedNode) {
-        const srcId = typeof d.source === 'object' ? d.source.id : d.source;
-        const tgtId = typeof d.target === 'object' ? d.target.id : d.target;
-        if (srcId === clickedNode.id || tgtId === clickedNode.id) return "url(#arrowhead)";
-      } else if (edges.length < 500) {
+      const srcId = typeof d.source === 'object' ? d.source.id : d.source;
+      const tgtId = typeof d.target === 'object' ? d.target.id : d.target;
+      if (clickedNode && (srcId === clickedNode.id || tgtId === clickedNode.id)) {
+        return "url(#arrowhead)";
+      }
+      if (clickedEdge) {
+        const cSrc = typeof clickedEdge.source === 'object' ? (clickedEdge.source as any).id : clickedEdge.source;
+        const cTgt = typeof clickedEdge.target === 'object' ? (clickedEdge.target as any).id : clickedEdge.target;
+        if (srcId === cSrc && tgtId === cTgt) {
+          return "url(#arrowhead)";
+        }
+      }
+      if (selectedElement && (`${srcId}-${tgtId}` === selectedElement || srcId === selectedElement || tgtId === selectedElement)) {
+        return "url(#arrowhead)";
+      }
+      if (q && (String(srcId).toLowerCase().includes(q) || String(tgtId).toLowerCase().includes(q))) {
+        return "url(#arrowhead)";
+      }
+      if (!clickedNode && !clickedEdge && !q && !selectedElement && edges.length < 500) {
         return "url(#arrowhead)";
       }
       return null;
@@ -553,12 +686,46 @@ export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edge
         const neighbors = adjacencyList[clickedNode.id] || new Set();
         return (d.id === clickedNode.id || neighbors.has(d.id)) ? 1 : 0.1;
       }
+      if (clickedEdge) {
+        const cSrc = typeof clickedEdge.source === 'object' ? (clickedEdge.source as any).id : clickedEdge.source;
+        const cTgt = typeof clickedEdge.target === 'object' ? (clickedEdge.target as any).id : clickedEdge.target;
+        return (d.id === cSrc || d.id === cTgt) ? 1 : 0.1;
+      }
+      if (selectedElement) {
+        if (d.id === selectedElement) return 1;
+        if (selectedElement.includes('-')) {
+          const parts = selectedElement.split('-');
+          if (parts.includes(String(d.id))) return 1;
+        }
+        return 0.1;
+      }
+      if (q) {
+        const matches = String(d.id).toLowerCase().includes(q) || String(d.label || d.name || "").toLowerCase().includes(q);
+        return matches ? 1 : 0.1;
+      }
       return 1;
     }).style('display', (d: any) => {
       if (isNodeHidden(d)) return 'none';
       if (clickedNode) {
         const neighbors = adjacencyList[clickedNode.id] || new Set();
         return (d.id === clickedNode.id || neighbors.has(d.id)) ? 'block' : 'none';
+      }
+      if (clickedEdge) {
+        const cSrc = typeof clickedEdge.source === 'object' ? (clickedEdge.source as any).id : clickedEdge.source;
+        const cTgt = typeof clickedEdge.target === 'object' ? (clickedEdge.target as any).id : clickedEdge.target;
+        return (d.id === cSrc || d.id === cTgt) ? 'block' : 'none';
+      }
+      if (selectedElement) {
+        if (d.id === selectedElement) return 'block';
+        if (selectedElement.includes('-')) {
+          const parts = selectedElement.split('-');
+          if (parts.includes(String(d.id))) return 'block';
+        }
+        return 'none';
+      }
+      if (q) {
+        const matches = String(d.id).toLowerCase().includes(q) || String(d.label || d.name || "").toLowerCase().includes(q);
+        return matches ? 'block' : 'none';
       }
       return showLabels ? 'block' : 'none';
     });
@@ -567,7 +734,7 @@ export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edge
         tickDrawRef.current();
     }
 
-  }, [clickedNode, hiddenItems, communityMap, nodes, bipartite, refreshKey, isDarkMode, directed, edges.length, nodeOpacity, edgeOpacity]);
+  }, [clickedNode, clickedEdge, selectedElement, hiddenItems, communityMap, nodes, bipartite, refreshKey, isDarkMode, directed, edges.length, nodeOpacity, edgeOpacity, searchQuery]);
 
   return (
     <div ref={containerRef} className="w-full h-full relative cursor-crosshair">
@@ -632,6 +799,38 @@ export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edge
                         <span className="font-mono font-bold">
                             <div className="w-3 h-3 inline-block align-middle ml-1" style={{backgroundColor: communityColorMap[communityMap[clickedNode.id]] || (isDarkMode ? '#bbbbbb' : '#141414')}}></div>
                         </span>
+                    </div>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {clickedEdge && (
+        <div className="absolute bottom-6 right-6 flex space-x-2">
+            <div className={`p-3 w-56 shadow-none border transition-colors ${
+              isDarkMode ? 'bg-[#141414] border-[#333] text-[#E4E3E0]' : 'bg-white border-[#141414] text-[#141414]'
+            }`}>
+                <div className={`text-[10px] font-bold uppercase tracking-widest mb-2 opacity-70 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Edge Details</div>
+                <div className="space-y-1">
+                    <div className="flex justify-between text-[10px] items-center">
+                        <span className="opacity-50 uppercase font-bold">SOURCE</span>
+                        <span className="font-mono font-bold truncate max-w-[120px] text-right" title={typeof clickedEdge.source === 'object' ? (clickedEdge.source as any).id : clickedEdge.source}>
+                            {typeof clickedEdge.source === 'object' ? (clickedEdge.source as any).id : clickedEdge.source}
+                        </span>
+                    </div>
+                    <div className="flex justify-between text-[10px] items-center">
+                        <span className="opacity-50 uppercase font-bold">TARGET</span>
+                        <span className="font-mono font-bold truncate max-w-[120px] text-right" title={typeof clickedEdge.target === 'object' ? (clickedEdge.target as any).id : clickedEdge.target}>
+                            {typeof clickedEdge.target === 'object' ? (clickedEdge.target as any).id : clickedEdge.target}
+                        </span>
+                    </div>
+                    <div className="flex justify-between text-[10px]">
+                        <span className="opacity-50 uppercase font-bold">RAW WT</span>
+                        <span className="font-mono font-bold">{clickedEdge.weight_raw || '-'}</span>
+                    </div>
+                    <div className="flex justify-between text-[10px]">
+                        <span className="opacity-50 uppercase font-bold">SEC WT</span>
+                        <span className="font-mono font-bold">{clickedEdge.weight_secondary || '-'}</span>
                     </div>
                 </div>
             </div>

@@ -62,32 +62,63 @@ export const exportImage = (svgElement: SVGSVGElement | null, format: 'png' | 'j
   let exportHeight = 2000;
 
   if (zoomGroupDom && zoomGroupClone) {
-    const bbox = zoomGroupDom.getBBox();
-    const padding = 50;
+    // Calculate bounding box manually based on visible nodes to avoid huge invisible SVG elements
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    const nodeGroups = zoomGroupDom.querySelectorAll('.node-group');
     
-    const vbX = bbox.x - padding;
-    const vbY = bbox.y - padding;
-    const vbWidth = bbox.width + padding * 2;
-    const vbHeight = bbox.height + padding * 2;
-    
-    // Set viewBox on clone to exactly match the content
-    clone.setAttribute('viewBox', `${vbX} ${vbY} ${vbWidth} ${vbHeight}`);
-    
-    // Remove the current zoom transform from the clone so it doesn't get offset
-    zoomGroupClone.removeAttribute('transform');
-    
-    // Set explicit export dimensions based on bounding box ratio to ensure high res
-    exportWidth = 4000; // High resolution base width
-    exportHeight = exportWidth * (vbHeight / vbWidth);
-    
-    clone.setAttribute('width', `${exportWidth}`);
-    clone.setAttribute('height', `${exportHeight}`);
+    nodeGroups.forEach(group => {
+      if (group.getAttribute('display') === 'none') return;
+      const transform = group.getAttribute('transform');
+      if (transform) {
+        const match = transform.match(/translate\(([^,]+),\s*([^)]+)\)/);
+        if (match) {
+          const x = parseFloat(match[1]);
+          const y = parseFloat(match[2]);
+          const circle = group.querySelector('circle.node-shape');
+          const r = circle ? parseFloat(circle.getAttribute('r') || '0') : 0;
+          
+          if (x - r < minX) minX = x - r;
+          if (x + r > maxX) maxX = x + r;
+          if (y - r < minY) minY = y - r;
+          if (y + r > maxY) maxY = y + r;
+        }
+      }
+    });
+
+    if (minX !== Infinity && maxX !== -Infinity && minY !== Infinity && maxY !== -Infinity) {
+      const padding = 100;
+      const vbX = minX - padding;
+      const vbY = minY - padding;
+      const vbWidth = (maxX - minX) + padding * 2;
+      const vbHeight = (maxY - minY) + padding * 2;
+      
+      // Set viewBox on clone to exactly match the content
+      clone.setAttribute('viewBox', `${vbX} ${vbY} ${vbWidth} ${vbHeight}`);
+      
+      // Remove the current zoom transform from the clone so it doesn't get offset
+      zoomGroupClone.removeAttribute('transform');
+      
+      // Set explicit export dimensions based on bounding box ratio to ensure high res
+      exportWidth = Math.max(4000, vbWidth * 2); // High resolution base width
+      exportHeight = exportWidth * (vbHeight / vbWidth);
+      
+      clone.setAttribute('width', `${exportWidth}`);
+      clone.setAttribute('height', `${exportHeight}`);
+    }
   } else {
     exportWidth = (svgElement.clientWidth || 1000) * 4;
     exportHeight = (svgElement.clientHeight || 1000) * 4;
     clone.setAttribute('width', `${exportWidth}`);
     clone.setAttribute('height', `${exportHeight}`);
   }
+
+  // Inline basic styles to ensure text and lines render correctly in canvas
+  const style = document.createElement('style');
+  style.textContent = `
+    .node-label { font-family: ui-sans-serif, system-ui, sans-serif; font-size: 10px; font-weight: 500; }
+    .graph-link { fill: none; }
+  `;
+  clone.insertBefore(style, clone.firstChild);
 
   // Prepend XML declaration and namespaces
   const serializer = new XMLSerializer();

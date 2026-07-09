@@ -49,6 +49,10 @@ interface AppState {
   communityMap: Record<string, string>; // nodeId -> color
   setCommunityMap: (map: Record<string, string>) => void;
   
+  selectedElement: string | null;
+  setSelectedElement: (val: string | null) => void;
+  searchQuery: string;
+  setSearchQuery: (val: string) => void;
   clearStore: () => void;
 }
 
@@ -60,6 +64,11 @@ export const useStore = create<AppState>((set) => ({
   rawNodes: [],
   rawEdges: [],
   setRawData: (nodes, edges, directed = false, bipartite = false) => set({ rawNodes: nodes, rawEdges: edges, directed, bipartite }),
+
+  selectedElement: null,
+  setSelectedElement: (val) => set({ selectedElement: val }),
+  searchQuery: '',
+  setSearchQuery: (val) => set({ searchQuery: val }),
 
   filters: {
     relCutoff: 0,

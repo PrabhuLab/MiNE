@@ -41,21 +41,34 @@ const SyncInput = ({ value, onChange, step, className }: any) => {
   );
 };
 
-const SyncTextInput = ({ value, onChange, className, placeholder }: any) => {
+const SyncTextInput = ({ value, onChange, className, placeholder, list, options }: any) => {
   const [localVal, setLocalVal] = useState(value);
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => setLocalVal(value), [value]);
 
   return (
-    <input 
-      type="text"
-      className={`text-inherit ${className}`}
-      value={localVal}
-      onChange={e => setLocalVal(e.target.value)}
-      onBlur={() => onChange(localVal)}
-      onKeyDown={e => e.key === 'Enter' && onChange(localVal)}
-      placeholder={placeholder}
-    />
+    <>
+      <input 
+        type="text"
+        className={`text-inherit ${className}`}
+        value={localVal}
+        onChange={e => setLocalVal(e.target.value)}
+        onBlur={() => onChange(localVal)}
+        onKeyDown={e => e.key === 'Enter' && onChange(localVal)}
+        placeholder={placeholder}
+        list={list}
+      />
+      {list && options && localVal && localVal.length >= 1 && (
+        <datalist id={list}>
+          {options
+            .filter((opt: any) => String(opt.value).toLowerCase().includes(localVal.toLowerCase()) || String(opt.label).toLowerCase().includes(localVal.toLowerCase()))
+            .slice(0, 15)
+            .map((opt: any, idx: number) => (
+              <option key={idx} value={opt.value}>{opt.label}</option>
+            ))}
+        </datalist>
+      )}
+    </>
   );
 };
 
@@ -110,7 +123,7 @@ const CustomSlider = ({ min, max, step, value, onChange, isDarkMode }: any) => {
 };
 
 export default function Workspace() {
-  const { rawNodes, rawEdges, filters, setFilter, communityMap, setCommunityMap, directed, bipartite, isDarkMode, setIsDarkMode } = useStore();
+  const { rawNodes, rawEdges, filters, setFilter, communityMap, setCommunityMap, directed, bipartite, isDarkMode, setIsDarkMode, searchQuery, setSearchQuery, selectedElement, setSelectedElement } = useStore();
   
   const [refreshKey, setRefreshKey] = useState(0);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -118,10 +131,15 @@ export default function Workspace() {
   const [networkMetrics, setNetworkMetrics] = useState<any[]>([]);
   const [modularity, setModularity] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<"graph" | "data">("graph");
+  const [dataTab, setDataTab] = useState<"nodes" | "edges">("nodes");
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [sortConfig, setSortConfig] = useState<{ key: string, direction: "asc" | "desc" } | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
 
+  const handleElementDoubleClick = (id: string, type: "node" | "edge") => {
+    setSelectedElement(id);
+    setActiveTab("data");
+    setDataTab(type + "s" as any);
+  };
 
 
 
@@ -392,6 +410,40 @@ export default function Workspace() {
     return data;
   }, [validNodes, networkMetrics, nodeMetrics, communityMap, sortConfig, searchQuery]);
 
+  const tableDataEdges = useMemo(() => {
+    let data = validEdges;
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      data = data.filter(d => 
+        String(d.source).toLowerCase().includes(q) || 
+        String(d.target).toLowerCase().includes(q)
+      );
+    }
+    
+    if (sortConfig) {
+      data = [...data].sort((a, b) => {
+        let aVal: any = a.source;
+        let bVal: any = b.source;
+
+        if (sortConfig.key === "source") {
+          aVal = a.source; bVal = b.source;
+        } else if (sortConfig.key === "target") {
+          aVal = a.target; bVal = b.target;
+        } else if (sortConfig.key === "weight_raw") {
+          aVal = a.weight_raw; bVal = b.weight_raw;
+        } else if (sortConfig.key === "weight_secondary") {
+          aVal = a.weight_secondary; bVal = b.weight_secondary;
+        }
+
+        if (aVal < bVal) return sortConfig.direction === "asc" ? -1 : 1;
+        if (aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1;
+        return 0;
+      });
+    }
+
+    return data;
+  }, [validEdges, sortConfig, searchQuery]);
+
   const handleExport = (format: string) => {
     setShowExportMenu(false);
     if (activeTab === "graph") {
@@ -420,6 +472,17 @@ export default function Workspace() {
     }
     setSortConfig({ key, direction });
   };
+
+  useEffect(() => {
+    if (activeTab === "data" && selectedElement) {
+      setTimeout(() => {
+        const el = document.getElementById(`row-${selectedElement}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 100);
+    }
+  }, [activeTab, selectedElement, dataTab]);
 
   return (
     <div className={`flex flex-1 overflow-hidden h-full w-full transition-colors ${isDarkMode ? 'bg-[#141414] text-[#E4E3E0]' : 'bg-[#E4E3E0] text-[#141414]'}`}>
@@ -463,6 +526,43 @@ export default function Workspace() {
               </button>
             </div>
           </div>
+
+          <div>
+            <h3 className={`text-[10px] font-bold uppercase tracking-widest mb-4 opacity-70 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Search & Select</h3>
+            <div className="group mb-6">
+               <input 
+                 type="text"
+                 placeholder="Search nodes/edges..."
+                 value={searchQuery}
+                 onChange={(e) => {
+                   const val = e.target.value;
+                   setSearchQuery(val);
+                   if (val && (rawNodes.some(n => String(n.id) === val) || rawEdges.some(edge => `${edge.source}-${edge.target}` === val))) {
+                     setSelectedElement(val);
+                   }
+                 }}
+                 className={`w-full bg-transparent border p-2 text-[10px] uppercase font-bold tracking-widest outline-none transition-colors ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0]' : 'border-[#141414] focus:border-black text-[#141414]'}`}
+                 list="search-autocomplete"
+               />
+               {searchQuery && searchQuery.length >= 1 && (
+                 <datalist id="search-autocomplete">
+                   {rawNodes
+                     .filter(n => String(n.id).toLowerCase().includes(searchQuery.toLowerCase()) || String(n.label || n.name || n.id).toLowerCase().includes(searchQuery.toLowerCase()))
+                     .slice(0, 15)
+                     .map(node => (
+                     <option key={`search-node-${node.id}`} value={node.id}>{node.label || node.name || node.id}</option>
+                   ))}
+                   {rawEdges
+                     .filter(e => `${e.source}-${e.target}`.toLowerCase().includes(searchQuery.toLowerCase()))
+                     .slice(0, 15)
+                     .map((edge, idx) => (
+                     <option key={`search-edge-${idx}`} value={`${edge.source}-${edge.target}`}>{`${edge.source} -> ${edge.target}`}</option>
+                   ))}
+                 </datalist>
+               )}
+            </div>
+          </div>
+
           <div>
             <h3 className={`text-[10px] font-bold uppercase tracking-widest mb-4 opacity-70 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Filter Logic Layer</h3>
           
@@ -521,6 +621,8 @@ export default function Workspace() {
                  value={filters.removedNodes}
                  onChange={(v: string) => setFilter('removedNodes', v)}
                  className={`w-full bg-transparent border p-2 text-xs font-mono outline-none transition-colors ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0]' : 'border-[#141414] focus:border-black text-[#141414]'}`}
+                 list="removal-autocomplete"
+                 options={rawNodes.map((n) => ({ value: n.id, label: n.label || n.name || n.id }))}
                />
             </div>
           </div>
@@ -716,20 +818,27 @@ export default function Workspace() {
             {activeTab === "data" && (
               <>
                 {typeof modularity === "number" && !isNaN(modularity) && (
-                  <div className="flex items-center space-x-2 text-[10px] font-bold uppercase tracking-widest">
+                  <div className="flex items-center space-x-2 text-[10px] font-bold uppercase tracking-widest mr-4">
                     <span className="opacity-60">Modularity (Q):</span>
                     <span className={`font-mono px-2 py-1 rounded ${isDarkMode ? "bg-white/10" : "bg-black/5"}`}>
                       {modularity.toFixed(4)}
                     </span>
                   </div>
                 )}
-                <input
-                  type="text"
-                  placeholder="SEARCH NODES..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className={`text-[10px] uppercase font-bold tracking-widest px-3 py-2 border outline-none w-64 transition-colors ${isDarkMode ? "bg-[#141414] border-[#333] text-[#E4E3E0] focus:border-[#E4E3E0] placeholder-[#666]" : "bg-white border-[#ccc] text-[#141414] focus:border-[#141414] placeholder-[#999]"}`}
-                />
+                <div className="flex text-[10px] uppercase font-bold tracking-widest bg-white dark:bg-[#141414] border border-[#141414] dark:border-[#333] shadow-sm">
+                  <button 
+                    className={`px-4 py-2 transition-colors ${dataTab === "nodes" ? (isDarkMode ? "bg-[#333] text-white" : "bg-[#141414] text-white") : (isDarkMode ? "text-[#888] hover:bg-[#222]" : "text-[#888] hover:bg-[#f5f5f5]")}`}
+                    onClick={() => setDataTab("nodes")}
+                  >
+                    Nodes
+                  </button>
+                  <button 
+                    className={`px-4 py-2 transition-colors border-l border-[#141414] dark:border-[#333] ${dataTab === "edges" ? (isDarkMode ? "bg-[#333] text-white" : "bg-[#141414] text-white") : (isDarkMode ? "text-[#888] hover:bg-[#222]" : "text-[#888] hover:bg-[#f5f5f5]")}`}
+                    onClick={() => setDataTab("edges")}
+                  >
+                    Edges
+                  </button>
+                </div>
               </>
             )}
             
@@ -788,81 +897,139 @@ export default function Workspace() {
                   isDarkMode={isDarkMode}
                   refreshKey={refreshKey}
                   onRefresh={() => setRefreshKey(k => k + 1)}
+                  onElementDoubleClick={handleElementDoubleClick}
+                  onClearSelection={() => setSelectedElement(null)}
+                  searchQuery={searchQuery}
+                  selectedElement={selectedElement}
                 />
               </div>
             )}
             
             {activeTab === "data" && (
               <div className="flex-1 w-full h-full overflow-auto">
-                <table className={`w-full text-left text-xs border-collapse ${isDarkMode ? "text-[#ddd]" : "text-[#333]"}`}>
-                  <thead className={`sticky top-0 shadow-sm z-10 ${isDarkMode ? "bg-[#222] border-b border-[#444]" : "bg-[#f0f0f0] border-b border-[#ccc]"}`}>
-                    <tr>
-                      <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("id")}>
-                        Node ID {sortConfig?.key === "id" && (sortConfig.direction === "asc" ? "↑" : "↓")}
-                      </th>
-                      <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("label")}>
-                        Label {sortConfig?.key === "label" && (sortConfig.direction === "asc" ? "↑" : "↓")}
-                      </th>
-                      <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("abundance")}>
-                        Abundance {sortConfig?.key === "abundance" && (sortConfig.direction === "asc" ? "↑" : "↓")}
-                      </th>
-                      {directed ? (
-                        <>
-                          <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("inDegree")}>
-                            In Degree {sortConfig?.key === "inDegree" && (sortConfig.direction === "asc" ? "↑" : "↓")}
-                          </th>
-                          <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("outDegree")}>
-                            Out Degree {sortConfig?.key === "outDegree" && (sortConfig.direction === "asc" ? "↑" : "↓")}
-                          </th>
-                        </>
-                      ) : (
-                        <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("degree")}>
-                          Degree {sortConfig?.key === "degree" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                {dataTab === "nodes" && (
+                  <table className={`w-full text-left text-xs border-collapse ${isDarkMode ? "text-[#ddd]" : "text-[#333]"}`}>
+                    <thead className={`sticky top-0 shadow-sm z-10 ${isDarkMode ? "bg-[#222] border-b border-[#444]" : "bg-[#f0f0f0] border-b border-[#ccc]"}`}>
+                      <tr>
+                        <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("id")}>
+                          Node ID {sortConfig?.key === "id" && (sortConfig.direction === "asc" ? "↑" : "↓")}
                         </th>
-                      )}
-                      <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("eigenvector")}>
-                        Eigenvector {sortConfig?.key === "eigenvector" && (sortConfig.direction === "asc" ? "↑" : "↓")}
-                      </th>
-                      <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("pagerank")}>
-                        PageRank {sortConfig?.key === "pagerank" && (sortConfig.direction === "asc" ? "↑" : "↓")}
-                      </th>
-                      <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("community")}>
-                        Community {sortConfig?.key === "community" && (sortConfig.direction === "asc" ? "↑" : "↓")}
-                      </th>
-                      <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("deltaQ")}>
-                        ΔQ {sortConfig?.key === "deltaQ" && (sortConfig.direction === "asc" ? "↑" : "↓")}
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {tableData.map(node => {
-                      return (
-                        <tr key={node.id} className={`border-b ${isDarkMode ? "border-[#333] hover:bg-[#1a1a1a]" : "border-[#eee] hover:bg-[#fcfcfc]"}`}>
-                          <td className="p-2 font-mono font-bold">{node.id}</td>
-                          <td className="p-2">{node.label || node.name || "-"}</td>
-                          <td className="p-2 font-mono">{node.abundance || "-"}</td>
-                          {directed ? (
-                            <>
-                              <td className="p-2 font-mono">{node.net.inDegree || 0}</td>
-                              <td className="p-2 font-mono">{node.net.outDegree || 0}</td>
-                            </>
-                          ) : (
-                            <td className="p-2 font-mono">{node.net.degree || 0}</td>
-                          )}
-                          <td className="p-2 font-mono">{node.net.eigenvector || 0}</td>
-                          <td className="p-2 font-mono">{node.net.pagerank || 0}</td>
-                          <td className="p-2">
-                            <div className="flex items-center space-x-2">
-                              {node.comm && <div className="w-3 h-3 rounded-full" style={{ backgroundColor: getCommunityColor(node.comm, allCommunityLabels) }} />}
-                              <span>{node.comm || "-"}</span>
-                            </div>
-                          </td>
-                          <td className="p-2 font-mono">{node.mod.deltaQ || "-"}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                        <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("label")}>
+                          Label {sortConfig?.key === "label" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                        </th>
+                        <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("abundance")}>
+                          Abundance {sortConfig?.key === "abundance" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                        </th>
+                        {directed ? (
+                          <>
+                            <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("inDegree")}>
+                              In Degree {sortConfig?.key === "inDegree" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                            </th>
+                            <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("outDegree")}>
+                              Out Degree {sortConfig?.key === "outDegree" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                            </th>
+                          </>
+                        ) : (
+                          <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("degree")}>
+                            Degree {sortConfig?.key === "degree" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                          </th>
+                        )}
+                        <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("eigenvector")}>
+                          Eigenvector {sortConfig?.key === "eigenvector" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                        </th>
+                        <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("pagerank")}>
+                          PageRank {sortConfig?.key === "pagerank" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                        </th>
+                        <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("community")}>
+                          Community {sortConfig?.key === "community" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                        </th>
+                        <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("deltaQ")}>
+                          ΔQ {sortConfig?.key === "deltaQ" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tableData.map(node => {
+                        const isSelected = selectedElement === node.id;
+                        return (
+                          <tr 
+                            id={`row-${node.id}`} 
+                            key={node.id} 
+                            onDoubleClick={() => {
+                              setSelectedElement(node.id);
+                              setActiveTab("graph");
+                            }}
+                            className={`border-b cursor-pointer ${isSelected ? (isDarkMode ? "bg-[#333] border-[#555]" : "bg-[#ccc] border-[#aaa]") : (isDarkMode ? "border-[#333] hover:bg-[#1a1a1a]" : "border-[#eee] hover:bg-[#fcfcfc]")}`}
+                          >
+                            <td className="p-2 font-mono font-bold">{node.id}</td>
+                            <td className="p-2">{node.label || node.name || "-"}</td>
+                            <td className="p-2 font-mono">{node.abundance || "-"}</td>
+                            {directed ? (
+                              <>
+                                <td className="p-2 font-mono">{node.net.inDegree || 0}</td>
+                                <td className="p-2 font-mono">{node.net.outDegree || 0}</td>
+                              </>
+                            ) : (
+                              <td className="p-2 font-mono">{node.net.degree || 0}</td>
+                            )}
+                            <td className="p-2 font-mono">{node.net.eigenvector || 0}</td>
+                            <td className="p-2 font-mono">{node.net.pagerank || 0}</td>
+                            <td className="p-2">
+                              <div className="flex items-center space-x-2">
+                                {node.comm && <div className="w-3 h-3 rounded-full" style={{ backgroundColor: getCommunityColor(node.comm, allCommunityLabels) }} />}
+                                <span>{node.comm || "-"}</span>
+                              </div>
+                            </td>
+                            <td className="p-2 font-mono">{node.mod.deltaQ || "-"}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+
+                {dataTab === "edges" && (
+                  <table className={`w-full text-left text-xs border-collapse ${isDarkMode ? "text-[#ddd]" : "text-[#333]"}`}>
+                    <thead className={`sticky top-0 shadow-sm z-10 ${isDarkMode ? "bg-[#222] border-b border-[#444]" : "bg-[#f0f0f0] border-b border-[#ccc]"}`}>
+                      <tr>
+                        <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("source")}>
+                          Source {sortConfig?.key === "source" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                        </th>
+                        <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("target")}>
+                          Target {sortConfig?.key === "target" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                        </th>
+                        <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("weight_raw")}>
+                          Primary Weight {sortConfig?.key === "weight_raw" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                        </th>
+                        <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("weight_secondary")}>
+                          Secondary Weight {sortConfig?.key === "weight_secondary" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tableDataEdges.map((edge, idx) => {
+                        const edgeId = `${edge.source}-${edge.target}`;
+                        const isSelected = selectedElement === edgeId;
+                        return (
+                          <tr 
+                            id={`row-${edgeId}`} 
+                            key={idx} 
+                            onDoubleClick={() => {
+                              setSelectedElement(edgeId);
+                              setActiveTab("graph");
+                            }}
+                            className={`border-b cursor-pointer ${isSelected ? (isDarkMode ? "bg-[#333] border-[#555]" : "bg-[#ccc] border-[#aaa]") : (isDarkMode ? "border-[#333] hover:bg-[#1a1a1a]" : "border-[#eee] hover:bg-[#fcfcfc]")}`}
+                          >
+                            <td className="p-2 font-mono">{edge.source}</td>
+                            <td className="p-2 font-mono">{edge.target}</td>
+                            <td className="p-2 font-mono">{edge.weight_raw}</td>
+                            <td className="p-2 font-mono">{edge.weight_secondary || "-"}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
               </div>
             )}
           </>
