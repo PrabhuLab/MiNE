@@ -187,8 +187,8 @@ export default function SmartUploadWizard() {
       const edges: any[] = [];
       const edgeSet = new Set();
       
-      parsedData.rawNodes.forEach((n: any) => {
-        const id = n[nodeIdCol || 'id'] || n['id'] || `node_${Math.random()}`;
+      parsedData.rawNodes.forEach((n: any, index: number) => {
+        const id = n[nodeIdCol || 'id'] || n['id'] || `node_${index}`;
         nodesMap.set(id, {
           id,
           name: n[nodeLabelCol || 'name'] || n['name'] || id,
