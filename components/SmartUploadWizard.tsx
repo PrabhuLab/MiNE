@@ -32,7 +32,7 @@ export default function SmartUploadWizard() {
   const [error, setError] = useState<string | null>(null);
 
   // Parsed CSVs
-  const [parsedData, setParsedData] = useState<Record<string, any[][]>>({});
+  const [parsedData, setParsedData] = useState<Record<string, any>>({});
   
   // Mapping State
   const [sourceCol, setSourceCol] = useState('');
@@ -102,8 +102,31 @@ export default function SmartUploadWizard() {
         const text = await jsonFile!.text();
         const data = JSON.parse(text);
         if (!data.nodes || !data.edges) throw new Error("Invalid Standard JSON format.");
-        setRawData(data.nodes, data.edges, data.directed || isDirected, data.bipartite || topology === 'Bipartite');
-        router.push('/workspace');
+        
+        const jsonEdgesData = [];
+        if (data.edges.length > 0) {
+           const headers = Object.keys(data.edges[0]);
+           jsonEdgesData.push(headers);
+           data.edges.slice(0, 6).forEach((e: any) => jsonEdgesData.push(headers.map(h => typeof e[h] === 'object' ? JSON.stringify(e[h]) : e[h])));
+           setSourceCol(headers.find(h => /source/i.test(h)) || headers[0] || '');
+           setTargetCol(headers.find(h => /target/i.test(h)) || headers[1] || '');
+           setWeightRawCol(headers.find(h => /weight/i.test(h)) || headers[2] || '');
+           setWeightSecCol(headers.find(h => /secondary/i.test(h)) || headers[3] || '');
+        }
+        const jsonNodesData = [];
+        if (data.nodes.length > 0) {
+           const headers = Object.keys(data.nodes[0]);
+           jsonNodesData.push(headers);
+           data.nodes.slice(0, 6).forEach((n: any) => jsonNodesData.push(headers.map(h => typeof n[h] === 'object' ? JSON.stringify(n[h]) : n[h])));
+           setNodeIdCol(headers.find(h => /id/i.test(h)) || headers[0] || '');
+           setNodeLabelCol(headers.find(h => /name|label/i.test(h)) || headers[1] || '');
+           setNodeAbundCol(headers.find(h => /size|abund|weight/i.test(h)) || headers[2] || '');
+           setNodeTypeCol(headers.find(h => /type/i.test(h)) || headers[3] || '');
+           setNodeCommunityCol(headers.find(h => /group|community/i.test(h)) || headers[4] || '');
+        }
+
+        setParsedData({ jsonNodes: jsonNodesData, jsonEdges: jsonEdgesData, rawNodes: data.nodes, rawEdges: data.edges });
+        setStep(5);
       } catch (err: any) {
         setError(err.message || 'Invalid JSON file.');
       }
@@ -142,6 +165,9 @@ export default function SmartUploadWizard() {
         }
       } else if (isFormatAdjList) {
         data.adjList = await parseCSV(adjListFile!);
+        if (data.adjList.length > 0 && data.adjList[0]) {
+           setSourceCol(data.adjList[0][0] || '');
+        }
       }
       
       setParsedData(data);
@@ -155,6 +181,42 @@ export default function SmartUploadWizard() {
 
   const previewGraph = useMemo(() => {
     if (step < 5) return { nodes: [], edges: [] };
+    
+    if (format === 'Standard JSON' && parsedData.rawNodes && parsedData.rawEdges) {
+      const nodesMap = new Map();
+      const edges: any[] = [];
+      const edgeSet = new Set();
+      
+      parsedData.rawNodes.forEach((n: any) => {
+        const id = n[nodeIdCol || 'id'] || n['id'] || `node_${Math.random()}`;
+        nodesMap.set(id, {
+          id,
+          name: n[nodeLabelCol || 'name'] || n['name'] || id,
+          abundance: parseFloat(n[nodeAbundCol || 'abundance'] || n['abundance']) || 10,
+          type: n[nodeTypeCol || 'type'] || n['type'] || 'A',
+          community: n[nodeCommunityCol || 'community'] || n['community'] || ''
+        });
+      });
+      
+      parsedData.rawEdges.forEach((e: any) => {
+        const sourceId = e[sourceCol || 'source'] || e['source'];
+        const targetId = e[targetCol || 'target'] || e['target'];
+        if (!sourceId || !targetId) return;
+        
+        const edgeId = isDirected ? `${sourceId}->${targetId}` : (sourceId < targetId ? `${sourceId}_${targetId}` : `${targetId}_${sourceId}`);
+        if (!edgeSet.has(edgeId)) {
+          edgeSet.add(edgeId);
+          edges.push({
+            source: sourceId,
+            target: targetId,
+            weight_raw: parseFloat(e[weightRawCol || 'weight'] || e['weight']) || 1,
+            weight_secondary: parseFloat(e[weightSecCol || 'weight'] || e['weight']) || 1
+          });
+        }
+      });
+      
+      return { nodes: Array.from(nodesMap.values()), edges };
+    }
     
     const nodesMap = new Map();
     const edges = [];
@@ -358,9 +420,14 @@ export default function SmartUploadWizard() {
           }
         }
       } else if (isFormatAdjList && parsedData.adjList) {
+        let actualSourceColIdx = 0;
+        if (parsedData.adjList.length > 0 && sourceCol) {
+           const idx = parsedData.adjList[0].indexOf(sourceCol);
+           if (idx !== -1) actualSourceColIdx = idx;
+        }
         for (let i = Math.max(0, safeDataStartRow); i < parsedData.adjList.length; i++) {
           const row = parsedData.adjList[i];
-          const sourceId = row[safeRowHeadersCol];
+          const sourceId = row[actualSourceColIdx];
           if (!sourceId) continue;
           if (!nodesMap.has(sourceId)) nodesMap.set(sourceId, { id: sourceId, name: sourceId, abundance: 10 });
           
@@ -396,7 +463,7 @@ export default function SmartUploadWizard() {
     router.push('/workspace');
   };
 
-  const renderTablePreview = (data: any[][] | undefined, title: string) => {
+  const renderTablePreview = (data: any[][] | undefined, title: string, applyHighlighting: boolean = false) => {
     if (!data || data.length === 0) return null;
     return (
       <div className="mb-4">
@@ -405,19 +472,56 @@ export default function SmartUploadWizard() {
           <table className="w-full text-left text-xs font-mono whitespace-nowrap">
             <thead>
               <tr className={isDarkMode ? 'bg-[#333] text-[#E4E3E0]' : 'bg-[#141414] text-[#E4E3E0]'}>
-                {data[0].map((h: any, i: number) => (
-                  <th key={i} className={`px-2 py-1 border-r border-t ${isDarkMode ? 'border-[#E4E3E0]/10' : 'border-[#E4E3E0]/20'}`}>{h || `Col ${i}`}</th>
-                ))}
+                {data[0].map((h: any, j: number) => {
+                  const isDataStartRow = applyHighlighting && typeof dataStartRow === 'number' && 0 === dataStartRow;
+                  const isDataStartCol = applyHighlighting && typeof dataStartCol === 'number' && j === dataStartCol;
+                  const isDataRegion = applyHighlighting && typeof dataStartRow === 'number' && typeof dataStartCol === 'number' && 0 >= dataStartRow && j >= dataStartCol;
+                  
+                  let thClass = `px-2 py-1 border-r border-t ${isDarkMode ? 'border-[#E4E3E0]/10' : 'border-[#E4E3E0]/20'}`;
+                  
+                  if (isDataStartRow && isDataStartCol) {
+                      thClass += isDarkMode ? ' bg-[#b4ff39]/40 border-l-2 border-t-2 border-[#b4ff39] text-[#b4ff39]' : ' bg-[#b4ff39]/50 border-l-2 border-t-2 border-[#b4ff39] text-[#141414] font-bold';
+                  } else if (isDataStartRow && isDataRegion) {
+                      thClass += isDarkMode ? ' bg-[#b4ff39]/20 border-t-2 border-[#b4ff39] text-[#b4ff39]' : ' bg-[#b4ff39]/30 border-t-2 border-[#b4ff39] text-[#141414] font-bold';
+                  } else if (isDataStartCol && isDataRegion) {
+                      thClass += isDarkMode ? ' bg-[#b4ff39]/20 border-l-2 border-[#b4ff39] text-[#b4ff39]' : ' bg-[#b4ff39]/30 border-l-2 border-[#b4ff39] text-[#141414] font-bold';
+                  } else if (isDataRegion) {
+                      thClass += isDarkMode ? ' bg-[#b4ff39]/10 text-[#b4ff39]' : ' bg-[#b4ff39]/20 text-[#141414]';
+                  }
+                  
+                  return <th key={j} className={thClass}>{h || `Col ${j}`}</th>;
+                })}
               </tr>
             </thead>
             <tbody>
-              {data.slice(1, 6).map((row: any[], i: number) => (
-                <tr key={i} className={`border-b hover:bg-opacity-50 ${isDarkMode ? 'border-[#333]/50 bg-[#141414] hover:bg-[#333]' : 'border-[#141414]/20 bg-white hover:bg-gray-50'}`}>
-                  {data[0].map((_: any, j: number) => (
-                    <td key={j} className={`px-2 py-1 border-r ${isDarkMode ? 'border-[#333]/50' : 'border-[#141414]/20'}`}>{row[j] !== undefined ? String(row[j]).slice(0,35) : ''}</td>
-                  ))}
-                </tr>
-              ))}
+              {data.slice(1, 6).map((row: any[], i: number) => {
+                const actualRowIndex = i + 1;
+                return (
+                  <tr key={i} className={`border-b hover:bg-opacity-50 ${isDarkMode ? 'border-[#333]/50 bg-[#141414] hover:bg-[#333]' : 'border-[#141414]/20 bg-white hover:bg-gray-50'}`}>
+                    {data[0].map((_: any, j: number) => {
+                      const isDataStartRow = applyHighlighting && typeof dataStartRow === 'number' && actualRowIndex === dataStartRow;
+                      const isDataStartCol = applyHighlighting && typeof dataStartCol === 'number' && j === dataStartCol;
+                      const isDataRegion = applyHighlighting && typeof dataStartRow === 'number' && typeof dataStartCol === 'number' && actualRowIndex >= dataStartRow && j >= dataStartCol;
+                      
+                      let tdClass = `px-2 py-1 border-r ${isDarkMode ? 'border-[#333]/50' : 'border-[#141414]/20'}`;
+                      
+                      if (isDataStartRow && isDataStartCol) {
+                          tdClass += isDarkMode ? ' bg-[#b4ff39]/40 border-l-2 border-t-2 border-[#b4ff39] text-[#b4ff39] font-bold' : ' bg-[#b4ff39]/50 border-l-2 border-t-2 border-[#b4ff39] text-[#141414] font-bold';
+                      } else if (isDataStartRow && isDataRegion) {
+                          tdClass += isDarkMode ? ' bg-[#b4ff39]/20 border-t-2 border-[#b4ff39] text-[#b4ff39] font-bold' : ' bg-[#b4ff39]/30 border-t-2 border-[#b4ff39] text-[#141414] font-bold';
+                      } else if (isDataStartCol && isDataRegion) {
+                          tdClass += isDarkMode ? ' bg-[#b4ff39]/20 border-l-2 border-[#b4ff39] text-[#b4ff39] font-bold' : ' bg-[#b4ff39]/30 border-l-2 border-[#b4ff39] text-[#141414] font-bold';
+                      } else if (isDataRegion) {
+                          tdClass += isDarkMode ? ' bg-[#b4ff39]/10 text-[#b4ff39]' : ' bg-[#b4ff39]/20 text-[#141414]';
+                      }
+                      
+                      return (
+                        <td key={j} className={tdClass}>{row[j] !== undefined ? String(row[j]).slice(0,35) : ''}</td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -692,18 +796,58 @@ export default function SmartUploadWizard() {
 
             {isFormatDualMatrix && (
                <>
-                 {renderTablePreview(parsedData.counts, 'Counts Matrix')}
-                 {renderTablePreview(parsedData.percentages, 'Secondary Matrix')}
+                 {renderTablePreview(parsedData.counts, 'Counts Matrix', true)}
+                 {renderTablePreview(parsedData.percentages, 'Secondary Matrix', true)}
                </>
             )}
 
             {isFormatMatrix && (
-               renderTablePreview(parsedData.matrix, 'Adjacency/Incidence Matrix')
+               renderTablePreview(parsedData.matrix, 'Adjacency/Incidence Matrix', true)
             )}
             
-            {isFormatAdjList && renderTablePreview(parsedData.adjList, 'Adjacency List')}
+            {isFormatAdjList && parsedData.adjList && (
+               <div className="space-y-6">
+                 {renderTablePreview(parsedData.adjList, 'Adjacency List', true)}
+                 <div className={`grid grid-cols-2 lg:grid-cols-4 gap-4 p-4 border mb-6 ${isDarkMode ? 'border-[#333] bg-[#222]/30' : 'border-[#141414] bg-[#E4E3E0]/30'}`}>
+                   {renderDropdown('Source Col', sourceCol, setSourceCol, parsedData.adjList[0] || [])}
+                   <div>
+                      <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Data Start Row Index</label>
+                      <input type="number" value={dataStartRow} onChange={e => setDataStartRow(e.target.value === '' ? '' : parseInt(e.target.value))} min={1} className={`w-full border px-3 py-2 font-mono text-[10px] ${isDarkMode ? 'border-[#333] bg-[#1a1a1a] text-[#E4E3E0]' : 'border-[#141414] bg-white text-[#141414]'}`} />
+                   </div>
+                   <div>
+                      <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Data Start Col Index</label>
+                      <input type="number" value={dataStartCol} onChange={e => setDataStartCol(e.target.value === '' ? '' : parseInt(e.target.value))} min={1} className={`w-full border px-3 py-2 font-mono text-[10px] ${isDarkMode ? 'border-[#333] bg-[#1a1a1a] text-[#E4E3E0]' : 'border-[#141414] bg-white text-[#141414]'}`} />
+                   </div>
+                 </div>
+               </div>
+            )}
 
-            {(isFormatMatrix || isFormatDualMatrix || isFormatAdjList) && (
+            {format === 'Standard JSON' && parsedData.jsonEdges && (
+               <div className="space-y-6">
+                 {renderTablePreview(parsedData.jsonEdges, 'JSON Edges Dataset')}
+                 <div className={`grid grid-cols-2 lg:grid-cols-4 gap-4 p-4 border mb-6 ${isDarkMode ? 'border-[#333] bg-[#222]/30' : 'border-[#141414] bg-[#E4E3E0]/30'}`}>
+                   {renderDropdown('Source Property', sourceCol, setSourceCol, parsedData.jsonEdges[0] || [])}
+                   {renderDropdown('Target Property', targetCol, setTargetCol, parsedData.jsonEdges[0] || [])}
+                   {renderDropdown('Weight Property', weightRawCol, setWeightRawCol, parsedData.jsonEdges[0] || [])}
+                   {renderDropdown('Weight (Sec) Property', weightSecCol, setWeightSecCol, parsedData.jsonEdges[0] || [])}
+                 </div>
+               </div>
+            )}
+            
+            {format === 'Standard JSON' && parsedData.jsonNodes && (
+               <div className="space-y-6 mt-6">
+                 {renderTablePreview(parsedData.jsonNodes, 'JSON Nodes Dataset')}
+                 <div className={`grid grid-cols-2 lg:grid-cols-5 gap-4 p-4 border mb-6 ${isDarkMode ? 'border-[#333] bg-[#222]/30' : 'border-[#141414] bg-[#E4E3E0]/30'}`}>
+                   {renderDropdown('Node ID Property', nodeIdCol, setNodeIdCol, parsedData.jsonNodes[0] || [])}
+                   {renderDropdown('Label Property', nodeLabelCol, setNodeLabelCol, parsedData.jsonNodes[0] || [])}
+                   {renderDropdown('Type Property', nodeTypeCol, setNodeTypeCol, parsedData.jsonNodes[0] || [])}
+                   {renderDropdown('Community Property', nodeCommunityCol, setNodeCommunityCol, parsedData.jsonNodes[0] || [])}
+                   {renderDropdown('Size/Abundance Property', nodeAbundCol, setNodeAbundCol, parsedData.jsonNodes[0] || [])}
+                 </div>
+               </div>
+            )}
+
+            {(isFormatMatrix || isFormatDualMatrix) && (
                <div className={`grid grid-cols-2 lg:grid-cols-4 gap-4 p-4 border mb-6 mt-4 ${isDarkMode ? 'border-[#333] bg-[#222]/30' : 'border-[#141414] bg-[#E4E3E0]/30'}`}>
                  <div>
                     <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Row Headers Col Index</label>
@@ -736,7 +880,7 @@ export default function SmartUploadWizard() {
             <div className={`mt-8 flex justify-between border-t pt-6 ${isDarkMode ? 'border-[#333]' : 'border-[#141414]'}`}>
               <button onClick={() => setStep(4)} className={`border border-transparent text-[10px] font-bold px-6 py-3 uppercase tracking-widest transition-all ${isDarkMode ? 'text-[#E4E3E0] hover:border-[#E4E3E0]' : 'text-[#141414] hover:border-[#141414]'}`}>Back</button>
               <button 
-                disabled={(isFormatMatrix || isFormatDualMatrix || isFormatAdjList) ? (rowHeadersCol === '' || colHeadersRow === '' || dataStartRow === '' || dataStartCol === '') : false}
+                disabled={(isFormatMatrix || isFormatDualMatrix) ? (rowHeadersCol === '' || colHeadersRow === '' || dataStartRow === '' || dataStartCol === '') : (isFormatAdjList ? (dataStartRow === '' || dataStartCol === '') : false)}
                 onClick={handleFinalize} 
                 className={`text-[10px] px-8 py-3 font-bold uppercase tracking-widest hover:invert transition-all border disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:invert-0 ${isDarkMode ? 'bg-[#E4E3E0] text-[#141414] border-[#E4E3E0]' : 'bg-[#141414] text-[#b4ff39] border-[#141414]'}`}>
                 Confirm & Plot Network
