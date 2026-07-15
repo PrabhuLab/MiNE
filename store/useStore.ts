@@ -16,22 +16,32 @@ export interface RawEdge {
   weight_secondary: number;
 }
 
+export interface WeightFilter {
+  id: string;
+  type: 'weight_raw' | 'weight_secondary';
+  cutoff: number;
+}
+
 export interface WorkspaceFilters {
-  relCutoff: number;
-  absCutoff: number;
+  weightFilters: WeightFilter[];
+  searchEdges: boolean;
   removedNodes: string;
   recalculateCommunities: boolean;
   resolution: number;
   nodeSize: number;
-  edgeWeight: number;
+  nodeSizeBase: string;
+  nodeColorBase: string;
   nodeOpacity: number;
+  edgeWeight: number;
+  edgeWeightBase: string;
+  edgeColorBase: string;
   edgeOpacity: number;
+  edgeOpacityBase: string;
   forceStrength: number;
   louvainSeed: number;
+  liveUpdate: boolean;
   livePhysics: boolean;
   isFrozen: boolean;
-  edgeWeightBase: string;
-  nodeSizeBase: string;
 }
 
 interface AppState {
@@ -48,17 +58,29 @@ interface AppState {
 
   communityMap: Record<string, string>; // nodeId -> color
   setCommunityMap: (map: Record<string, string>) => void;
+  activeCommunityAlgorithm: string;
+  setActiveCommunityAlgorithm: (alg: string) => void;
+  communitiesData: Record<string, Record<string, number | string>>; // alg -> { nodeId -> community }
+  setCommunitiesData: (data: Record<string, Record<string, number | string>>) => void;
+  calculatedMetrics: Record<string, boolean>; // e.g., { degree: true, pagerank: true }
+  setCalculatedMetrics: (metrics: Record<string, boolean>) => void;
+  nodeMetricsData: any[];
+  setNodeMetricsData: (data: any[]) => void;
   
   selectedElement: string | null;
   setSelectedElement: (val: string | null) => void;
   searchQuery: string;
   setSearchQuery: (val: string) => void;
+  projectName: string;
+  setProjectName: (val: string) => void;
   clearStore: () => void;
 }
 
 export const useStore = create<AppState>((set) => ({
   isDarkMode: false,
   setIsDarkMode: (val) => set({ isDarkMode: val }),
+  projectName: 'NEW_PROJECT_NAME',
+  setProjectName: (val) => set({ projectName: val }),
   directed: false,
   bipartite: false,
   rawNodes: [],
@@ -71,50 +93,67 @@ export const useStore = create<AppState>((set) => ({
   setSearchQuery: (val) => set({ searchQuery: val }),
 
   filters: {
-    relCutoff: 0,
-    absCutoff: 0,
+    weightFilters: [{ id: 'default-1', type: 'weight_raw', cutoff: 0 }],
+    searchEdges: false,
     removedNodes: "",
     recalculateCommunities: true,
     resolution: 1.0,
     nodeSize: 3,
-    edgeWeight: 1.0,
+    nodeSizeBase: 'abundance',
+    nodeColorBase: 'community',
     nodeOpacity: 1.0,
+    edgeWeight: 1.0,
+    edgeWeightBase: 'weight_raw',
+    edgeColorBase: 'uniform',
     edgeOpacity: 0.8,
+    edgeOpacityBase: 'uniform',
     forceStrength: -100,
     louvainSeed: 42,
+    liveUpdate: true,
     livePhysics: false,
     isFrozen: false,
-    edgeWeightBase: 'weight_raw',
-    nodeSizeBase: 'abundance',
   },
   setFilter: (key, value) => 
     set((state) => ({ filters: { ...state.filters, [key]: value } })),
 
   communityMap: {},
   setCommunityMap: (map) => set({ communityMap: map }),
+  activeCommunityAlgorithm: 'louvain',
+  setActiveCommunityAlgorithm: (alg) => set({ activeCommunityAlgorithm: alg }),
+  communitiesData: {},
+  setCommunitiesData: (data) => set({ communitiesData: data }),
+  calculatedMetrics: {},
+  setCalculatedMetrics: (metrics) => set({ calculatedMetrics: metrics }),
+  nodeMetricsData: [],
+  setNodeMetricsData: (data) => set({ nodeMetricsData: data }),
   
   clearStore: () => set({
+    projectName: 'NEW_PROJECT_NAME',
     directed: false,
     bipartite: false,
     rawNodes: [],
     rawEdges: [],
     communityMap: {},
     filters: {
-      relCutoff: 0,
-      absCutoff: 0,
+      weightFilters: [{ id: 'default-1', type: 'weight_raw', cutoff: 0 }],
+      searchEdges: false,
       removedNodes: "",
       recalculateCommunities: true,
       resolution: 1.0,
       nodeSize: 3,
-      edgeWeight: 1.0,
+      nodeSizeBase: 'abundance',
+      nodeColorBase: 'community',
       nodeOpacity: 1.0,
+      edgeWeight: 1.0,
+      edgeWeightBase: 'weight_raw',
+      edgeColorBase: 'uniform',
       edgeOpacity: 0.8,
+      edgeOpacityBase: 'uniform',
       forceStrength: -100,
       louvainSeed: 42,
+      liveUpdate: true,
       livePhysics: false,
       isFrozen: false,
-      edgeWeightBase: 'weight_raw',
-      nodeSizeBase: 'abundance',
     }
   })
 }));

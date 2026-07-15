@@ -10,6 +10,7 @@ const Papa = (PapaPkg as any).default || PapaPkg;
 export default function SmartUploadWizard() {
   const router = useRouter();
   const setRawData = useStore(state => state.setRawData);
+  const clearStore = useStore(state => state.clearStore);
   const isDarkMode = useStore(state => state.isDarkMode);
   
   // Cascade UI State
@@ -459,6 +460,7 @@ export default function SmartUploadWizard() {
   }, [parsedData, format, step, sourceCol, targetCol, weightRawCol, weightSecCol, nodeIdCol, nodeLabelCol, nodeTypeCol, nodeCommunityCol, nodeAbundCol, rowHeadersCol, colHeadersRow, dataStartRow, dataStartCol, isDirected, topology, isFormatDualMatrix, isFormatEdgeList, isFormatMatrix, isFormatAdjList]);
 
   const handleFinalize = () => {
+    clearStore();
     setRawData(previewGraph.nodes, previewGraph.edges, isDirected, topology === 'Bipartite');
     router.push('/workspace');
   };
@@ -548,7 +550,9 @@ export default function SmartUploadWizard() {
       <div className={`p-6 transition-colors ${
         isDarkMode ? 'border-b border-[#333] bg-[#000]' : 'border-b border-[#141414] bg-[#E4E3E0]'
       }`}>
-        <h2 className="text-xl font-black tracking-tighter uppercase mb-2">Smart Upload Wizard</h2>
+        <div className="flex justify-between items-center mb-2">
+          <h2 className="text-xl font-black tracking-tighter uppercase">Smart Upload Wizard</h2>
+        </div>
         
         {/* Breadcrumb Header */}
         <div className="flex gap-2 text-[10px] font-mono font-bold uppercase tracking-widest overflow-x-auto pb-2">

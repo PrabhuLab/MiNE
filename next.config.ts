@@ -19,7 +19,7 @@ const nextConfig: NextConfig = {
       },
     ],
   },
-  output: 'standalone',
+  
   transpilePackages: ['motion'],
   webpack: (config, {dev}) => {
     // Disable file watching to prevent flickering when DISABLE_HMR is set

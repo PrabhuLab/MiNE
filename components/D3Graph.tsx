@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import * as d3 from 'd3';
 import { RawNode, RawEdge } from '@/store/useStore';
 import { ChevronUp, ChevronDown } from 'lucide-react';
@@ -10,12 +10,16 @@ interface D3GraphProps {
   nodes: RawNode[];
   edges: RawEdge[];
   communityMap: Record<string, string>;
+  networkMetrics?: any[];
   nodeSizeMult: number;
+  nodeSizeBase?: string;
+  nodeColorBase?: string;
   edgeWeightMult?: number;
+  edgeWeightBase?: string;
+  edgeColorBase?: string;
   nodeOpacity?: number;
   edgeOpacity?: number;
-  nodeSizeBase?: string;
-  edgeWeightBase?: string;
+  edgeOpacityBase?: string;
   forceStrength: number;
   directed: boolean;
   bipartite: boolean;
@@ -30,12 +34,14 @@ interface D3GraphProps {
   selectedElement?: string | null;
 }
 
-export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edgeWeightMult = 1, nodeOpacity = 1, edgeOpacity = 0.8, nodeSizeBase = 'abundance', edgeWeightBase = 'weight_raw', forceStrength, directed, bipartite, livePhysics, isFrozen, isDarkMode, refreshKey, onRefresh, onElementDoubleClick, onClearSelection, searchQuery = "", selectedElement = null }: D3GraphProps) {
+export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [], nodeSizeMult, nodeSizeBase = 'abundance', nodeColorBase = 'community', edgeWeightMult = 1, edgeWeightBase = 'weight_raw', edgeColorBase = 'uniform', nodeOpacity = 1, edgeOpacity = 0.8, edgeOpacityBase = 'uniform', forceStrength, directed, bipartite, livePhysics, isFrozen, isDarkMode, refreshKey, onRefresh, onElementDoubleClick, onClearSelection, searchQuery = "", selectedElement = null }: D3GraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const simulationRef = useRef<d3.Simulation<any, any> | null>(null);
   const zoomBehaviorRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   
+  
+
   const runtimeRef = useRef({ livePhysics, isFrozen });
   useEffect(() => {
     runtimeRef.current = { livePhysics, isFrozen };
@@ -157,7 +163,9 @@ export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edge
     )}
   ];
   const elementLegendIds = elementLegendItems.map(item => item.id);
-  const communityLabels = Array.from(new Set(Object.values(communityMap))) as string[];
+  const communityLabels = useMemo(() => (Array.from(new Set(Object.values(communityMap))) as string[]).sort((a, b) => 
+    a.toString().localeCompare(b.toString(), undefined, { numeric: true, sensitivity: 'base' })
+  ), [communityMap]);
   const communityLegendIds = communityLabels.map(c => `community:${c}`);
   
   const communityColorMap = useMemo(() => {
@@ -167,6 +175,43 @@ export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edge
     });
     return map;
   }, [communityLabels]);
+
+  const typeColorScale = useMemo(() => d3.scaleOrdinal(d3.schemeCategory10), []);
+
+  const maxEigen = useMemo(() => d3.max(networkMetrics, (d: any) => parseFloat(d.eigenvector)) || 1, [networkMetrics]);
+  const minEigen = useMemo(() => d3.min(networkMetrics, (d: any) => parseFloat(d.eigenvector)) || 0, [networkMetrics]);
+  const maxPageRank = useMemo(() => d3.max(networkMetrics, (d: any) => parseFloat(d.pagerank)) || 1, [networkMetrics]);
+  const minPageRank = useMemo(() => d3.min(networkMetrics, (d: any) => parseFloat(d.pagerank)) || 0, [networkMetrics]);
+
+  const eigenColorScale = useMemo(() => d3.scaleSequential(isDarkMode ? d3.interpolatePurples : d3.interpolatePurples).domain([minEigen, maxEigen]), [isDarkMode, minEigen, maxEigen]);
+  const prColorScale = useMemo(() => d3.scaleSequential(isDarkMode ? d3.interpolateGreens : d3.interpolateGreens).domain([minPageRank, maxPageRank]), [isDarkMode, minPageRank, maxPageRank]);
+
+  const getNodeColor = useCallback((d: any) => {
+    const net = networkMetrics.find(m => m.id === d.id);
+    const defaultNodeColor = isDarkMode ? '#bbbbbb' : '#141414';
+    if (nodeColorBase === 'community') return communityColorMap[communityMap[d.id]] || defaultNodeColor;
+    if (nodeColorBase === 'type' && d.type) return typeColorScale(d.type);
+    if (nodeColorBase === 'eigenvector' && net?.eigenvector !== undefined) return eigenColorScale(parseFloat(net.eigenvector));
+    if (nodeColorBase === 'pagerank' && net?.pagerank !== undefined) return prColorScale(parseFloat(net.pagerank));
+    return defaultNodeColor;
+  }, [isDarkMode, nodeColorBase, communityColorMap, communityMap, typeColorScale, eigenColorScale, prColorScale, networkMetrics]);
+
+  const maxRaw = useMemo(() => d3.max(edges, (d: any) => Number(d.weight_raw) || 0) || 1, [edges]);
+  const maxSec = useMemo(() => d3.max(edges, (d: any) => Number(d.weight_secondary) || 0) || 1, [edges]);
+  const rawColorScale = useMemo(() => d3.scaleSequential(isDarkMode ? d3.interpolateGnBu : d3.interpolateBlues).domain([0, maxRaw]), [isDarkMode, maxRaw]);
+  const secColorScale = useMemo(() => d3.scaleSequential(isDarkMode ? d3.interpolateOrRd : d3.interpolateOranges).domain([0, maxSec]), [isDarkMode, maxSec]);
+
+  const getEdgeColor = useCallback((d: any) => {
+    if (edgeColorBase === 'weight_raw' && d.weight_raw !== undefined) return rawColorScale(Number(d.weight_raw));
+    if (edgeColorBase === 'weight_secondary' && d.weight_secondary !== undefined) return secColorScale(Number(d.weight_secondary));
+    return isDarkMode ? '#eeeeee' : '#141414';
+  }, [edgeColorBase, rawColorScale, secColorScale, isDarkMode]);
+
+  const getEdgeOpacity = useCallback((d: any) => {
+    if (edgeOpacityBase === 'weight_raw' && d.weight_raw !== undefined) return 0.1 + 0.9 * (Number(d.weight_raw) / maxRaw);
+    if (edgeOpacityBase === 'weight_secondary' && d.weight_secondary !== undefined) return 0.1 + 0.9 * (Number(d.weight_secondary) / maxSec);
+    return edgeOpacity;
+  }, [edgeOpacityBase, maxRaw, maxSec, edgeOpacity]);
 
   const handleZoomFit = () => {
     if (!svgRef.current || !zoomBehaviorRef.current || !simulationRef.current || !containerRef.current) return;
@@ -263,10 +308,13 @@ export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edge
     // Deep copy data for D3 mutation
     const graphNodes = nodes.map(d => {
       const gNode: any = { ...d };
+      const net = networkMetrics.find(m => m.id === d.id);
       
       let baseVal = 10;
       if (nodeSizeBase === 'abundance') baseVal = gNode.abundance || 10;
       else if (nodeSizeBase === 'degree') baseVal = (degreeMap[d.id] || 0) * 5;
+      else if (nodeSizeBase === 'eigenvector') baseVal = (parseFloat(net?.eigenvector || "0")) * 50;
+      else if (nodeSizeBase === 'pagerank') baseVal = (parseFloat(net?.pagerank || "0")) * 500;
       else if (nodeSizeBase === 'uniform') baseVal = 5;
 
       gNode.currentRadius = nodeSizeMult * Math.max(Math.log(baseVal + 2), 1) + 2;
@@ -280,7 +328,9 @@ export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edge
       return { 
         source: d.source, 
         target: d.target, 
-        weight: w 
+        weight: w,
+        weight_raw: d.weight_raw,
+        weight_secondary: d.weight_secondary
       };
     });
 
@@ -296,6 +346,11 @@ export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edge
     const maxWeight = d3.max(graphLinks, (d: void | any) => (d as any).weight) || 1;
     const strokeWidthScale = d3.scaleLinear().domain([0, maxWeight]).range([0.5, 4]);
 
+    
+                
+    
+    
+
     const simulation = d3.forceSimulation(graphNodes as d3.SimulationNodeDatum[])
       .force('link', d3.forceLink(graphLinks).id((d: any) => d.id).distance(30))
       .force('charge', d3.forceManyBody().strength(forceStrength))
@@ -306,17 +361,16 @@ export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edge
 
     // Draw lines
     const link = zoomGroup.append('g')
-      .attr('stroke', isDarkMode ? '#eeeeee' : '#141414')
-      .attr('stroke-opacity', 0.25)
       .attr('fill', 'none')
       .selectAll('path')
       .data(graphLinks)
       .join('path')
       .attr('class', 'graph-link')
       .style('cursor', 'pointer')
+      .attr('stroke', (d: any) => getEdgeColor(d))
       .attr('stroke-width', (d: any) => {
          d._defaultStrokeWidth = Math.min(strokeWidthScale(d.weight || 1), 4) * edgeWeightMult;
-         return Math.max(d._defaultStrokeWidth, 2); // Ensure it's thick enough to click easily
+         return `${Math.max(d._defaultStrokeWidth, 2)}px`;
       })
       .attr("marker-end", (directed && graphLinks.length < 500) ? "url(#arrowhead)" : null)
       .on("click", (e: any, d: any) => {
@@ -358,7 +412,7 @@ export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edge
           .attr('y', (d: any) => -d.currentRadius)
           .attr('width', (d: any) => d.currentRadius * 2)
           .attr('height', (d: any) => d.currentRadius * 2)
-          .attr('fill', (d: any) => communityColorMap[communityMap[d.id]] || defaultNodeColor)
+          .attr('fill', (d: any) => getNodeColor(d))
           .attr('stroke', isDarkMode ? '#222' : '#141414')
           .attr('stroke-width', 0.5)
           .style('cursor', 'pointer');
@@ -366,7 +420,7 @@ export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edge
         return selection.append('circle')
           .attr('class', 'node-shape')
           .attr('r', (d: any) => d.currentRadius)
-          .attr('fill', (d: any) => communityColorMap[communityMap[d.id]] || defaultNodeColor)
+          .attr('fill', (d: any) => getNodeColor(d))
           .attr('stroke', isDarkMode ? '#222' : '#141414')
           .attr('stroke-width', 0.5)
           .style('cursor', 'pointer');
@@ -538,7 +592,7 @@ export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edge
       .attr('stroke', isDarkMode ? '#eeeeee' : '#141414');
 
     svg.selectAll('.node-shape')
-      .attr('fill', (d: any) => communityColorMap[communityMap[d.id]] || defaultNodeColor)
+      .attr('fill', (d: any) => getNodeColor(d))
       .attr('stroke', isDarkMode ? '#222' : '#141414');
 
     svg.selectAll('.node-label')
@@ -547,7 +601,7 @@ export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edge
     svg.selectAll('.arrowhead-path')
       .attr("fill", isDarkMode ? "#eeeeee" : "#141414")
       .attr("opacity", isDarkMode ? 0.9 : 0.6);
-  }, [isDarkMode, communityMap, communityColorMap]);
+  }, [isDarkMode, communityMap, communityColorMap, getNodeColor]);
 
   // 4. Highlight Node Effect & Legend Visibility
   useEffect(() => {
@@ -610,50 +664,63 @@ export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edge
       if (hiddenItems.has('element:edges')) return 0;
       const srcId = typeof d.source === 'object' ? d.source.id : d.source;
       const tgtId = typeof d.target === 'object' ? d.target.id : d.target;
+      const baseOpacity = getEdgeOpacity(d);
 
       if (clickedNode) {
-        return (srcId === clickedNode.id || tgtId === clickedNode.id) ? edgeOpacity : edgeOpacity * 0.1;
+        return (srcId === clickedNode.id || tgtId === clickedNode.id) ? baseOpacity : baseOpacity * 0.1;
       }
       if (clickedEdge) {
         const cSrc = typeof clickedEdge.source === 'object' ? (clickedEdge.source as any).id : clickedEdge.source;
         const cTgt = typeof clickedEdge.target === 'object' ? (clickedEdge.target as any).id : clickedEdge.target;
-        return (srcId === cSrc && tgtId === cTgt) ? edgeOpacity : edgeOpacity * 0.1;
+        return (srcId === cSrc && tgtId === cTgt) ? baseOpacity : baseOpacity * 0.1;
       }
       if (selectedElement) {
-        if (`${srcId}-${tgtId}` === selectedElement || `${tgtId}-${srcId}` === selectedElement) return edgeOpacity;
-        if (srcId === selectedElement || tgtId === selectedElement) return edgeOpacity;
-        return edgeOpacity * 0.1;
+        if (`${srcId}-${tgtId}` === selectedElement || `${tgtId}-${srcId}` === selectedElement) return baseOpacity;
+        if (srcId === selectedElement || tgtId === selectedElement) return baseOpacity;
+        return baseOpacity * 0.1;
       }
       if (q) {
         const matches = String(srcId).toLowerCase().includes(q) || String(tgtId).toLowerCase().includes(q);
-        return matches ? edgeOpacity : edgeOpacity * 0.1;
+        return matches ? baseOpacity : baseOpacity * 0.1;
       }
-      return edgeOpacity;
+      return baseOpacity;
     }).style('display', (d: any) => {
       if (hiddenItems.has('element:edges')) return 'none';
       return '';
-    }).style('stroke-width', (d: any) => {
+    }).attr('stroke', (d: any) => getEdgeColor(d))
+      .style('stroke-width', (d: any) => {
+      let w = 1;
+      if (edgeWeightBase === 'weight_raw') w = d.weight_raw !== undefined ? Number(d.weight_raw) : 1;
+      else if (edgeWeightBase === 'weight_secondary') w = d.weight_secondary !== undefined ? Number(d.weight_secondary) : 1;
+      
+      const maxW = edgeWeightBase === 'weight_raw' ? maxRaw : (edgeWeightBase === 'weight_secondary' ? maxSec : 1);
+      const normalizedW = maxW > 0 ? (w / maxW) : 1;
+      
+      // Calculate dynamic stroke width similar to strokeWidthScale (0.5 to 4)
+      const currentStrokeWidth = Math.min(0.5 + (3.5 * normalizedW), 4) * edgeWeightMult;
+      const defaultStroke = Math.max(currentStrokeWidth, 2); // Ensure it's thick enough to click easily
+
       const srcId = typeof d.source === 'object' ? d.source.id : d.source;
       const tgtId = typeof d.target === 'object' ? d.target.id : d.target;
       if (clickedNode && (srcId === clickedNode.id || tgtId === clickedNode.id)) {
-        return `${Math.min((d._defaultStrokeWidth || 1) * 1.5, 6)}px`;
+        return `${Math.min(defaultStroke * 1.5, 6)}px`;
       }
       if (clickedEdge) {
         const cSrc = typeof clickedEdge.source === 'object' ? (clickedEdge.source as any).id : clickedEdge.source;
         const cTgt = typeof clickedEdge.target === 'object' ? (clickedEdge.target as any).id : clickedEdge.target;
         if (srcId === cSrc && tgtId === cTgt) {
-          return `${Math.min((d._defaultStrokeWidth || 1) * 1.5, 6)}px`;
+          return `${Math.min(defaultStroke * 1.5, 6)}px`;
         }
       }
       if (selectedElement) {
         if (`${srcId}-${tgtId}` === selectedElement || `${tgtId}-${srcId}` === selectedElement || srcId === selectedElement || tgtId === selectedElement) {
-          return `${Math.min((d._defaultStrokeWidth || 1) * 1.5, 6)}px`;
+          return `${Math.min(defaultStroke * 1.5, 6)}px`;
         }
       }
       if (q && (String(srcId).toLowerCase().includes(q) || String(tgtId).toLowerCase().includes(q))) {
-        return `${Math.min((d._defaultStrokeWidth || 1) * 1.5, 6)}px`;
+        return `${Math.min(defaultStroke * 1.5, 6)}px`;
       }
-      return null;
+      return `${defaultStroke}px`;
     }).attr('marker-end', (d: any) => {
       if (!directed) return null;
       const srcId = typeof d.source === 'object' ? d.source.id : d.source;
@@ -734,7 +801,7 @@ export default function D3Graph({ nodes, edges, communityMap, nodeSizeMult, edge
         tickDrawRef.current();
     }
 
-  }, [clickedNode, clickedEdge, selectedElement, hiddenItems, communityMap, nodes, bipartite, refreshKey, isDarkMode, directed, edges.length, nodeOpacity, edgeOpacity, searchQuery]);
+  }, [clickedNode, clickedEdge, selectedElement, hiddenItems, communityMap, nodes, bipartite, refreshKey, isDarkMode, directed, edges.length, nodeOpacity, edgeOpacity, searchQuery, getEdgeOpacity, getEdgeColor, edgeWeightBase, edgeWeightMult, maxRaw, maxSec]);
 
   return (
     <div ref={containerRef} className="w-full h-full relative cursor-crosshair">

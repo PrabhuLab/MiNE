@@ -3,10 +3,12 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 import { useStore } from '@/store/useStore';
+import { Sun, Moon } from 'lucide-react';
 
 export default function Header() {
   const pathname = usePathname();
-  const [projectName, setProjectName] = useState('ADJ_MATRIX_772_B');
+  const projectName = useStore(state => state.projectName);
+  const setProjectName = useStore(state => state.setProjectName);
   const isDarkMode = useStore(state => state.isDarkMode);
   const setIsDarkMode = useStore(state => state.setIsDarkMode);
 
@@ -26,7 +28,7 @@ export default function Header() {
           <span className="opacity-40">/</span>
           <Link 
             href="/workspace" 
-            className={`${pathname.startsWith('/workspace') ? 'underline underline-offset-4' : 'opacity-40 hover:opacity-100'}`}
+            className={`${pathname?.startsWith('/workspace') ? 'underline underline-offset-4' : 'opacity-40 hover:opacity-100'}`}
           >
             02 WORKSPACE
           </Link>
@@ -46,14 +48,10 @@ export default function Header() {
         
         <div 
           onClick={() => setIsDarkMode(!isDarkMode)}
-          className={`w-8 h-8 border flex items-center justify-center font-mono text-[10px] cursor-pointer transition-colors ${isDarkMode ? 'border-[#E4E3E0] hover:bg-[#E4E3E0] hover:text-[#141414]' : 'border-black hover:bg-[#141414] hover:text-[#E4E3E0]'}`}
-          title="Toggle Dark Mode"
+          className={`p-1.5 rounded-full hover:bg-black/10 dark:hover:bg-white/10 transition-colors cursor-pointer ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}
+          title="Toggle Theme"
         >
-          {isDarkMode ? 'LGT' : 'DRK'}
-        </div>
-
-        <div className={`w-8 h-8 border flex items-center justify-center font-mono text-[10px] cursor-pointer transition-colors ${isDarkMode ? 'border-[#E4E3E0] hover:bg-[#E4E3E0] hover:text-[#141414]' : 'border-black hover:bg-[#141414] hover:text-[#E4E3E0]'}`}>
-          USR
+          {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
         </div>
       </div>
     </header>

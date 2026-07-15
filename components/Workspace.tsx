@@ -17,13 +17,14 @@ const eigenvector = (typeof eigenvectorPkg === 'function') ? eigenvectorPkg : (e
 const seedrandom = (typeof seedrandomPkg === 'function') ? seedrandomPkg : (seedrandomPkg as any).default || seedrandomPkg;
 import { normalize_communities, COMMUNITY_COLORS, getCommunityColor } from '@/lib/communityUtils';
 import { ChevronLeft, ChevronRight, Sun, Moon, Download } from 'lucide-react';
-import { exportSvg, exportImage, exportCsv, exportJson, exportCsvZip, exportGraphML } from '@/lib/exportUtils';
+import { exportSvg, exportImage, exportCsv, exportJson, exportCsvZip, exportGraphML, exportWorkspaceSettings } from '@/lib/exportUtils';
 
 
 // Dynamically import D3Graph so it only runs on the client due to canvas/SVG dependencies
 const D3Graph = dynamic(() => import('./D3Graph'), { ssr: false });
 
 const SyncInput = ({ value, onChange, step, className }: any) => {
+  const liveUpdate = useStore(state => state.filters.liveUpdate);
   const [localVal, setLocalVal] = useState(value);
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => setLocalVal(value), [value]);
@@ -33,7 +34,10 @@ const SyncInput = ({ value, onChange, step, className }: any) => {
       type="number"
       className={`text-inherit ${className}`}
       value={localVal}
-      onChange={e => setLocalVal(e.target.value)}
+      onChange={e => {
+        setLocalVal(e.target.value);
+        if (liveUpdate) onChange(Number(e.target.value));
+      }}
       onBlur={() => onChange(Number(localVal))}
       onKeyDown={e => e.key === 'Enter' && onChange(Number(localVal))}
       step={step}
@@ -42,9 +46,15 @@ const SyncInput = ({ value, onChange, step, className }: any) => {
 };
 
 const SyncTextInput = ({ value, onChange, className, placeholder, list, options }: any) => {
+  const liveUpdate = useStore(state => state.filters.liveUpdate);
   const [localVal, setLocalVal] = useState(value);
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => setLocalVal(value), [value]);
+
+  // Support comma-separated autocomplete
+  const tokens = typeof localVal === 'string' ? localVal.split(',') : [];
+  const lastToken = tokens.length > 0 ? tokens[tokens.length - 1].trim() : '';
+  const prefix = tokens.length > 1 ? tokens.slice(0, -1).join(', ') + ', ' : '';
 
   return (
     <>
@@ -52,19 +62,22 @@ const SyncTextInput = ({ value, onChange, className, placeholder, list, options 
         type="text"
         className={`text-inherit ${className}`}
         value={localVal}
-        onChange={e => setLocalVal(e.target.value)}
+        onChange={e => {
+          setLocalVal(e.target.value);
+          if (liveUpdate) onChange(e.target.value);
+        }}
         onBlur={() => onChange(localVal)}
         onKeyDown={e => e.key === 'Enter' && onChange(localVal)}
         placeholder={placeholder}
         list={list}
       />
-      {list && options && localVal && localVal.length >= 1 && (
+      {list && options && lastToken.length >= 1 && (
         <datalist id={list}>
           {options
-            .filter((opt: any) => String(opt.value).toLowerCase().includes(localVal.toLowerCase()) || String(opt.label).toLowerCase().includes(localVal.toLowerCase()))
+            .filter((opt: any) => String(opt.value).toLowerCase().includes(lastToken.toLowerCase()) || String(opt.label).toLowerCase().includes(lastToken.toLowerCase()))
             .slice(0, 15)
             .map((opt: any, idx: number) => (
-              <option key={idx} value={opt.value}>{opt.label}</option>
+              <option key={idx} value={prefix + opt.value}>{opt.label}</option>
             ))}
         </datalist>
       )}
@@ -87,13 +100,18 @@ const SegmentedToggle = ({ checked, onChange, isDarkMode }: any) => {
 };
 
 const CustomSlider = ({ min, max, step, value, onChange, isDarkMode }: any) => {
+  const liveUpdate = useStore(state => state.filters.liveUpdate);
   const [localVal, setLocalVal] = useState(value);
   
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => setLocalVal(value), [value]);
 
   const handleChange = (e: any) => {
-    setLocalVal(Number(e.target.value));
+    const val = Number(e.target.value);
+    setLocalVal(val);
+    if (liveUpdate) {
+      onChange(val);
+    }
   };
 
   const handleRelease = () => {
@@ -123,7 +141,19 @@ const CustomSlider = ({ min, max, step, value, onChange, isDarkMode }: any) => {
 };
 
 export default function Workspace() {
-  const { rawNodes, rawEdges, filters, setFilter, communityMap, setCommunityMap, directed, bipartite, isDarkMode, setIsDarkMode, searchQuery, setSearchQuery, selectedElement, setSelectedElement } = useStore();
+  const { rawNodes, rawEdges, filters, setFilter, communityMap, setCommunityMap, directed, bipartite, isDarkMode, setIsDarkMode, searchQuery, setSearchQuery, selectedElement, setSelectedElement, projectName } = useStore();
+  
+  const hasType = useMemo(() => rawNodes.some(n => !!n.type), [rawNodes]);
+  const hasAbundance = useMemo(() => rawNodes.some(n => n.abundance !== undefined && n.abundance !== null), [rawNodes]);
+  const hasSecondaryWeight = useMemo(() => rawEdges.some(e => e.weight_secondary !== undefined && e.weight_secondary !== null), [rawEdges]);
+  
+  useEffect(() => {
+    if (!hasType && filters.nodeColorBase === 'type') setFilter('nodeColorBase', 'community');
+    if (!hasAbundance && filters.nodeSizeBase === 'abundance') setFilter('nodeSizeBase', 'degree');
+    if (!hasSecondaryWeight && filters.edgeColorBase === 'weight_secondary') setFilter('edgeColorBase', 'uniform');
+    if (!hasSecondaryWeight && filters.edgeWeightBase === 'weight_secondary') setFilter('edgeWeightBase', 'weight_raw');
+    if (!hasSecondaryWeight && filters.edgeOpacityBase === 'weight_secondary') setFilter('edgeOpacityBase', 'uniform');
+  }, [hasType, hasAbundance, hasSecondaryWeight, filters.nodeColorBase, filters.nodeSizeBase, filters.edgeColorBase, filters.edgeWeightBase, filters.edgeOpacityBase, setFilter]);
   
   const [refreshKey, setRefreshKey] = useState(0);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -132,8 +162,44 @@ export default function Workspace() {
   const [modularity, setModularity] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<"graph" | "data">("graph");
   const [dataTab, setDataTab] = useState<"nodes" | "edges">("nodes");
+  const [activeControlTab, setActiveControlTab] = useState<"nodes" | "edges">("nodes");
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [sortConfig, setSortConfig] = useState<{ key: string, direction: "asc" | "desc" } | null>(null);
+
+  const [appliedFilters, setAppliedFilters] = useState(filters);
+  useEffect(() => {
+    if (filters.liveUpdate) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setAppliedFilters(filters);
+    }
+  }, [filters, filters.liveUpdate]);
+
+  const handleImportWorkspace = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const json = JSON.parse(event.target?.result as string);
+        if (json.type !== 'workspace_state') {
+          throw new Error('Invalid workspace file.');
+        }
+        
+        useStore.setState({
+          projectName: json.projectName || 'NEW_PROJECT_NAME',
+          directed: !!json.directed,
+          bipartite: !!json.bipartite,
+          filters: json.filters,
+          rawNodes: json.rawNodes || [],
+          rawEdges: json.rawEdges || []
+        });
+      } catch (err: any) {
+        alert('Failed to import workspace: ' + err.message);
+      }
+    };
+    reader.readAsText(file);
+  };
 
   const handleElementDoubleClick = (id: string, type: "node" | "edge") => {
     setSelectedElement(id);
@@ -162,18 +228,23 @@ export default function Workspace() {
   // Compute Active Network
   const { validNodes, validEdges } = useMemo(() => {
     const removedSet = new Set(
-      filters.removedNodes.split(',')
+      appliedFilters.removedNodes.split(',')
         .map(s => s.trim())
         .filter(Boolean)
     );
 
-    const filteredEdges = rawEdges.filter(e => 
-      e.weight_secondary >= filters.relCutoff &&
-      e.weight_raw >= filters.absCutoff &&
-      !removedSet.has(e.source) &&
-      !removedSet.has(e.target)
-      // in graphology, we might want to also avoid adding edges if source==target, but parsed already prevents it
-    );
+    const filteredEdges = rawEdges.filter(e => {
+      // Check all weight filters
+      const passesWeightFilters = appliedFilters.weightFilters.every(filter => {
+        const val = e[filter.type];
+        if (val === undefined || val === null) return true; // If edge doesn't have this weight, don't filter it out
+        return val >= filter.cutoff;
+      });
+
+      return passesWeightFilters &&
+        !removedSet.has(e.source) &&
+        !removedSet.has(e.target);
+    });
 
     const nodesWithEdges = new Set<string>();
     filteredEdges.forEach(e => {
@@ -189,7 +260,7 @@ export default function Workspace() {
     const strictlyValidEdges = filteredEdges.filter(e => validNodeIds.has(e.source) && validNodeIds.has(e.target));
 
     return { validNodes: filteredNodes, validEdges: strictlyValidEdges };
-  }, [rawNodes, rawEdges, filters.relCutoff, filters.absCutoff, filters.removedNodes]);
+  }, [rawNodes, rawEdges, appliedFilters.weightFilters, appliedFilters.removedNodes]);
 
   // Compute Communities and Metrics
   useEffect(() => {
@@ -213,10 +284,10 @@ export default function Workspace() {
       let newCommunityMap: Record<string, any> = {};
       let modularityVal = null;
 
-      if (filters.recalculateCommunities) {
+      if (appliedFilters.recalculateCommunities) {
         const options = { 
-          rng: seedrandom(filters.louvainSeed || 42),
-          resolution: filters.resolution || 1.0, 
+          rng: seedrandom(appliedFilters.louvainSeed || 42),
+          resolution: appliedFilters.resolution || 1.0, 
           getEdgeWeight: "weight",
           fastLocalMoves: true
         };
@@ -342,7 +413,7 @@ export default function Workspace() {
     } catch (err) {
       console.warn("Community calculation skipped/failed:", err);
     }
-  }, [validNodes, validEdges, filters.recalculateCommunities, filters.resolution, filters.edgeWeightBase, directed, setCommunityMap, filters.louvainSeed]);
+  }, [validNodes, validEdges, appliedFilters.recalculateCommunities, appliedFilters.resolution, appliedFilters.edgeWeightBase, directed, setCommunityMap, appliedFilters.louvainSeed]);
 
   const allCommunityLabels = useMemo(() => Array.from(new Set(Object.values(communityMap))) as string[], [communityMap]);
 
@@ -448,19 +519,47 @@ export default function Workspace() {
     setShowExportMenu(false);
     if (activeTab === "graph") {
       const svgElement = document.getElementById('network-graph-svg') as SVGSVGElement | null;
-      if (format === 'svg') exportSvg(svgElement, 'network.svg');
-      else if (format === 'png') exportImage(svgElement, 'png', 'network.png', isDarkMode);
-      else if (format === 'jpeg') exportImage(svgElement, 'jpeg', 'network.jpg', isDarkMode);
+      if (format === 'svg') exportSvg(svgElement, `${projectName}.svg`);
+      else if (format === 'png') exportImage(svgElement, 'png', `${projectName}.png`, isDarkMode);
+      else if (format === 'jpeg') exportImage(svgElement, 'jpeg', `${projectName}.jpg`, isDarkMode);
       else if (format === 'json') {
-        exportJson({ nodes: validNodes, edges: validEdges }, 'network.json');
+        exportJson({ nodes: validNodes, edges: validEdges }, `${projectName}.json`);
       } else if (format === 'csvzip') {
-        exportCsvZip(validNodes, validEdges, 'network_data.zip');
+        exportCsvZip(validNodes, validEdges, `${projectName}_data.zip`);
       } else if (format === 'graphml') {
-        exportGraphML(validNodes, validEdges, directed, 'network.graphml');
+        exportGraphML(validNodes, validEdges, directed, `${projectName}.graphml`);
+      } else if (format === 'settings') {
+        const workspaceState = {
+          type: 'workspace_state',
+          projectName,
+          directed,
+          bipartite,
+          isDarkMode,
+          filters,
+          rawNodes,
+          rawEdges
+        };
+        exportWorkspaceSettings(workspaceState, `${projectName}_workspace.json`);
       }
     } else {
       if (format === 'csv') {
-        exportCsv(tableData, 'table_data.csv');
+        if (dataTab === 'nodes') {
+          const flatNodes = tableData.map(d => ({
+            id: d.id, name: d.name, label: d.label, type: d.type, abundance: d.abundance, community: d.comm,
+            degree: d.net?.degree, inDegree: d.net?.inDegree, outDegree: d.net?.outDegree,
+            eigenvector: d.net?.eigenvector, pagerank: d.net?.pagerank, deltaQ: d.mod?.deltaQ
+          }));
+          exportCsv(flatNodes, `${projectName}_nodes.csv`);
+        } else {
+          exportCsv(tableDataEdges, `${projectName}_edges.csv`);
+        }
+      } else if (format === 'csvzip_table') {
+        const flatNodes = tableData.map(d => ({
+          id: d.id, name: d.name, label: d.label, type: d.type, abundance: d.abundance, community: d.comm,
+          degree: d.net?.degree, inDegree: d.net?.inDegree, outDegree: d.net?.outDegree,
+          eigenvector: d.net?.eigenvector, pagerank: d.net?.pagerank, deltaQ: d.mod?.deltaQ
+        }));
+        exportCsvZip(flatNodes, tableDataEdges, `${projectName}_table_data.zip`);
       }
     }
   };
@@ -510,6 +609,10 @@ export default function Workspace() {
           <div className="flex items-center justify-between">
             <h2 className="text-xs font-bold uppercase tracking-widest">Controls</h2>
             <div className="flex items-center space-x-2">
+              <label className={`p-1.5 rounded-full hover:bg-black/10 dark:hover:bg-white/10 transition-colors cursor-pointer ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`} title="Import Workspace">
+                <Download size={16} className="rotate-180" />
+                <input type="file" accept=".json" className="hidden" onChange={handleImportWorkspace} />
+              </label>
               <button 
                 onClick={() => setIsDarkMode(!isDarkMode)}
                 className={`p-1.5 rounded-full hover:bg-black/10 dark:hover:bg-white/10 transition-colors ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}
@@ -528,16 +631,26 @@ export default function Workspace() {
           </div>
 
           <div>
-            <h3 className={`text-[10px] font-bold uppercase tracking-widest mb-4 opacity-70 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Search & Select</h3>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className={`text-[10px] font-bold uppercase tracking-widest opacity-70 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Search & Select</h3>
+              <label className="flex items-center space-x-2 text-[10px] font-bold uppercase tracking-widest cursor-pointer">
+                <span className={isDarkMode ? 'text-[#888]' : 'text-[#666]'}>Edges</span>
+                <SegmentedToggle 
+                   checked={filters.searchEdges}
+                   onChange={(v: boolean) => setFilter('searchEdges', v)}
+                   isDarkMode={isDarkMode}
+                />
+              </label>
+            </div>
             <div className="group mb-6">
                <input 
                  type="text"
-                 placeholder="Search nodes/edges..."
+                 placeholder={filters.searchEdges ? "Search nodes/edges..." : "Search nodes..."}
                  value={searchQuery}
                  onChange={(e) => {
                    const val = e.target.value;
                    setSearchQuery(val);
-                   if (val && (rawNodes.some(n => String(n.id) === val) || rawEdges.some(edge => `${edge.source}-${edge.target}` === val))) {
+                   if (val && (rawNodes.some(n => String(n.id) === val) || (filters.searchEdges && rawEdges.some(edge => `${edge.source}-${edge.target}` === val)))) {
                      setSelectedElement(val);
                    }
                  }}
@@ -552,7 +665,7 @@ export default function Workspace() {
                      .map(node => (
                      <option key={`search-node-${node.id}`} value={node.id}>{node.label || node.name || node.id}</option>
                    ))}
-                   {rawEdges
+                   {filters.searchEdges && rawEdges
                      .filter(e => `${e.source}-${e.target}`.toLowerCase().includes(searchQuery.toLowerCase()))
                      .slice(0, 15)
                      .map((edge, idx) => (
@@ -561,72 +674,7 @@ export default function Workspace() {
                  </datalist>
                )}
             </div>
-          </div>
-
-          <div>
-            <h3 className={`text-[10px] font-bold uppercase tracking-widest mb-4 opacity-70 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Filter Logic Layer</h3>
-          
-          <div className="space-y-6">
-            {/* Filter: Relative Weight Cutoff */}
-            <div className="group">
-              <label className={`flex items-center justify-between text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
-                <span>Edge Cutoff by Relative</span>
-                <SyncInput 
-                  className={`w-14 bg-transparent border-b text-right font-mono outline-none ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0]' : 'border-[#ccc] focus:border-[#141414] text-[#141414]'}`}
-                  value={filters.relCutoff}
-                  onChange={(v: number) => setFilter('relCutoff', v)}
-                  step={maxRelWeight <= 1.0 ? 0.01 : 0.1}
-                />
-              </label>
-              <CustomSlider
-                min="0" max={maxRelWeight} step={maxRelWeight <= 1.0 ? 0.01 : 0.1}
-                value={filters.relCutoff}
-                onChange={(v: number) => setFilter('relCutoff', v)}
-                isDarkMode={isDarkMode}
-              />
-              <div className="flex justify-between text-[9px] mt-2 opacity-50 font-mono">
-                <span>0</span>
-                <span>{maxRelWeight}</span>
-              </div>
             </div>
-
-            {/* Filter: Absolute Cutoff */}
-            <div className="group">
-              <label className={`flex items-center justify-between text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
-                <span>Absolute Cutoff</span>
-                <SyncInput 
-                  className={`w-14 bg-transparent border-b text-right font-mono outline-none ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0]' : 'border-[#ccc] focus:border-[#141414] text-[#141414]'}`}
-                  value={filters.absCutoff}
-                  onChange={(v: number) => setFilter('absCutoff', v)}
-                  step="1"
-                />
-              </label>
-              <CustomSlider
-                min="0" max={maxRawWeight} step="1"
-                value={filters.absCutoff}
-                onChange={(v: number) => setFilter('absCutoff', v)}
-                isDarkMode={isDarkMode}
-              />
-              <div className="flex justify-between text-[9px] mt-2 opacity-50 font-mono">
-                <span>0</span>
-                <span>{maxRawWeight}</span>
-              </div>
-            </div>
-
-            {/* Manual Node Removal */}
-            <div className="group">
-               <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Node Removal (ID)</label>
-               <SyncTextInput 
-                 placeholder="e.g. Ag, Au, Al"
-                 value={filters.removedNodes}
-                 onChange={(v: string) => setFilter('removedNodes', v)}
-                 className={`w-full bg-transparent border p-2 text-xs font-mono outline-none transition-colors ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0]' : 'border-[#141414] focus:border-black text-[#141414]'}`}
-                 list="removal-autocomplete"
-                 options={rawNodes.map((n) => ({ value: n.id, label: n.label || n.name || n.id }))}
-               />
-            </div>
-          </div>
-        </div>
 
         {/* Visualization Controls */}
         <div>
@@ -663,6 +711,24 @@ export default function Workspace() {
             <div className={`group border-t border-dotted pt-4 mt-4 transition-colors ${isDarkMode ? 'border-[#555]' : 'border-[#888]'}`}>
               <div className="flex flex-col space-y-4">
                  <div className="flex items-center justify-between">
+                   <label className="text-xs font-bold uppercase text-[10px]">Live Update Controls</label>
+                   <SegmentedToggle 
+                     checked={filters.liveUpdate}
+                     onChange={(v: boolean) => setFilter('liveUpdate', v)}
+                     isDarkMode={isDarkMode}
+                   />
+                 </div>
+
+                 {!filters.liveUpdate && (
+                   <button 
+                     onClick={() => setAppliedFilters(useStore.getState().filters)}
+                     className={`w-full py-2 text-[10px] font-bold uppercase tracking-widest border transition-colors ${isDarkMode ? 'bg-[#141414] border-[#b4ff39] text-[#b4ff39] hover:bg-[#b4ff39] hover:text-[#141414]' : 'bg-white border-[#141414] text-[#141414] hover:bg-[#141414] hover:text-white'}`}
+                   >
+                     Apply Changes
+                   </button>
+                 )}
+                 
+                 <div className="flex items-center justify-between">
                    <label className="text-xs font-bold uppercase text-[10px]">Enable Live Physics</label>
                    <SegmentedToggle 
                      checked={filters.livePhysics}
@@ -682,65 +748,7 @@ export default function Workspace() {
               </div>
             </div>
 
-            <div className="group">
-              <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Node Size Based On</label>
-              <select 
-                value={filters.nodeSizeBase} 
-                onChange={e => setFilter('nodeSizeBase', e.target.value)} 
-                className={`w-full bg-transparent border p-2 text-xs font-mono outline-none transition-colors mb-4 ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0] [&>option]:bg-[#1a1a1a]' : 'border-[#141414] focus:border-black text-[#141414] [&>option]:bg-white'}`}
-              >
-                <option value="abundance">Abundance</option>
-                <option value="degree">Degree</option>
-                <option value="uniform">Uniform</option>
-              </select>
-              
-              <label className={`flex items-center justify-between text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
-                <span>Node Size Scale</span>
-                <SyncInput 
-                  className={`w-12 bg-transparent border-b text-right font-mono outline-none ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0]' : 'border-[#ccc] focus:border-[#141414] text-[#141414]'}`}
-                  value={filters.nodeSize}
-                  onChange={(v: number) => setFilter('nodeSize', v)}
-                  step="0.5"
-                />
-              </label>
-              <CustomSlider
-                min="1" max="10" step="0.5"
-                value={filters.nodeSize}
-                onChange={(v: number) => setFilter('nodeSize', v)}
-                isDarkMode={isDarkMode}
-              />
-            </div>
-
-            <div className="group">
-              <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Edge Weight Based On</label>
-              <select 
-                value={filters.edgeWeightBase} 
-                onChange={e => setFilter('edgeWeightBase', e.target.value)} 
-                className={`w-full bg-transparent border p-2 text-xs font-mono outline-none transition-colors mb-4 ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0] [&>option]:bg-[#1a1a1a]' : 'border-[#141414] focus:border-black text-[#141414] [&>option]:bg-white'}`}
-              >
-                <option value="weight_raw">Primary Weight (Matrix 1)</option>
-                <option value="weight_secondary">Secondary Weight (Matrix 2)</option>
-                <option value="uniform">Unweighted (Uniform)</option>
-              </select>
-
-              <label className={`flex items-center justify-between text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
-                <span>Edge Weight Scale</span>
-                <SyncInput 
-                  className={`w-12 bg-transparent border-b text-right font-mono outline-none ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0]' : 'border-[#ccc] focus:border-[#141414] text-[#141414]'}`}
-                  value={filters.edgeWeight}
-                  onChange={(v: number) => setFilter('edgeWeight', v)}
-                  step="0.5"
-                />
-              </label>
-              <CustomSlider
-                min="0.5" max="10" step="0.5"
-                value={filters.edgeWeight}
-                onChange={(v: number) => setFilter('edgeWeight', v)}
-                isDarkMode={isDarkMode}
-              />
-            </div>
-
-            <div className="group">
+            <div className="group border-t border-dotted pt-4 mt-4 transition-colors ${isDarkMode ? 'border-[#555]' : 'border-[#888]'}">
               <label className={`flex items-center justify-between text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
                 <span>Node Repulsion</span>
                 <SyncInput 
@@ -758,9 +766,229 @@ export default function Workspace() {
               />
             </div>
           </div>
-        </div>
+                {/* Network Element Controls */}
+        <div className="mt-8">
+          <div className="flex text-[10px] uppercase font-bold tracking-widest bg-transparent border border-[#141414] dark:border-[#333] shadow-sm mb-6 overflow-hidden">
+            <button 
+              onClick={() => setActiveControlTab("nodes")}
+              className={`flex-1 py-2 transition-colors ${activeControlTab === "nodes" ? (isDarkMode ? "bg-[#333] text-white" : "bg-[#141414] text-white") : (isDarkMode ? "text-[#888] hover:bg-[#222]" : "text-[#888] hover:bg-[#f5f5f5]")}`}
+            >
+              Node Controls
+            </button>
+            <button 
+              onClick={() => setActiveControlTab("edges")}
+              className={`flex-1 py-2 transition-colors border-l border-[#141414] dark:border-[#333] ${activeControlTab === "edges" ? (isDarkMode ? "bg-[#333] text-white" : "bg-[#141414] text-white") : (isDarkMode ? "text-[#888] hover:bg-[#222]" : "text-[#888] hover:bg-[#f5f5f5]")}`}
+            >
+              Edge Controls
+            </button>
+          </div>
 
-        <div className="mt-auto">
+          {activeControlTab === "nodes" && (
+            <div className="space-y-5">
+              <div className="group">
+                <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Node Color Based On</label>
+                <select 
+                  value={filters.nodeColorBase} 
+                  onChange={e => setFilter('nodeColorBase', e.target.value)} 
+                  className={`w-full bg-transparent border p-2 text-xs font-mono outline-none transition-colors mb-4 ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0] [&>option]:bg-[#1a1a1a]' : 'border-[#141414] focus:border-black text-[#141414] [&>option]:bg-white'}`}
+                >
+                  <option value="community">Community</option>
+                  {hasType && <option value="type">Node Type</option>}
+                  <option value="eigenvector">Eigenvector Centrality</option>
+                  <option value="pagerank">PageRank</option>
+                  <option value="uniform">Uniform Color</option>
+                </select>
+              </div>
+              <div className="group">
+                <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Node Size Based On</label>
+                <select 
+                  value={filters.nodeSizeBase} 
+                  onChange={e => setFilter('nodeSizeBase', e.target.value)} 
+                  className={`w-full bg-transparent border p-2 text-xs font-mono outline-none transition-colors mb-4 ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0] [&>option]:bg-[#1a1a1a]' : 'border-[#141414] focus:border-black text-[#141414] [&>option]:bg-white'}`}
+                >
+                  {hasAbundance && <option value="abundance">Abundance</option>}
+                  <option value="degree">Degree</option>
+                  <option value="eigenvector">Eigenvector Centrality</option>
+                  <option value="pagerank">PageRank</option>
+                  <option value="uniform">Uniform</option>
+                </select>
+                
+                <label className={`flex items-center justify-between text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
+                  <span>Node Size Scale</span>
+                  <SyncInput 
+                    className={`w-12 bg-transparent border-b text-right font-mono outline-none ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0]' : 'border-[#ccc] focus:border-[#141414] text-[#141414]'}`}
+                    value={filters.nodeSize}
+                    onChange={(v: number) => setFilter('nodeSize', v)}
+                    step="0.5"
+                  />
+                </label>
+                <CustomSlider
+                  min="1" max="10" step="0.5"
+                  value={filters.nodeSize}
+                  onChange={(v: number) => setFilter('nodeSize', v)}
+                  isDarkMode={isDarkMode}
+                />
+              </div>
+            </div>
+          )}
+
+          {activeControlTab === "edges" && (
+            <div className="space-y-5">
+              <div className="group">
+                <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Edge Color Based On</label>
+                <select 
+                  value={filters.edgeColorBase} 
+                  onChange={e => setFilter('edgeColorBase', e.target.value)} 
+                  className={`w-full bg-transparent border p-2 text-xs font-mono outline-none transition-colors mb-4 ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0] [&>option]:bg-[#1a1a1a]' : 'border-[#141414] focus:border-black text-[#141414] [&>option]:bg-white'}`}
+                >
+                  <option value="uniform">Uniform Color</option>
+                  <option value="weight_raw">Primary Weight (Matrix 1)</option>
+                  {hasSecondaryWeight && <option value="weight_secondary">Secondary Weight (Matrix 2)</option>}
+                </select>
+              </div>
+              
+              <div className="group">
+                <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Thickness Based On</label>
+                <select 
+                  value={filters.edgeWeightBase} 
+                  onChange={e => setFilter('edgeWeightBase', e.target.value)} 
+                  className={`w-full bg-transparent border p-2 text-xs font-mono outline-none transition-colors mb-4 ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0] [&>option]:bg-[#1a1a1a]' : 'border-[#141414] focus:border-black text-[#141414] [&>option]:bg-white'}`}
+                >
+                  <option value="weight_raw">Primary Weight (Matrix 1)</option>
+                  {hasSecondaryWeight && <option value="weight_secondary">Secondary Weight (Matrix 2)</option>}
+                  <option value="uniform">Uniform</option>
+                </select>
+                <label className={`flex items-center justify-between text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
+                  <span>Thickness Scale</span>
+                  <SyncInput 
+                    className={`w-12 bg-transparent border-b text-right font-mono outline-none ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0]' : 'border-[#ccc] focus:border-[#141414] text-[#141414]'}`}
+                    value={filters.edgeWeight}
+                    onChange={(v: number) => setFilter('edgeWeight', v)}
+                    step="0.5"
+                  />
+                </label>
+                <CustomSlider
+                  min="0.5" max="10" step="0.5"
+                  value={filters.edgeWeight}
+                  onChange={(v: number) => setFilter('edgeWeight', v)}
+                  isDarkMode={isDarkMode}
+                />
+              </div>
+              <div className="group">
+                <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Transparency Based On</label>
+                <select 
+                  value={filters.edgeOpacityBase} 
+                  onChange={e => setFilter('edgeOpacityBase', e.target.value)} 
+                  className={`w-full bg-transparent border p-2 text-xs font-mono outline-none transition-colors mb-4 ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0] [&>option]:bg-[#1a1a1a]' : 'border-[#141414] focus:border-black text-[#141414] [&>option]:bg-white'}`}
+                >
+                  <option value="uniform">Uniform</option>
+                  <option value="weight_raw">Primary Weight (Matrix 1)</option>
+                  {hasSecondaryWeight && <option value="weight_secondary">Secondary Weight (Matrix 2)</option>}
+                </select>
+                <label className={`flex items-center justify-between text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
+                  <span>Transparency Scale</span>
+                  <SyncInput 
+                    className={`w-12 bg-transparent border-b text-right font-mono outline-none ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0]' : 'border-[#ccc] focus:border-[#141414] text-[#141414]'}`}
+                    value={filters.edgeOpacity}
+                    onChange={(v: number) => setFilter('edgeOpacity', v)}
+                    step="0.1"
+                  />
+                </label>
+                <CustomSlider
+                  min="0.1" max="1.0" step="0.1"
+                  value={filters.edgeOpacity}
+                  onChange={(v: number) => setFilter('edgeOpacity', v)}
+                  isDarkMode={isDarkMode}
+                />
+              </div>
+            </div>
+          )}
+        </div>  </div>
+
+        <div className="mt-auto space-y-6 pt-8">
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className={`text-[10px] font-bold uppercase tracking-widest opacity-70 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Filter Logic Layer</h3>
+              <button 
+                onClick={() => {
+                  setFilter('weightFilters', [...filters.weightFilters, { id: `filter-${Date.now()}`, type: 'weight_raw', cutoff: 0 }]);
+                }}
+                className={`text-[10px] font-bold uppercase tracking-widest px-2 py-1 border transition-colors ${isDarkMode ? 'border-[#333] hover:bg-[#333] text-[#E4E3E0]' : 'border-[#ccc] hover:bg-[#eee] text-[#141414]'}`}
+              >
+                + Add Filter
+              </button>
+            </div>
+          
+            <div className="space-y-6">
+              {filters.weightFilters.map((wf, idx) => (
+                <div key={wf.id} className="group relative border p-3 rounded-sm border-[#e0e0e0] dark:border-[#333]">
+                  <button 
+                    onClick={() => {
+                      setFilter('weightFilters', filters.weightFilters.filter(f => f.id !== wf.id));
+                    }}
+                    className={`absolute top-2 right-2 text-xs opacity-50 hover:opacity-100 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}
+                  >
+                    ×
+                  </button>
+                  <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Weight Source</label>
+                  <select 
+                    value={wf.type}
+                    onChange={(e) => {
+                      const newFilters = [...filters.weightFilters];
+                      newFilters[idx] = { ...wf, type: e.target.value as any, cutoff: 0 };
+                      setFilter('weightFilters', newFilters);
+                    }}
+                    className={`w-full bg-transparent border p-2 text-xs font-mono outline-none transition-colors mb-4 ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0] [&>option]:bg-[#1a1a1a]' : 'border-[#141414] focus:border-black text-[#141414] [&>option]:bg-white'}`}
+                  >
+                    <option value="weight_raw">Primary Weight</option>
+                    {hasSecondaryWeight && <option value="weight_secondary">Secondary Weight</option>}
+                  </select>
+
+                  <label className={`flex items-center justify-between text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
+                    <span>Cutoff Threshold</span>
+                    <SyncInput 
+                      className={`w-14 bg-transparent border-b text-right font-mono outline-none ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0]' : 'border-[#ccc] focus:border-[#141414] text-[#141414]'}`}
+                      value={wf.cutoff}
+                      onChange={(v: number) => {
+                        const newFilters = [...filters.weightFilters];
+                        newFilters[idx] = { ...wf, cutoff: v };
+                        setFilter('weightFilters', newFilters);
+                      }}
+                      step={wf.type === 'weight_secondary' ? (maxRelWeight <= 1.0 ? 0.01 : 0.1) : 1}
+                    />
+                  </label>
+                  <CustomSlider
+                    min="0" max={wf.type === 'weight_secondary' ? maxRelWeight : maxRawWeight} step={wf.type === 'weight_secondary' ? (maxRelWeight <= 1.0 ? 0.01 : 0.1) : 1}
+                    value={wf.cutoff}
+                    onChange={(v: number) => {
+                      const newFilters = [...filters.weightFilters];
+                      newFilters[idx] = { ...wf, cutoff: v };
+                      setFilter('weightFilters', newFilters);
+                    }}
+                    isDarkMode={isDarkMode}
+                  />
+                  <div className="flex justify-between text-[9px] mt-2 opacity-50 font-mono">
+                    <span>0</span>
+                    <span>{wf.type === 'weight_secondary' ? maxRelWeight : maxRawWeight}</span>
+                  </div>
+                </div>
+              ))}
+              
+              {/* Manual Node Removal */}
+              <div className="group">
+                 <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Node Removal (ID, comma separated)</label>
+                 <SyncTextInput
+                    placeholder="e.g. Ag, Au, Al"
+                   value={filters.removedNodes}
+                   onChange={(v: string) => setFilter('removedNodes', v)}
+                   className={`w-full bg-transparent border p-2 text-xs font-mono outline-none transition-colors ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0]' : 'border-[#141414] focus:border-black text-[#141414]'}`}
+                   list="removal-autocomplete"
+                   options={rawNodes.map((n) => ({ value: n.id, label: n.label || n.name || n.id }))}
+                 />
+              </div>
+            </div>
+          </div>
+
           <div className={`border-t border-dotted pt-4 transition-colors ${isDarkMode ? 'border-[#555]' : 'border-[#888]'}`}>
             <div className="flex justify-between text-[11px] mb-1">
               <span>Active Nodes</span>
@@ -798,7 +1026,7 @@ export default function Workspace() {
       {/* MAIN VIEWPORT */}
       <section className={`flex-1 relative overflow-hidden h-full flex flex-col transition-colors ${isDarkMode ? "bg-[#000]" : "bg-white"}`}>
         {/* Top Navigation Bar */}
-        <div className={`flex items-center justify-between px-6 py-3 border-b z-10 ${isDarkMode ? "bg-[#222] border-[#444]" : "bg-[#f0f0f0] border-[#ccc]"}`}>
+        <div className={`flex items-center justify-between px-6 py-3 border-b z-50 ${isDarkMode ? "bg-[#222] border-[#444]" : "bg-[#f0f0f0] border-[#ccc]"}`}>
           <div className="flex text-[10px] uppercase font-bold tracking-widest bg-white dark:bg-[#141414] border border-[#141414] dark:border-[#333] shadow-sm">
             <button 
               className={`px-6 py-2 transition-colors ${activeTab === "graph" ? (isDarkMode ? "bg-[#333] text-white" : "bg-[#141414] text-white") : (isDarkMode ? "text-[#888] hover:bg-[#222]" : "text-[#888] hover:bg-[#f5f5f5]")}`}
@@ -865,10 +1093,13 @@ export default function Workspace() {
                       <button onClick={() => handleExport('json')} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>Export JSON</button>
                       <button onClick={() => handleExport('graphml')} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>Export GraphML</button>
                       <button onClick={() => handleExport('csvzip')} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>Export Node/Edge CSV (ZIP)</button>
+                      <div className={`h-px w-full ${isDarkMode ? 'bg-[#333]' : 'bg-[#eee]'}`}></div>
+                      <button onClick={() => handleExport('settings')} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>Export Settings</button>
                     </>
                   ) : (
                     <>
                       <button onClick={() => handleExport('csv')} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>Export Table CSV</button>
+                      <button onClick={() => handleExport('csvzip_table')} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>Export Node/Edge Table CSV (ZIP)</button>
                     </>
                   )}
                 </div>
@@ -885,15 +1116,20 @@ export default function Workspace() {
                   nodes={validNodes} 
                   edges={validEdges} 
                   communityMap={communityMap}
-                  nodeSizeMult={filters.nodeSize || 3}
-                  edgeWeightMult={filters.edgeWeight || 1}
-                  nodeSizeBase={filters.nodeSizeBase || "abundance"}
-                  edgeWeightBase={filters.edgeWeightBase || "weight_raw"}
-                  forceStrength={filters.forceStrength || -100}
+                  networkMetrics={networkMetrics}
+                  nodeSizeMult={appliedFilters.nodeSize || 3}
+                  nodeSizeBase={appliedFilters.nodeSizeBase || "abundance"}
+                  nodeColorBase={appliedFilters.nodeColorBase || "community"}
+                  edgeWeightMult={appliedFilters.edgeWeight || 1}
+                  edgeWeightBase={appliedFilters.edgeWeightBase || "weight_raw"}
+                  edgeColorBase={appliedFilters.edgeColorBase || "uniform"}
+                  edgeOpacity={appliedFilters.edgeOpacity || 0.8}
+                  edgeOpacityBase={appliedFilters.edgeOpacityBase || "uniform"}
+                  forceStrength={appliedFilters.forceStrength || -100}
                   directed={directed}
                   bipartite={bipartite}
-                  livePhysics={filters.livePhysics}
-                  isFrozen={filters.isFrozen}
+                  livePhysics={appliedFilters.livePhysics}
+                  isFrozen={appliedFilters.isFrozen}
                   isDarkMode={isDarkMode}
                   refreshKey={refreshKey}
                   onRefresh={() => setRefreshKey(k => k + 1)}

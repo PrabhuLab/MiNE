@@ -186,6 +186,11 @@ export const exportJson = (data: any, filename: string) => {
   downloadStringAsFile(json, filename, 'application/json;charset=utf-8;');
 };
 
+export const exportWorkspaceSettings = (settings: any, filename: string) => {
+  const json = JSON.stringify(settings, null, 2);
+  downloadStringAsFile(json, filename, 'application/json;charset=utf-8;');
+};
+
 const escapeXml = (unsafe: any) => {
   if (unsafe === undefined || unsafe === null) return '';
   return String(unsafe).replace(/[<>&'"]/g, function (c) {
