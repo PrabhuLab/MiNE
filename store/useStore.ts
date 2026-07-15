@@ -58,14 +58,6 @@ interface AppState {
 
   communityMap: Record<string, string>; // nodeId -> color
   setCommunityMap: (map: Record<string, string>) => void;
-  activeCommunityAlgorithm: string;
-  setActiveCommunityAlgorithm: (alg: string) => void;
-  communitiesData: Record<string, Record<string, number | string>>; // alg -> { nodeId -> community }
-  setCommunitiesData: (data: Record<string, Record<string, number | string>>) => void;
-  calculatedMetrics: Record<string, boolean>; // e.g., { degree: true, pagerank: true }
-  setCalculatedMetrics: (metrics: Record<string, boolean>) => void;
-  nodeMetricsData: any[];
-  setNodeMetricsData: (data: any[]) => void;
   
   selectedElement: string | null;
   setSelectedElement: (val: string | null) => void;
@@ -118,14 +110,6 @@ export const useStore = create<AppState>((set) => ({
 
   communityMap: {},
   setCommunityMap: (map) => set({ communityMap: map }),
-  activeCommunityAlgorithm: 'louvain',
-  setActiveCommunityAlgorithm: (alg) => set({ activeCommunityAlgorithm: alg }),
-  communitiesData: {},
-  setCommunitiesData: (data) => set({ communitiesData: data }),
-  calculatedMetrics: {},
-  setCalculatedMetrics: (metrics) => set({ calculatedMetrics: metrics }),
-  nodeMetricsData: [],
-  setNodeMetricsData: (data) => set({ nodeMetricsData: data }),
   
   clearStore: () => set({
     projectName: 'NEW_PROJECT_NAME',
