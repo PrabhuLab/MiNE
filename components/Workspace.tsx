@@ -7,6 +7,9 @@ import Graph from 'graphology';
 import louvainPkg from 'graphology-communities-louvain';
 import pagerankPkg from 'graphology-metrics/centrality/pagerank';
 import eigenvectorPkg from 'graphology-metrics/centrality/eigenvector';
+import betweennessPkg from 'graphology-metrics/centrality/betweenness';
+import closenessPkg from 'graphology-metrics/centrality/closeness';
+import * as degreePkg from 'graphology-metrics/centrality/degree';
 import * as d3 from 'd3';
 import seedrandomPkg from 'seedrandom';
 
@@ -14,6 +17,11 @@ import seedrandomPkg from 'seedrandom';
 const louvain = (typeof louvainPkg === 'function') ? louvainPkg : (louvainPkg as any).default || louvainPkg;
 const pagerank = (typeof pagerankPkg === 'function') ? pagerankPkg : (pagerankPkg as any).default || pagerankPkg;
 const eigenvector = (typeof eigenvectorPkg === 'function') ? eigenvectorPkg : (eigenvectorPkg as any).default || eigenvectorPkg;
+const betweenness = (typeof betweennessPkg === 'function') ? betweennessPkg : (betweennessPkg as any).default || betweennessPkg;
+const closeness = (typeof closenessPkg === 'function') ? closenessPkg : (closenessPkg as any).default || closenessPkg;
+const degreeCentrality = degreePkg.degreeCentrality || (degreePkg as any).default?.degreeCentrality;
+const inDegreeCentrality = degreePkg.inDegreeCentrality || (degreePkg as any).default?.inDegreeCentrality;
+const outDegreeCentrality = degreePkg.outDegreeCentrality || (degreePkg as any).default?.outDegreeCentrality;
 const seedrandom = (typeof seedrandomPkg === 'function') ? seedrandomPkg : (seedrandomPkg as any).default || seedrandomPkg;
 import { normalize_communities, COMMUNITY_COLORS, getCommunityColor } from '@/lib/communityUtils';
 import { ChevronLeft, ChevronRight, Sun, Moon, Download } from 'lucide-react';
@@ -146,7 +154,21 @@ export default function Workspace() {
   const hasType = useMemo(() => rawNodes.some(n => !!n.type), [rawNodes]);
   const hasAbundance = useMemo(() => rawNodes.some(n => n.abundance !== undefined && n.abundance !== null), [rawNodes]);
   const hasSecondaryWeight = useMemo(() => rawEdges.some(e => e.weight_secondary !== undefined && e.weight_secondary !== null), [rawEdges]);
+
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [nodeMetrics, setNodeMetrics] = useState<any[]>([]);
+  const [networkMetrics, setNetworkMetrics] = useState<any[]>([]);
   
+  const hasEigenvector = networkMetrics.some(m => m.eigenvector !== undefined);
+  const hasPageRank = networkMetrics.some(m => m.pagerank !== undefined);
+  const hasBetweenness = networkMetrics.some(m => m.betweenness !== undefined);
+  const hasCloseness = networkMetrics.some(m => m.closeness !== undefined);
+  const hasClustering = networkMetrics.some(m => m.clustering !== undefined);
+  const hasInDegreeCent = networkMetrics.some(m => m.inDegreeCentrality !== undefined);
+  const hasOutDegreeCent = networkMetrics.some(m => m.outDegreeCentrality !== undefined);
+  const hasDegreeCent = networkMetrics.some(m => m.degreeCentrality !== undefined);
+
   useEffect(() => {
     if (!hasType && filters.nodeColorBase === 'type') setFilter('nodeColorBase', 'community');
     if (!hasAbundance && filters.nodeSizeBase === 'abundance') setFilter('nodeSizeBase', 'degree');
@@ -154,17 +176,23 @@ export default function Workspace() {
     if (!hasSecondaryWeight && filters.edgeWeightBase === 'weight_secondary') setFilter('edgeWeightBase', 'weight_raw');
     if (!hasSecondaryWeight && filters.edgeOpacityBase === 'weight_secondary') setFilter('edgeOpacityBase', 'uniform');
   }, [hasType, hasAbundance, hasSecondaryWeight, filters.nodeColorBase, filters.nodeSizeBase, filters.edgeColorBase, filters.edgeWeightBase, filters.edgeOpacityBase, setFilter]);
-  
-  const [refreshKey, setRefreshKey] = useState(0);
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const [nodeMetrics, setNodeMetrics] = useState<any[]>([]);
-  const [networkMetrics, setNetworkMetrics] = useState<any[]>([]);
+
   const [modularity, setModularity] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<"graph" | "data">("graph");
   const [dataTab, setDataTab] = useState<"nodes" | "edges">("nodes");
-  const [activeControlTab, setActiveControlTab] = useState<"nodes" | "edges">("nodes");
+  const [activeControlTab, setActiveControlTab] = useState<"nodes" | "edges" | "metrics">("nodes");
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [sortConfig, setSortConfig] = useState<{ key: string, direction: "asc" | "desc" } | null>(null);
+
+  const [metricsToRun, setMetricsToRun] = useState({
+    degree: false,
+    betweenness: false,
+    closeness: false,
+    clustering: false,
+    pagerank: false,
+    eigenvector: false
+  });
+  const [metricsLoading, setMetricsLoading] = useState(false);
 
   const [appliedFilters, setAppliedFilters] = useState(filters);
   useEffect(() => {
@@ -393,23 +421,28 @@ export default function Workspace() {
       metrics.sort((a,b) => parseFloat(b.deltaQ) - parseFloat(a.deltaQ));
       setNodeMetrics(metrics);
 
-      // Network Metrics (Degree, Eigenvector, PageRank)
-      let pr: Record<string, number> = {};
-      let eig: Record<string, number> = {};
-      try { pr = pagerank(graph); } catch (e) { console.warn("PageRank failed", e); }
-      try { eig = eigenvector(graph); } catch (e) { console.warn("Eigenvector failed", e); }
-      
-      const netMetrics = graph.nodes().map(nodeId => {
+      const netMetrics = networkMetrics.length > 0 ? networkMetrics : graph.nodes().map(nodeId => {
+        return {
+          id: nodeId,
+          degree: graph.degree ? graph.degree(nodeId) : 0,
+          inDegree: directed && graph.inDegree ? graph.inDegree(nodeId) : 0,
+          outDegree: directed && graph.outDegree ? graph.outDegree(nodeId) : 0
+        };
+      });
+      // We don't overwrite if we already have it, or maybe we just merge it?
+      // Actually, if nodes changed, we should re-initialize, but keep old values if possible.
+      const currentMap = new Map(networkMetrics.map(m => [m.id, m]));
+      const nextNetMetrics = graph.nodes().map(nodeId => {
+        const old = currentMap.get(nodeId) || {};
         return {
           id: nodeId,
           degree: graph.degree ? graph.degree(nodeId) : 0,
           inDegree: directed && graph.inDegree ? graph.inDegree(nodeId) : 0,
           outDegree: directed && graph.outDegree ? graph.outDegree(nodeId) : 0,
-          pagerank: pr[nodeId] ? pr[nodeId].toFixed(6) : "0",
-          eigenvector: eig[nodeId] ? eig[nodeId].toFixed(6) : "0",
+          ...old // Preserve calculated metrics
         };
       });
-      setNetworkMetrics(netMetrics);
+      setNetworkMetrics(nextNetMetrics);
     } catch (err) {
       console.warn("Community calculation skipped/failed:", err);
     }
@@ -428,6 +461,130 @@ export default function Workspace() {
     };
   }, [rawNodes, validNodes]);
 
+
+  const runSelectedMetrics = () => {
+    if (validNodes.length === 0 || validEdges.length === 0) return;
+    setMetricsLoading(true);
+    
+    // We defer to let the UI update the loading state
+    setTimeout(() => {
+      try {
+        const graph = new Graph({ type: directed ? "directed" : "undirected", multi: false, allowSelfLoops: false });
+        
+        validNodes.forEach(n => {
+          if (!graph.hasNode(n.id)) graph.addNode(n.id, { ...n });
+        });
+        
+        validEdges.forEach(e => {
+          if (graph.hasNode(e.source) && graph.hasNode(e.target)) {
+            if (!graph.hasEdge(e.source, e.target)) {
+              graph.addEdge(e.source, e.target, { weight: e.weight_raw || 1 });
+            }
+          }
+        });
+
+        const newMetrics: Record<string, any> = {};
+        graph.forEachNode(node => {
+          newMetrics[node] = {};
+        });
+
+        if (metricsToRun.degree) {
+          try {
+            if (directed) {
+              const inDeg = inDegreeCentrality(graph);
+              const outDeg = outDegreeCentrality(graph);
+              Object.keys(inDeg).forEach(node => {
+                newMetrics[node].inDegreeCentrality = inDeg[node].toFixed(6);
+              });
+              Object.keys(outDeg).forEach(node => {
+                newMetrics[node].outDegreeCentrality = outDeg[node].toFixed(6);
+              });
+            } else {
+              const deg = degreeCentrality(graph);
+              Object.keys(deg).forEach(node => {
+                newMetrics[node].degreeCentrality = deg[node].toFixed(6);
+              });
+            }
+          } catch (e) { console.warn("Degree Centrality failed", e); }
+        }
+
+        if (metricsToRun.betweenness) {
+          try {
+            const bet = betweenness(graph);
+            Object.keys(bet).forEach(node => {
+              newMetrics[node].betweenness = bet[node].toFixed(6);
+            });
+          } catch (e) { console.warn("Betweenness Centrality failed", e); }
+        }
+
+        if (metricsToRun.closeness) {
+          try {
+            const clo = closeness(graph);
+            Object.keys(clo).forEach(node => {
+              newMetrics[node].closeness = clo[node].toFixed(6);
+            });
+          } catch (e) { console.warn("Closeness Centrality failed", e); }
+        }
+
+        if (metricsToRun.clustering) {
+          try {
+            // Manual local clustering coefficient calculation
+            graph.forEachNode(node => {
+              const neighbors = graph.neighbors(node);
+              const k = neighbors.length;
+              if (k < 2) {
+                newMetrics[node].clustering = "0.000000";
+              } else {
+                let edgesBetween = 0;
+                for (let i = 0; i < k; i++) {
+                  for (let j = i + 1; j < k; j++) {
+                    if (graph.hasEdge(neighbors[i], neighbors[j]) || graph.hasEdge(neighbors[j], neighbors[i])) {
+                      edgesBetween++;
+                    }
+                  }
+                }
+                const possibleEdges = directed ? k * (k - 1) : (k * (k - 1)) / 2;
+                newMetrics[node].clustering = (edgesBetween / possibleEdges).toFixed(6);
+              }
+            });
+          } catch (e) { console.warn("Clustering Coefficient failed", e); }
+        }
+
+        if (metricsToRun.pagerank) {
+          try {
+            const pr = pagerank(graph);
+            Object.keys(pr).forEach(node => {
+              newMetrics[node].pagerank = pr[node].toFixed(6);
+            });
+          } catch (e) { console.warn("PageRank failed", e); }
+        }
+
+        if (metricsToRun.eigenvector) {
+          try {
+            const eig = eigenvector(graph);
+            Object.keys(eig).forEach(node => {
+              newMetrics[node].eigenvector = eig[node].toFixed(6);
+            });
+          } catch (e) { console.warn("Eigenvector Centrality failed", e); }
+        }
+
+        setNetworkMetrics(prev => {
+          const currentMap = new Map(prev.map(m => [m.id, m]));
+          return graph.nodes().map(nodeId => {
+            const old = currentMap.get(nodeId) || { id: nodeId };
+            return {
+              ...old,
+              ...newMetrics[nodeId]
+            };
+          });
+        });
+      } catch (err) {
+        console.error("Failed to run metrics:", err);
+      } finally {
+        setMetricsLoading(false);
+      }
+    }, 100);
+  };
 
   const tableData = useMemo(() => {
     let data = validNodes.map(node => {
@@ -773,13 +930,19 @@ export default function Workspace() {
               onClick={() => setActiveControlTab("nodes")}
               className={`flex-1 py-2 transition-colors ${activeControlTab === "nodes" ? (isDarkMode ? "bg-[#333] text-white" : "bg-[#141414] text-white") : (isDarkMode ? "text-[#888] hover:bg-[#222]" : "text-[#888] hover:bg-[#f5f5f5]")}`}
             >
-              Node Controls
+              Nodes
             </button>
             <button 
               onClick={() => setActiveControlTab("edges")}
               className={`flex-1 py-2 transition-colors border-l border-[#141414] dark:border-[#333] ${activeControlTab === "edges" ? (isDarkMode ? "bg-[#333] text-white" : "bg-[#141414] text-white") : (isDarkMode ? "text-[#888] hover:bg-[#222]" : "text-[#888] hover:bg-[#f5f5f5]")}`}
             >
-              Edge Controls
+              Edges
+            </button>
+            <button 
+              onClick={() => setActiveControlTab("metrics")}
+              className={`flex-1 py-2 transition-colors border-l border-[#141414] dark:border-[#333] ${activeControlTab === "metrics" ? (isDarkMode ? "bg-[#333] text-white" : "bg-[#141414] text-white") : (isDarkMode ? "text-[#888] hover:bg-[#222]" : "text-[#888] hover:bg-[#f5f5f5]")}`}
+            >
+              Metrics
             </button>
           </div>
 
@@ -794,6 +957,17 @@ export default function Workspace() {
                 >
                   <option value="community">Community</option>
                   {hasType && <option value="type">Node Type</option>}
+                  <option value="betweenness">Betweenness Centrality</option>
+                  <option value="closeness">Closeness Centrality</option>
+                  <option value="clustering">Clustering Coefficient</option>
+                  {directed ? (
+                    <>
+                      <option value="inDegreeCentrality">In-Degree Centrality</option>
+                      <option value="outDegreeCentrality">Out-Degree Centrality</option>
+                    </>
+                  ) : (
+                    <option value="degreeCentrality">Degree Centrality</option>
+                  )}
                   <option value="eigenvector">Eigenvector Centrality</option>
                   <option value="pagerank">PageRank</option>
                   <option value="uniform">Uniform Color</option>
@@ -807,7 +981,18 @@ export default function Workspace() {
                   className={`w-full bg-transparent border p-2 text-xs font-mono outline-none transition-colors mb-4 ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0] [&>option]:bg-[#1a1a1a]' : 'border-[#141414] focus:border-black text-[#141414] [&>option]:bg-white'}`}
                 >
                   {hasAbundance && <option value="abundance">Abundance</option>}
-                  <option value="degree">Degree</option>
+                  <option value="degree">Degree (Absolute)</option>
+                  <option value="betweenness">Betweenness Centrality</option>
+                  <option value="closeness">Closeness Centrality</option>
+                  <option value="clustering">Clustering Coefficient</option>
+                  {directed ? (
+                    <>
+                      <option value="inDegreeCentrality">In-Degree Centrality</option>
+                      <option value="outDegreeCentrality">Out-Degree Centrality</option>
+                    </>
+                  ) : (
+                    <option value="degreeCentrality">Degree Centrality</option>
+                  )}
                   <option value="eigenvector">Eigenvector Centrality</option>
                   <option value="pagerank">PageRank</option>
                   <option value="uniform">Uniform</option>
@@ -900,6 +1085,49 @@ export default function Workspace() {
                   onChange={(v: number) => setFilter('edgeOpacity', v)}
                   isDarkMode={isDarkMode}
                 />
+              </div>
+            </div>
+          )}
+
+          {activeControlTab === "metrics" && (
+            <div className="space-y-5">
+              <div className="group">
+                <label className={`block text-[10px] font-bold uppercase tracking-widest mb-4 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
+                  Select Metrics to Compute
+                </label>
+                <div className="space-y-3">
+                  {[
+                    { key: "degree", label: directed ? "In/Out Degree Centrality" : "Degree Centrality" },
+                    { key: "betweenness", label: "Betweenness Centrality" },
+                    { key: "closeness", label: "Closeness Centrality" },
+                    { key: "clustering", label: "Clustering Coefficient" },
+                    { key: "pagerank", label: "PageRank" },
+                    { key: "eigenvector", label: "Eigenvector Centrality" }
+                  ].map(({ key, label }) => (
+                    <label key={key} className="flex items-center space-x-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={(metricsToRun as any)[key]}
+                        onChange={(e) => setMetricsToRun(prev => ({ ...prev, [key]: e.target.checked }))}
+                        className="accent-[#141414] dark:accent-[#E4E3E0] w-3 h-3"
+                      />
+                      <span className={`text-[10px] uppercase font-mono tracking-wider ${isDarkMode ? 'text-[#aaa]' : 'text-[#555]'}`}>
+                        {label}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                <button
+                  onClick={runSelectedMetrics}
+                  disabled={metricsLoading || !Object.values(metricsToRun).some(v => v)}
+                  className={`mt-6 w-full py-2 text-[10px] uppercase font-bold tracking-widest border transition-colors ${
+                    metricsLoading 
+                    ? "opacity-50 cursor-not-allowed border-gray-400 text-gray-400" 
+                    : (isDarkMode ? "border-[#E4E3E0] text-[#E4E3E0] hover:bg-[#E4E3E0] hover:text-[#141414]" : "border-[#141414] text-[#141414] hover:bg-[#141414] hover:text-white")
+                  }`}
+                >
+                  {metricsLoading ? "Computing..." : "Run Metrics"}
+                </button>
               </div>
             </div>
           )}
@@ -1123,7 +1351,7 @@ export default function Workspace() {
                   edgeWeightMult={appliedFilters.edgeWeight || 1}
                   edgeWeightBase={appliedFilters.edgeWeightBase || "weight_raw"}
                   edgeColorBase={appliedFilters.edgeColorBase || "uniform"}
-                  edgeOpacity={appliedFilters.edgeOpacity || 0.8}
+                  edgeOpacity={appliedFilters.edgeOpacity ?? 0.3}
                   edgeOpacityBase={appliedFilters.edgeOpacityBase || "uniform"}
                   forceStrength={appliedFilters.forceStrength || -100}
                   directed={directed}
@@ -1158,24 +1386,49 @@ export default function Workspace() {
                         </th>
                         {directed ? (
                           <>
-                            <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("inDegree")}>
-                              In Degree {sortConfig?.key === "inDegree" && (sortConfig.direction === "asc" ? "↑" : "↓")}
-                            </th>
-                            <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("outDegree")}>
-                              Out Degree {sortConfig?.key === "outDegree" && (sortConfig.direction === "asc" ? "↑" : "↓")}
-                            </th>
+                            {hasInDegreeCent && (
+                              <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("inDegree")}>
+                                In Degree {sortConfig?.key === "inDegree" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                              </th>
+                            )}
+                            {hasOutDegreeCent && (
+                              <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("outDegree")}>
+                                Out Degree {sortConfig?.key === "outDegree" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                              </th>
+                            )}
                           </>
                         ) : (
-                          <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("degree")}>
-                            Degree {sortConfig?.key === "degree" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                          hasDegreeCent && (
+                            <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("degree")}>
+                              Degree {sortConfig?.key === "degree" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                            </th>
+                          )
+                        )}
+                        {hasEigenvector && (
+                          <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("eigenvector")}>
+                            Eigenvector {sortConfig?.key === "eigenvector" && (sortConfig.direction === "asc" ? "↑" : "↓")}
                           </th>
                         )}
-                        <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("eigenvector")}>
-                          Eigenvector {sortConfig?.key === "eigenvector" && (sortConfig.direction === "asc" ? "↑" : "↓")}
-                        </th>
-                        <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("pagerank")}>
-                          PageRank {sortConfig?.key === "pagerank" && (sortConfig.direction === "asc" ? "↑" : "↓")}
-                        </th>
+                        {hasPageRank && (
+                          <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("pagerank")}>
+                            PageRank {sortConfig?.key === "pagerank" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                          </th>
+                        )}
+                        {hasBetweenness && (
+                          <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("betweenness")}>
+                            Betweenness {sortConfig?.key === "betweenness" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                          </th>
+                        )}
+                        {hasCloseness && (
+                          <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("closeness")}>
+                            Closeness {sortConfig?.key === "closeness" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                          </th>
+                        )}
+                        {hasClustering && (
+                          <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("clustering")}>
+                            Clustering {sortConfig?.key === "clustering" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                          </th>
+                        )}
                         <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("community")}>
                           Community {sortConfig?.key === "community" && (sortConfig.direction === "asc" ? "↑" : "↓")}
                         </th>
@@ -1202,14 +1455,17 @@ export default function Workspace() {
                             <td className="p-2 font-mono">{node.abundance || "-"}</td>
                             {directed ? (
                               <>
-                                <td className="p-2 font-mono">{node.net.inDegree || 0}</td>
-                                <td className="p-2 font-mono">{node.net.outDegree || 0}</td>
+                                {hasInDegreeCent && <td className="p-2 font-mono">{node.net.inDegreeCentrality || 0}</td>}
+                                {hasOutDegreeCent && <td className="p-2 font-mono">{node.net.outDegreeCentrality || 0}</td>}
                               </>
                             ) : (
-                              <td className="p-2 font-mono">{node.net.degree || 0}</td>
+                              hasDegreeCent && <td className="p-2 font-mono">{node.net.degreeCentrality || 0}</td>
                             )}
-                            <td className="p-2 font-mono">{node.net.eigenvector || 0}</td>
-                            <td className="p-2 font-mono">{node.net.pagerank || 0}</td>
+                            {hasEigenvector && <td className="p-2 font-mono">{node.net.eigenvector || 0}</td>}
+                            {hasPageRank && <td className="p-2 font-mono">{node.net.pagerank || 0}</td>}
+                            {hasBetweenness && <td className="p-2 font-mono">{node.net.betweenness || 0}</td>}
+                            {hasCloseness && <td className="p-2 font-mono">{node.net.closeness || 0}</td>}
+                            {hasClustering && <td className="p-2 font-mono">{node.net.clustering || 0}</td>}
                             <td className="p-2">
                               <div className="flex items-center space-x-2">
                                 {node.comm && <div className="w-3 h-3 rounded-full" style={{ backgroundColor: getCommunityColor(node.comm, allCommunityLabels) }} />}
