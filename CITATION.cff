@@ -1,0 +1,13 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+- family-names: "Ngo"
+  given-names: "Don"
+  orcid: "https://orcid.org/0009-0001-2779-2146"
+- family-names: "Prabhu"
+  given-names: "Anirudh"
+  orcid: "https://orcid.org/0000-0002-9921-6084"
+title: "MiNE: Mineral Network Explorer"
+version: 1.0.0
+date-released: 2026-07-30
+url: "https://github.com/PrabhuLab/MiNE"
