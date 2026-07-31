@@ -70,6 +70,8 @@ interface AppState {
   setIsolatedLegendItem: (val: string | null) => void;
   searchQuery: string;
   setSearchQuery: (val: string) => void;
+  showArrowheads: boolean;
+  setShowArrowheads: (val: boolean) => void;
   projectName: string;
   setProjectName: (val: string) => void;
   clearStore: () => void;
@@ -94,6 +96,8 @@ export const useStore = create<AppState>((set) => ({
   setIsolatedLegendItem: (val) => set({ isolatedLegendItem: val }),
   searchQuery: '',
   setSearchQuery: (val) => set({ searchQuery: val }),
+  showArrowheads: false,
+  setShowArrowheads: (val) => set({ showArrowheads: val }),
 
   filters: {
     weightFilters: [],
@@ -134,6 +138,7 @@ export const useStore = create<AppState>((set) => ({
     communityMap: {},
     hiddenLegendItems: [],
     isolatedLegendItem: null,
+    showArrowheads: false,
     filters: {
       weightFilters: [],
       searchEdges: false,

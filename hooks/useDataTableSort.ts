@@ -43,20 +43,8 @@ export function useDataTableSort(validNodes: any[], validEdges: any[], networkMe
       return true;
     });
     
-    // Filter by selected element
-    if (selectedElement) {
-      if (selectedElement.includes('-')) {
-        const parts = selectedElement.split('-');
-        if (parts.length === 2) {
-          nodes = nodes.filter(n => n.id === parts[0] || n.id === parts[1]);
-        }
-      } else {
-        nodes = nodes.filter(n => n.id === selectedElement);
-      }
-    }
-    
     return nodes;
-  }, [validNodes, hiddenLegendItems, isolatedLegendItem, bipartite, communityMap, selectedElement, filters.nodeColorBase, netMap]);
+  }, [validNodes, hiddenLegendItems, isolatedLegendItem, bipartite, communityMap, filters.nodeColorBase, netMap]);
   
   const filteredEdges = useMemo(() => {
     let edges = validEdges;
@@ -71,16 +59,8 @@ export function useDataTableSort(validNodes: any[], validEdges: any[], networkMe
     const validNodeIds = new Set(filteredNodes.map(n => n.id));
     edges = edges.filter(e => validNodeIds.has(e.source) && validNodeIds.has(e.target));
     
-    if (selectedElement) {
-      if (selectedElement.includes('-')) {
-        edges = edges.filter(e => `${e.source}-${e.target}` === selectedElement || `${e.target}-${e.source}` === selectedElement);
-      } else {
-        edges = edges.filter(e => e.source === selectedElement || e.target === selectedElement);
-      }
-    }
-    
     return edges;
-  }, [validEdges, hiddenLegendItems, isolatedLegendItem, filteredNodes, selectedElement]);
+  }, [validEdges, hiddenLegendItems, isolatedLegendItem, filteredNodes]);
 
   const tableData = useMemo(() => {
     return computeTableDataNodes(filteredNodes, networkMetrics, nodeMetrics, communityMap, searchQuery, sortConfig);

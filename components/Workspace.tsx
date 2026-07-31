@@ -188,11 +188,17 @@ export default function Workspace() {
   useEffect(() => {
     if (activeTab === "data" && selectedElement) {
       setTimeout(() => {
-        const el = document.getElementById(`row-${selectedElement}`);
+        let el = document.getElementById(`row-${selectedElement}`);
+        if (!el && selectedElement.includes('-')) {
+          const parts = selectedElement.split('-');
+          if (parts.length === 2) {
+            el = document.getElementById(`row-${parts[1]}-${parts[0]}`);
+          }
+        }
         if (el) {
           el.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
-      }, 100);
+      }, 120);
     }
   }, [activeTab, selectedElement, dataTab]);
 

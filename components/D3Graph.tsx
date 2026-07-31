@@ -55,7 +55,7 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
   const [clickedEdge, setClickedEdge] = useState<RawEdge | null>(null);
   const [isCalculatingLayout, setIsCalculatingLayout] = useState(false);
   
-  const { hiddenLegendItems, setHiddenLegendItems, isolatedLegendItem, setIsolatedLegendItem } = useStore();
+  const { hiddenLegendItems, setHiddenLegendItems, isolatedLegendItem, setIsolatedLegendItem, showArrowheads, setShowArrowheads } = useStore();
   const hiddenItems = new Set(hiddenLegendItems);
   const setHiddenItems = (updater: (prev: Set<string>) => Set<string>) => {
     setHiddenLegendItems(Array.from(updater(new Set(hiddenLegendItems))));
@@ -269,6 +269,76 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
   const typeColorScale = useMemo(() => d3.scaleOrdinal(d3.schemeCategory10), []);
 
   const netMap = useMemo(() => new Map((networkMetrics || []).map((m: any) => [m.id, m])), [networkMetrics]);
+
+  const getShouldShowArrowhead = useCallback((d: any) => {
+    if (!directed) return false;
+
+    const srcId = typeof d.source === 'object' ? d.source.id : d.source;
+    const tgtId = typeof d.target === 'object' ? d.target.id : d.target;
+
+    // 1. Global toggle in Legend
+    if (showArrowheads) return true;
+
+    // 2. Node is selected (clickedNode or selectedElement is a node ID)
+    // Shows arrowheads for incoming (which nodes connect to them) and outgoing (what they connect to)
+    const activeNodeId = clickedNodeRef.current?.id || (selectedElement && !selectedElement.includes('-') ? selectedElement : null);
+    if (activeNodeId && (srcId === activeNodeId || tgtId === activeNodeId)) {
+      return true;
+    }
+
+    // 3. Edge is selected
+    if (clickedEdgeRef.current) {
+      const cSrc = typeof clickedEdgeRef.current.source === 'object' ? (clickedEdgeRef.current.source as any).id : clickedEdgeRef.current.source;
+      const cTgt = typeof clickedEdgeRef.current.target === 'object' ? (clickedEdgeRef.current.target as any).id : clickedEdgeRef.current.target;
+      if (srcId === cSrc && tgtId === cTgt) return true;
+    }
+    if (selectedElement && selectedElement.includes('-')) {
+      const parts = selectedElement.split('-');
+      if ((srcId === parts[0] && tgtId === parts[1]) || (!directed && srcId === parts[1] && tgtId === parts[0])) {
+        return true;
+      }
+    }
+
+    // 4. Selected / Isolated Community (custom and calculated)
+    if (isolatedLegendItem && isolatedLegendItem.startsWith('community:')) {
+      const commVal = isolatedLegendItem.split('community:')[1];
+      
+      const getNodeComm = (nodeId: string) => {
+        const net = netMap.get(nodeId);
+        if (nodeColorBase === 'louvain') return net?.louvain;
+        if (nodeColorBase === 'leiden') return net?.leiden;
+        if (nodeColorBase === 'infomap') return net?.infomap;
+        if (nodeColorBase === 'fast_greedy') return net?.fast_greedy;
+        if (nodeColorBase === 'label_propagation') return net?.label_propagation;
+        if (nodeColorBase === 'walktrap') return net?.walktrap;
+        if (nodeColorBase === 'eigenvector') return net?.eigenvector;
+        if (nodeColorBase === 'spinglass') return net?.spinglass;
+        return communityMap[nodeId] ?? net?.community ?? net?.louvain ?? net?.leiden;
+      };
+
+      const srcComm = getNodeComm(srcId);
+      const tgtComm = getNodeComm(tgtId);
+
+      if (String(srcComm) === String(commVal) || String(tgtComm) === String(commVal)) {
+        return true;
+      }
+    }
+
+    // 5. Search Query
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      if (String(srcId).toLowerCase().includes(q) || String(tgtId).toLowerCase().includes(q)) {
+        return true;
+      }
+    }
+
+    return false;
+  }, [directed, showArrowheads, selectedElement, isolatedLegendItem, netMap, nodeColorBase, communityMap, searchQuery]);
+
+  const getShouldShowArrowheadRef = useRef(getShouldShowArrowhead);
+  useEffect(() => {
+    getShouldShowArrowheadRef.current = getShouldShowArrowhead;
+  }, [getShouldShowArrowhead]);
 
   const legendCategories = useMemo(() => {
     if ((nodeColorBase === 'custom' || nodeColorBase === 'louvain' || nodeColorBase === 'leiden') && communityLabels.length > 0) {
@@ -599,7 +669,7 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
          d._defaultStrokeWidth = Math.min(strokeWidthScale(d.weight || 1), 4) * edgeWeightMult;
          return `${Math.max(d._defaultStrokeWidth, 2)}px`;
       })
-      .attr("marker-end", (directed && graphLinks.length < 500) ? "url(#arrowhead)" : null)
+      .attr("marker-end", directed ? "url(#arrowhead)" : null)
       .on("click", (e: any, d: any) => {
         e.stopPropagation();
         setClickedEdge(prev => {
@@ -692,27 +762,14 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
       .style('display', showLabels ? 'block' : 'none');
 
     // Simulation Tick
-    const defaultArrows = directed && graphLinks.length < 500;
-    const isLargeEdgeCount = graphLinks.length > 800;
     const tickDraw = () => {
       link.attr('d', (d: any) => {
         let targetX = d.target.x;
         let targetY = d.target.y;
         
-        let showArrow = defaultArrows;
-        if (clickedNodeRef.current) {
-          const srcId = typeof d.source === 'object' ? d.source.id : d.source;
-          const tgtId = typeof d.target === 'object' ? d.target.id : d.target;
-          showArrow = directed && (srcId === clickedNodeRef.current.id || tgtId === clickedNodeRef.current.id);
-        } else if (clickedEdgeRef.current) {
-          const srcId = typeof d.source === 'object' ? d.source.id : d.source;
-          const tgtId = typeof d.target === 'object' ? d.target.id : d.target;
-          const cEdgeSrc = typeof clickedEdgeRef.current.source === 'object' ? (clickedEdgeRef.current.source as any).id : clickedEdgeRef.current.source;
-          const cEdgeTgt = typeof clickedEdgeRef.current.target === 'object' ? (clickedEdgeRef.current.target as any).id : clickedEdgeRef.current.target;
-          showArrow = directed && (srcId === cEdgeSrc && tgtId === cEdgeTgt);
-        }
+        const showArrow = getShouldShowArrowheadRef.current ? getShouldShowArrowheadRef.current(d) : false;
 
-        if (directed && !isLargeEdgeCount) {
+        if (directed) {
           const dx = d.target.x - d.source.x;
           const dy = d.target.y - d.source.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
@@ -1083,29 +1140,7 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
       }
       return `${defaultStroke}px`;
     }).attr('marker-end', (d: any) => {
-      if (!directed) return null;
-      const srcId = typeof d.source === 'object' ? d.source.id : d.source;
-      const tgtId = typeof d.target === 'object' ? d.target.id : d.target;
-      if (clickedNode && (srcId === clickedNode.id || tgtId === clickedNode.id)) {
-        return "url(#arrowhead)";
-      }
-      if (clickedEdge) {
-        const cSrc = typeof clickedEdge.source === 'object' ? (clickedEdge.source as any).id : clickedEdge.source;
-        const cTgt = typeof clickedEdge.target === 'object' ? (clickedEdge.target as any).id : clickedEdge.target;
-        if (srcId === cSrc && tgtId === cTgt) {
-          return "url(#arrowhead)";
-        }
-      }
-      if (selectedElement && (`${srcId}-${tgtId}` === selectedElement || srcId === selectedElement || tgtId === selectedElement)) {
-        return "url(#arrowhead)";
-      }
-      if (q && (String(srcId).toLowerCase().includes(q) || String(tgtId).toLowerCase().includes(q))) {
-        return "url(#arrowhead)";
-      }
-      if (!clickedNode && !clickedEdge && !q && !selectedElement && edges.length < 500) {
-        return "url(#arrowhead)";
-      }
-      return null;
+      return getShouldShowArrowhead(d) ? "url(#arrowhead)" : null;
     });
 
     labels.style('opacity', (d: any) => {
@@ -1168,7 +1203,7 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
         tickDrawRef.current();
     }
 
-  }, [clickedNode, clickedEdge, selectedElement, hiddenItems, isolatedLegendItem, communityMap, nodes, bipartite, refreshKey, isDarkMode, directed, edges.length, nodeOpacity, edgeOpacity, searchQuery, getEdgeOpacity, getEdgeColor, edgeWeightBase, edgeWeightMult, maxRaw, maxSec, nodeColorBase, networkMetrics]);
+  }, [clickedNode, clickedEdge, selectedElement, hiddenItems, isolatedLegendItem, communityMap, nodes, bipartite, refreshKey, isDarkMode, directed, edges.length, nodeOpacity, edgeOpacity, searchQuery, getEdgeOpacity, getEdgeColor, edgeWeightBase, edgeWeightMult, maxRaw, maxSec, nodeColorBase, networkMetrics, showArrowheads, getShouldShowArrowhead]);
 
   return (
     <div ref={containerRef} className="w-full h-full relative cursor-crosshair">
@@ -1370,6 +1405,34 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
                     </div>
                   );
                 })}
+                {directed && (
+                  <div 
+                    className={`flex items-center justify-between cursor-pointer p-1 -mx-1 rounded-sm transition-all ${
+                      showArrowheads 
+                        ? 'opacity-100 font-bold bg-black/5 dark:bg-white/10' 
+                        : 'opacity-70 hover:opacity-100 hover:bg-black/5 dark:hover:bg-white/5'
+                    }`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowArrowheads(!showArrowheads);
+                    }}
+                    title="Click to toggle arrowheads on all directed edges"
+                  >
+                    <div className="flex items-center space-x-2">
+                      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className={showArrowheads ? 'text-[#b4ff39]' : ''}>
+                        <path d="M2 8h11M9 4l4 4-4 4" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                      <span>Arrowheads</span>
+                    </div>
+                    <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded border transition-colors ${
+                      showArrowheads 
+                        ? 'bg-[#b4ff39] text-[#141414] border-[#b4ff39] font-bold' 
+                        : 'bg-transparent text-current opacity-70 border-current/30'
+                    }`}>
+                      {showArrowheads ? 'ON' : 'OFF'}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
 
