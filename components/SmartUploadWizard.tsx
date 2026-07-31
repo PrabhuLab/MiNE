@@ -27,6 +27,7 @@ export default function SmartUploadWizard() {
   const [edgesFile, setEdgesFile] = useState<File | null>(null);
   const [nodesFile, setNodesFile] = useState<File | null>(null);
   const [adjListFile, setAdjListFile] = useState<File | null>(null);
+  const [hasAdditionalAttributes, setHasAdditionalAttributes] = useState<boolean>(false);
   const [jsonFile, setJsonFile] = useState<File | null>(null);
   
   const [isProcessing, setIsProcessing] = useState(false);
@@ -37,6 +38,7 @@ export default function SmartUploadWizard() {
   
   // Mapping State
   const [sourceCol, setSourceCol] = useState('');
+  const [adjSourceCol, setAdjSourceCol] = useState('');
   const [targetCol, setTargetCol] = useState('');
   const [weightRawCol, setWeightRawCol] = useState('');
   const [weightSecCol, setWeightSecCol] = useState('');
@@ -167,7 +169,33 @@ export default function SmartUploadWizard() {
       } else if (isFormatAdjList) {
         data.adjList = await parseCSV(adjListFile!);
         if (data.adjList.length > 0 && data.adjList[0]) {
-           setSourceCol(data.adjList[0][0] || '');
+           setAdjSourceCol(data.adjList[0][0] || '');
+        }
+      }
+      
+      if (hasAdditionalAttributes) {
+        if (!isFormatEdgeList && edgesFile) {
+          const edgeData = await parseCSV(edgesFile);
+          data.additionalEdges = edgeData;
+          if (edgeData[0]) {
+            // We use different variables if it's Adjacency List + Additional Edges. 
+            // We have sourceCol, targetCol, weightRawCol, weightSecCol for the additional edges.
+            setSourceCol(edgeData[0][0] || '');
+            setTargetCol(edgeData[0][1] || '');
+            setWeightRawCol(edgeData[0][2] || '');
+            setWeightSecCol(edgeData[0][3] || '');
+          }
+        }
+        if (nodesFile) {
+          const nodeData = await parseCSV(nodesFile);
+          data.nodes = nodeData;
+          if (nodeData[0]) {
+            setNodeIdCol(nodeData[0][0] || '');
+            setNodeLabelCol(nodeData[0][1] || '');
+            setNodeAbundCol(nodeData[0][2] || '');
+            setNodeTypeCol(nodeData[0][3] || '');
+            setNodeCommunityCol(nodeData[0][4] || '');
+          }
         }
       }
       
@@ -388,42 +416,22 @@ export default function SmartUploadWizard() {
             const edgeId = isDirected ? `${sId}->${tId}` : (sId < tId ? `${sId}_${tId}` : `${tId}_${sId}`);
             if (!edgeSet.has(edgeId)) {
               edgeSet.add(edgeId);
-              edges.push({ source: sId, target: tId, weight_raw: finalWR, weight_secondary: finalWS });
+              const extraEdgeProps: any = {};
+              for (let j = 0; j < eHeaders.length; j++) {
+                 if (j !== sIdx && j !== tIdx && j !== wrIdx && j !== wsIdx) {
+                    if (row[j] !== undefined && row[j] !== '') extraEdgeProps[eHeaders[j]] = row[j];
+                 }
+              }
+              edges.push({ source: sId, target: tId, weight_raw: finalWR, weight_secondary: finalWS, ...extraEdgeProps });
               if (!nodesMap.has(sId)) nodesMap.set(sId, { id: sId, name: sId, abundance: 10, type: topology === 'Bipartite' ? 'A' : undefined });
               if (!nodesMap.has(tId)) nodesMap.set(tId, { id: tId, name: tId, abundance: 10, type: topology === 'Bipartite' ? 'B' : undefined });
             }
           }
         }
-
-        if (parsedData.nodes) {
-          const nodeData = parsedData.nodes;
-          const nHeaders = nodeData[0] || [];
-          const idIdx = nHeaders.indexOf(nodeIdCol);
-          const lblIdx = nHeaders.indexOf(nodeLabelCol);
-          const typIdx = nHeaders.indexOf(nodeTypeCol);
-          const commIdx = nHeaders.indexOf(nodeCommunityCol);
-          const abnIdx = nHeaders.indexOf(nodeAbundCol);
-
-          if (idIdx !== -1) {
-            for (let i = 1; i < nodeData.length; i++) {
-              const row = nodeData[i];
-              const id = row[idIdx];
-              if (!id) continue;
-              const name = lblIdx !== -1 && row[lblIdx] ? row[lblIdx] : id;
-              const type = typIdx !== -1 ? row[typIdx] : undefined;
-              const comm = (commIdx !== -1 && row[commIdx]) ? row[commIdx] : undefined;
-              const abund = abnIdx !== -1 ? parseFloat(row[abnIdx]) : 10;
-              
-              if (nodesMap.has(id)) {
-                nodesMap.set(id, { id, name, type, community: comm, abundance: isNaN(abund) ? 10 : abund });
-              }
-            }
-          }
-        }
       } else if (isFormatAdjList && parsedData.adjList) {
         let actualSourceColIdx = 0;
-        if (parsedData.adjList.length > 0 && sourceCol) {
-           const idx = parsedData.adjList[0].indexOf(sourceCol);
+        if (parsedData.adjList.length > 0 && adjSourceCol) {
+           const idx = parsedData.adjList[0].indexOf(adjSourceCol);
            if (idx !== -1) actualSourceColIdx = idx;
         }
         for (let i = Math.max(0, safeDataStartRow); i < parsedData.adjList.length; i++) {
@@ -445,19 +453,112 @@ export default function SmartUploadWizard() {
           }
         }
       }
+      
+      if (parsedData.additionalEdges) {
+          const edgeData = parsedData.additionalEdges;
+          const eHeaders = edgeData[0] || [];
+          const sIdx = eHeaders.indexOf(sourceCol);
+          const tIdx = eHeaders.indexOf(targetCol);
+          const wrIdx = eHeaders.indexOf(weightRawCol);
+          const wsIdx = eHeaders.indexOf(weightSecCol);
+
+          if (sIdx !== -1 && tIdx !== -1) {
+            for (let i = 1; i < edgeData.length; i++) {
+              const row = edgeData[i];
+              const sId = row[sIdx];
+              const tId = row[tIdx];
+              if (!sId || !tId || sId === tId) continue;
+
+              const edgeId = isDirected ? `${sId}->${tId}` : (sId < tId ? `${sId}_${tId}` : `${tId}_${sId}`);
+              if (edgeSet.has(edgeId)) {
+                const existingEdge = edges.find(e => {
+                  const eId = isDirected ? `${e.source}->${e.target}` : (e.source < e.target ? `${e.source}_${e.target}` : `${e.target}_${e.source}`);
+                  return eId === edgeId;
+                });
+                if (existingEdge) {
+                  if (wrIdx !== -1 && !isNaN(parseFloat(row[wrIdx]))) existingEdge.weight_raw = parseFloat(row[wrIdx]);
+                  if (wsIdx !== -1 && !isNaN(parseFloat(row[wsIdx]))) existingEdge.weight_secondary = parseFloat(row[wsIdx]);
+                }
+              } else {
+                 const wRaw = wrIdx !== -1 ? parseFloat(row[wrIdx]) : 1;
+                 const wSec = wsIdx !== -1 ? parseFloat(row[wsIdx]) : wRaw;
+                 const finalWR = !isNaN(wRaw) ? wRaw : 1;
+                 const finalWS = !isNaN(wSec) ? wSec : finalWR;
+                 edgeSet.add(edgeId);
+                 edges.push({ source: sId, target: tId, weight_raw: finalWR, weight_secondary: finalWS });
+                 if (!nodesMap.has(sId)) nodesMap.set(sId, { id: sId, name: sId, abundance: 10 });
+                 if (!nodesMap.has(tId)) nodesMap.set(tId, { id: tId, name: tId, abundance: 10 });
+              }
+            }
+          }
+      }
+
+      if (parsedData.nodes) {
+          const nodeData = parsedData.nodes;
+          const nHeaders = nodeData[0] || [];
+          const idIdx = nHeaders.indexOf(nodeIdCol);
+          const lblIdx = nHeaders.indexOf(nodeLabelCol);
+          const typIdx = nHeaders.indexOf(nodeTypeCol);
+          const commIdx = nHeaders.indexOf(nodeCommunityCol);
+          const abnIdx = nHeaders.indexOf(nodeAbundCol);
+
+          if (idIdx !== -1) {
+            for (let i = 1; i < nodeData.length; i++) {
+              const row = nodeData[i];
+              const id = row[idIdx];
+              if (!id) continue;
+              const name = lblIdx !== -1 && row[lblIdx] ? row[lblIdx] : id;
+              const type = typIdx !== -1 ? row[typIdx] : undefined;
+              const comm = (commIdx !== -1 && row[commIdx]) ? row[commIdx] : undefined;
+              const abund = abnIdx !== -1 ? parseFloat(row[abnIdx]) : 10;
+                
+              if (nodesMap.has(id)) {
+                const existing = nodesMap.get(id);
+                
+                const extraProps: any = {};
+                for (let j = 0; j < nHeaders.length; j++) {
+                  if (j !== idIdx && j !== lblIdx && j !== typIdx && j !== commIdx && j !== abnIdx) {
+                    if (row[j] !== undefined && row[j] !== '') {
+                      extraProps[nHeaders[j]] = row[j];
+                    }
+                  }
+                }
+                nodesMap.set(id, { 
+                  ...existing,
+                  name: lblIdx !== -1 && row[lblIdx] ? name : existing.name,
+                  type: type || existing.type, 
+                  community: comm || existing.community, 
+                  abundance: isNaN(abund) ? existing.abundance : abund,
+                  ...extraProps
+                });
+              } else {
+                
+                const extraProps: any = {};
+                for (let j = 0; j < nHeaders.length; j++) {
+                  if (j !== idIdx && j !== lblIdx && j !== typIdx && j !== commIdx && j !== abnIdx) {
+                    if (row[j] !== undefined && row[j] !== '') {
+                      extraProps[nHeaders[j]] = row[j];
+                    }
+                  }
+                }
+                nodesMap.set(id, { id, name, type, community: comm, abundance: isNaN(abund) ? 10 : abund, ...extraProps });
+              }
+            }
+          }
+      }
     } catch(err) {
       console.error(err);
     }
     
     const finalNodes = Array.from(nodesMap.values());
     if (format !== 'Incidence Matrix') {
-      finalNodes.forEach(n => { if (n.abundance <= 0) n.abundance = 10; });
+      finalNodes.forEach(n => { if (typeof n.abundance !== 'number' || isNaN(n.abundance) || n.abundance <= 0) n.abundance = 10; });
     } else {
-      finalNodes.forEach(n => { if (n.abundance <= 0) n.abundance = 1; });
+      finalNodes.forEach(n => { if (typeof n.abundance !== 'number' || isNaN(n.abundance) || n.abundance <= 0) n.abundance = 1; });
     }
 
     return { nodes: finalNodes, edges };
-  }, [parsedData, format, step, sourceCol, targetCol, weightRawCol, weightSecCol, nodeIdCol, nodeLabelCol, nodeTypeCol, nodeCommunityCol, nodeAbundCol, rowHeadersCol, colHeadersRow, dataStartRow, dataStartCol, isDirected, topology, isFormatDualMatrix, isFormatEdgeList, isFormatMatrix, isFormatAdjList]);
+  }, [parsedData, format, step, sourceCol, targetCol, adjSourceCol, weightRawCol, weightSecCol, nodeIdCol, nodeLabelCol, nodeTypeCol, nodeCommunityCol, nodeAbundCol, rowHeadersCol, colHeadersRow, dataStartRow, dataStartCol, isDirected, topology, isFormatDualMatrix, isFormatEdgeList, isFormatMatrix, isFormatAdjList]);
 
   const handleFinalize = () => {
     clearStore();
@@ -753,6 +854,41 @@ export default function SmartUploadWizard() {
               )}
             </div>
 
+            {format !== 'Standard JSON' && (
+              <div className="mt-6 border-t border-dashed pt-6" style={{ borderColor: isDarkMode ? '#333' : '#d0d0d0' }}>
+                <label className="flex items-center space-x-2 cursor-pointer mb-4">
+                  <input type="checkbox" checked={hasAdditionalAttributes} onChange={e => setHasAdditionalAttributes(e.target.checked)} className="accent-[#141414] dark:accent-[#E4E3E0]" />
+                  <span className={`text-[10px] font-bold uppercase tracking-widest ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Upload Additional Node/Edge Attributes</span>
+                </label>
+                {hasAdditionalAttributes && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {!isFormatEdgeList && (
+                      <div>
+                        <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Additional Edges (CSV) [Optional]</label>
+                        <label className={`flex flex-col items-center justify-center w-full h-32 border border-dashed cursor-pointer transition-colors ${isDarkMode ? 'border-[#E4E3E0]/50 bg-[#222]/30 hover:bg-[#222]' : 'border-[#141414] bg-[#E4E3E0]/30 hover:bg-[#E4E3E0]'}`}>
+                          <div className="flex flex-col items-center justify-center">
+                            <p className="text-[10px] font-bold tracking-widest uppercase">Select File</p>
+                            <p className="text-[10px] font-mono opacity-60 mt-1">{edgesFile?.name || '---'}</p>
+                          </div>
+                          <input type="file" className="hidden" accept=".csv" onChange={e => setEdgesFile(e.target.files?.[0] || null)} />
+                        </label>
+                      </div>
+                    )}
+                    <div>
+                      <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Additional Nodes (CSV) [Optional]</label>
+                      <label className={`flex flex-col items-center justify-center w-full h-32 border border-dashed cursor-pointer transition-colors ${isDarkMode ? 'border-[#E4E3E0]/50 bg-[#222]/30 hover:bg-[#222]' : 'border-[#141414] bg-[#E4E3E0]/30 hover:bg-[#E4E3E0]'}`}>
+                        <div className="flex flex-col items-center justify-center">
+                          <p className="text-[10px] font-bold tracking-widest uppercase">Select File</p>
+                          <p className="text-[10px] font-mono opacity-60 mt-1">{nodesFile?.name || '---'}</p>
+                        </div>
+                        <input type="file" className="hidden" accept=".csv" onChange={e => setNodesFile(e.target.files?.[0] || null)} />
+                      </label>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className={`mt-8 flex justify-between border-t pt-6 ${isDarkMode ? 'border-[#333]' : 'border-[#141414]'}`}>
               <button onClick={() => setStep(3)} className={`border border-transparent text-[10px] font-bold px-6 py-3 uppercase tracking-widest transition-all ${isDarkMode ? 'text-[#E4E3E0] hover:border-[#E4E3E0]' : 'text-[#141414] hover:border-[#141414]'}`}>Back</button>
               <button 
@@ -784,8 +920,20 @@ export default function SmartUploadWizard() {
                  </div>
                </div>
             )}
+               
+            {parsedData.additionalEdges && (
+               <div className="space-y-6">
+                 {renderTablePreview(parsedData.additionalEdges, 'Additional Edges Attributes')}
+                 <div className={`grid grid-cols-2 lg:grid-cols-5 gap-4 p-4 border mb-6 ${isDarkMode ? 'border-[#333] bg-[#222]/30' : 'border-[#141414] bg-[#E4E3E0]/30'}`}>
+                   {renderDropdown('Source Col', sourceCol, setSourceCol, parsedData.additionalEdges[0] || [])}
+                   {renderDropdown('Target Col', targetCol, setTargetCol, parsedData.additionalEdges[0] || [])}
+                   {renderDropdown('Weight Col', weightRawCol, setWeightRawCol, parsedData.additionalEdges[0] || [])}
+                   {renderDropdown('Weight (Sec)', weightSecCol, setWeightSecCol, parsedData.additionalEdges[0] || [])}
+                 </div>
+               </div>
+            )}
             
-            {isFormatEdgeList && parsedData.nodes && (
+            {parsedData.nodes && (
                <div className="space-y-6">
                  {renderTablePreview(parsedData.nodes, 'Nodes Dataset')}
                  <div className={`grid grid-cols-2 lg:grid-cols-5 gap-4 p-4 border mb-6 ${isDarkMode ? 'border-[#333] bg-[#222]/30' : 'border-[#141414] bg-[#E4E3E0]/30'}`}>
@@ -813,7 +961,7 @@ export default function SmartUploadWizard() {
                <div className="space-y-6">
                  {renderTablePreview(parsedData.adjList, 'Adjacency List', true)}
                  <div className={`grid grid-cols-2 lg:grid-cols-4 gap-4 p-4 border mb-6 ${isDarkMode ? 'border-[#333] bg-[#222]/30' : 'border-[#141414] bg-[#E4E3E0]/30'}`}>
-                   {renderDropdown('Source Col', sourceCol, setSourceCol, parsedData.adjList[0] || [])}
+                   {renderDropdown('Source Col', adjSourceCol, setAdjSourceCol, parsedData.adjList[0] || [])}
                    <div>
                       <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Data Start Row Index</label>
                       <input type="number" value={dataStartRow} onChange={e => setDataStartRow(e.target.value === '' ? '' : parseInt(e.target.value))} min={1} className={`w-full border px-3 py-2 font-mono text-[10px] ${isDarkMode ? 'border-[#333] bg-[#1a1a1a] text-[#E4E3E0]' : 'border-[#141414] bg-white text-[#141414]'}`} />

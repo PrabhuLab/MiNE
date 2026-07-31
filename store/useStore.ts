@@ -26,22 +26,25 @@ export interface WorkspaceFilters {
   weightFilters: WeightFilter[];
   searchEdges: boolean;
   removedNodes: string;
-  recalculateCommunities: boolean;
   resolution: number;
   nodeSize: number;
   nodeSizeBase: string;
   nodeColorBase: string;
+  uniformNodeColor: string;
+  uniformEdgeColor: string;
   nodeOpacity: number;
   edgeWeight: number;
   edgeWeightBase: string;
   edgeColorBase: string;
+  edgeColorNodeMetric: string;
+  edgeColorNodeTarget: 'source' | 'target';
   edgeOpacity: number;
   edgeOpacityBase: string;
   forceStrength: number;
   louvainSeed: number;
   liveUpdate: boolean;
   livePhysics: boolean;
-  isFrozen: boolean;
+  
 }
 
 interface AppState {
@@ -61,6 +64,10 @@ interface AppState {
   
   selectedElement: string | null;
   setSelectedElement: (val: string | null) => void;
+  hiddenLegendItems: string[];
+  setHiddenLegendItems: (val: string[]) => void;
+  isolatedLegendItem: string | null;
+  setIsolatedLegendItem: (val: string | null) => void;
   searchQuery: string;
   setSearchQuery: (val: string) => void;
   projectName: string;
@@ -81,29 +88,36 @@ export const useStore = create<AppState>((set) => ({
 
   selectedElement: null,
   setSelectedElement: (val) => set({ selectedElement: val }),
+  hiddenLegendItems: [],
+  setHiddenLegendItems: (val) => set({ hiddenLegendItems: val }),
+  isolatedLegendItem: null,
+  setIsolatedLegendItem: (val) => set({ isolatedLegendItem: val }),
   searchQuery: '',
   setSearchQuery: (val) => set({ searchQuery: val }),
 
   filters: {
-    weightFilters: [{ id: 'default-1', type: 'weight_raw', cutoff: 0 }],
+    weightFilters: [],
     searchEdges: false,
     removedNodes: "",
-    recalculateCommunities: true,
     resolution: 1.0,
     nodeSize: 3,
     nodeSizeBase: 'abundance',
-    nodeColorBase: 'community',
+    nodeColorBase: 'custom',
+    uniformNodeColor: '#cccccc',
+    uniformEdgeColor: '#888888',
     nodeOpacity: 1.0,
     edgeWeight: 1.0,
     edgeWeightBase: 'weight_raw',
     edgeColorBase: 'uniform',
+    edgeColorNodeMetric: '',
+    edgeColorNodeTarget: 'source',
     edgeOpacity: 0.3,
     edgeOpacityBase: 'uniform',
     forceStrength: -100,
     louvainSeed: 42,
     liveUpdate: true,
     livePhysics: false,
-    isFrozen: false,
+    
   },
   setFilter: (key, value) => 
     set((state) => ({ filters: { ...state.filters, [key]: value } })),
@@ -118,26 +132,31 @@ export const useStore = create<AppState>((set) => ({
     rawNodes: [],
     rawEdges: [],
     communityMap: {},
+    hiddenLegendItems: [],
+    isolatedLegendItem: null,
     filters: {
-      weightFilters: [{ id: 'default-1', type: 'weight_raw', cutoff: 0 }],
+      weightFilters: [],
       searchEdges: false,
       removedNodes: "",
-      recalculateCommunities: true,
       resolution: 1.0,
       nodeSize: 3,
       nodeSizeBase: 'abundance',
-      nodeColorBase: 'community',
+      nodeColorBase: 'custom',
+      uniformNodeColor: '#cccccc',
+      uniformEdgeColor: '#888888',
       nodeOpacity: 1.0,
       edgeWeight: 1.0,
       edgeWeightBase: 'weight_raw',
       edgeColorBase: 'uniform',
+      edgeColorNodeMetric: '',
+      edgeColorNodeTarget: 'source',
       edgeOpacity: 0.3,
       edgeOpacityBase: 'uniform',
       forceStrength: -100,
       louvainSeed: 42,
       liveUpdate: true,
       livePhysics: false,
-      isFrozen: false,
+      
     }
   })
 }));

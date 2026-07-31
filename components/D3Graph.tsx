@@ -1,8 +1,10 @@
 'use client';
 
+/* eslint-disable react-hooks/preserve-manual-memoization, react-hooks/exhaustive-deps */
+
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import * as d3 from 'd3';
-import { RawNode, RawEdge } from '@/store/useStore';
+import { useStore, RawNode, RawEdge } from '@/store/useStore';
 import { ChevronUp, ChevronDown } from 'lucide-react';
 import { COMMUNITY_COLORS, getCommunityColor } from '@/lib/communityUtils';
 
@@ -24,8 +26,7 @@ interface D3GraphProps {
   directed: boolean;
   bipartite: boolean;
   livePhysics?: boolean;
-  isFrozen?: boolean;
-  isDarkMode?: boolean;
+    isDarkMode?: boolean;
   refreshKey?: number;
   onRefresh?: () => void;
   onElementDoubleClick?: (id: string, type: "node" | "edge") => void;
@@ -34,7 +35,7 @@ interface D3GraphProps {
   selectedElement?: string | null;
 }
 
-export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [], nodeSizeMult, nodeSizeBase = 'abundance', nodeColorBase = 'community', edgeWeightMult = 1, edgeWeightBase = 'weight_raw', edgeColorBase = 'uniform', nodeOpacity = 1, edgeOpacity = 0.3, edgeOpacityBase = 'uniform', forceStrength, directed, bipartite, livePhysics, isFrozen, isDarkMode, refreshKey, onRefresh, onElementDoubleClick, onClearSelection, searchQuery = "", selectedElement = null }: D3GraphProps) {
+export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [], nodeSizeMult, nodeSizeBase = 'abundance', nodeColorBase = 'custom', uniformNodeColor = '#cccccc', uniformEdgeColor = '#cccccc', edgeWeightMult = 1, edgeWeightBase = 'weight_raw', edgeColorBase = 'uniform', edgeColorNodeMetric = '', edgeColorNodeTarget = 'source', nodeOpacity = 1, edgeOpacity = 0.3, edgeOpacityBase = 'uniform', forceStrength, directed, bipartite, livePhysics, isDarkMode, refreshKey, onRefresh, onElementDoubleClick, onClearSelection, searchQuery = '', selectedElement = null }: D3GraphProps & { uniformNodeColor?: string, uniformEdgeColor?: string, edgeColorNodeMetric?: string, edgeColorNodeTarget?: 'source' | 'target' }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const simulationRef = useRef<d3.Simulation<any, any> | null>(null);
@@ -42,19 +43,26 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
   
   
 
-  const runtimeRef = useRef({ livePhysics, isFrozen });
+  const runtimeRef = useRef({ livePhysics });
+  const onDoubleClickRef = useRef(onElementDoubleClick);
+  useEffect(() => { onDoubleClickRef.current = onElementDoubleClick; }, [onElementDoubleClick]);
   useEffect(() => {
-    runtimeRef.current = { livePhysics, isFrozen };
-  }, [livePhysics, isFrozen]);
+    runtimeRef.current = { livePhysics };
+  }, [livePhysics]);
 
   const [clickedNode, setClickedNode] = useState<RawNode | null>(null);
   const [clickedDegree, setClickedDegree] = useState<number>(0);
   const [clickedEdge, setClickedEdge] = useState<RawEdge | null>(null);
+  const [isCalculatingLayout, setIsCalculatingLayout] = useState(false);
   
-  const [hiddenItems, setHiddenItems] = useState<Set<string>>(new Set());
+  const { hiddenLegendItems, setHiddenLegendItems, isolatedLegendItem, setIsolatedLegendItem } = useStore();
+  const hiddenItems = new Set(hiddenLegendItems);
+  const setHiddenItems = (updater: (prev: Set<string>) => Set<string>) => {
+    setHiddenLegendItems(Array.from(updater(new Set(hiddenLegendItems))));
+  };
   const [expandedLegendItems, setExpandedLegendItems] = useState<Set<string>>(new Set());
   const [isLegendMinimized, setIsLegendMinimized] = useState(false);
-  const [isolatedLegendItem, setIsolatedLegendItem] = useState<string | null>(null);
+  
   const clickTimers = useRef<{[key: string]: NodeJS.Timeout}>({});
   const clickCounts = useRef<{[key: string]: number}>({});
   const clickedNodeRef = useRef<RawNode | null>(null);
@@ -101,7 +109,7 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
   
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect */
-    setHiddenItems(new Set());
+    setHiddenItems(() => new Set<string>());
     setClickedNode(null);
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [refreshKey]);
@@ -164,7 +172,12 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
             const graphNodes = simulationRef.current.nodes().filter((d: any) => {
               if (id.startsWith('community:')) {
                  const c = id.split('community:')[1];
-                 return communityMap[d.id] === c;
+                 const net = netMap.get(d.id);
+                 let comm;
+                 if (nodeColorBase === 'louvain') comm = net?.louvain;
+                 else if (nodeColorBase === 'leiden') comm = net?.leiden;
+                 else comm = communityMap[d.id] ?? d.community ?? net?.louvain ?? net?.leiden;
+                 return String(comm) === String(c);
               }
               if (id.startsWith('type:')) {
                  const t = id.split('type:')[1];
@@ -216,18 +229,38 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
     )}
   ];
   const elementLegendIds = elementLegendItems.map(item => item.id);
-  const communityLabels = useMemo(() => (Array.from(new Set(Object.values(communityMap))) as string[]).sort((a, b) => 
-    a.toString().localeCompare(b.toString(), undefined, { numeric: true, sensitivity: 'base' })
-  ), [communityMap]);
-  const communityLegendIds = communityLabels.map(c => `community:${c}`);
-  
-  const communityColorMap = useMemo(() => {
+    const customLabels = useMemo(() => Array.from(new Set(Object.values(communityMap || {}).filter(Boolean))).sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' })), [communityMap]);
+  const louvainLabels = useMemo(() => Array.from(new Set((networkMetrics || []).map(m => m.louvain).filter(Boolean))).sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' })), [networkMetrics]);
+  const leidenLabels = useMemo(() => Array.from(new Set((networkMetrics || []).map(m => m.leiden).filter(Boolean))).sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' })), [networkMetrics]);
+
+  const customColorMap = useMemo(() => {
     const map: Record<string, string> = {};
-    communityLabels.forEach((label, i) => {
-      map[label] = COMMUNITY_COLORS[i % COMMUNITY_COLORS.length] || COMMUNITY_COLORS[0];
-    });
+    customLabels.forEach((label, i) => { map[label] = COMMUNITY_COLORS[i % COMMUNITY_COLORS.length] || COMMUNITY_COLORS[0]; });
     return map;
-  }, [communityLabels]);
+  }, [customLabels]);
+  const louvainColorMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    louvainLabels.forEach((label, i) => { map[label] = COMMUNITY_COLORS[i % COMMUNITY_COLORS.length] || COMMUNITY_COLORS[0]; });
+    return map;
+  }, [louvainLabels]);
+  const leidenColorMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    leidenLabels.forEach((label, i) => { map[label] = COMMUNITY_COLORS[i % COMMUNITY_COLORS.length] || COMMUNITY_COLORS[0]; });
+    return map;
+  }, [leidenLabels]);
+
+  const communityLabels = useMemo(() => {
+    if (nodeColorBase === 'louvain') return louvainLabels;
+    if (nodeColorBase === 'leiden') return leidenLabels;
+    return customLabels;
+  }, [nodeColorBase, customLabels, louvainLabels, leidenLabels]);
+
+  const communityColorMap = useMemo(() => {
+    if (nodeColorBase === 'louvain') return louvainColorMap;
+    if (nodeColorBase === 'leiden') return leidenColorMap;
+    return customColorMap;
+  }, [nodeColorBase, customColorMap, louvainColorMap, leidenColorMap]);
+  const communityLegendIds = communityLabels.map(c => `community:${c}`);
 
   const typeLabels = useMemo(() => {
     return Array.from(new Set(nodes.map(n => n.type).filter(Boolean))) as string[];
@@ -235,15 +268,21 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
 
   const typeColorScale = useMemo(() => d3.scaleOrdinal(d3.schemeCategory10), []);
 
+  const netMap = useMemo(() => new Map((networkMetrics || []).map((m: any) => [m.id, m])), [networkMetrics]);
+
   const legendCategories = useMemo(() => {
-    if (nodeColorBase === 'community' && communityLabels.length > 0) {
+    if ((nodeColorBase === 'custom' || nodeColorBase === 'louvain' || nodeColorBase === 'leiden') && communityLabels.length > 0) {
       return {
-        title: 'Communities',
+        title: nodeColorBase === 'custom' ? 'Custom Communities' : (nodeColorBase === 'louvain' ? 'Louvain Communities' : 'Leiden Communities'),
         items: communityLabels.map(label => ({
           label,
           id: `community:${label}`,
           color: communityColorMap[label],
-          nodes: nodes.filter(n => communityMap[n.id] === label).map(n => n.label || n.name || n.id),
+          nodes: nodes.filter(n => {
+             if (nodeColorBase === 'custom') return communityMap[n.id] === label;
+             const net = netMap.get(n.id);
+             return net && net[nodeColorBase] === label;
+          }).map(n => n.label || n.name || n.id),
           allIds: communityLegendIds
         }))
       };
@@ -260,7 +299,7 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
       };
     }
     return null;
-  }, [nodeColorBase, communityLabels, communityColorMap, communityMap, typeLabels, typeColorScale, nodes, communityLegendIds]);
+  }, [nodeColorBase, communityLabels, communityColorMap, communityMap, typeLabels, typeColorScale, nodes, communityLegendIds, netMap]);
 
   const maxEigen = useMemo(() => d3.max(networkMetrics, (d: any) => parseFloat(d.eigenvector)) || 1, [networkMetrics]);
   const minEigen = useMemo(() => d3.min(networkMetrics, (d: any) => parseFloat(d.eigenvector)) || 0, [networkMetrics]);
@@ -279,9 +318,17 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
   const degreeCentColorScale = useMemo(() => d3.scaleSequential(isDarkMode ? d3.interpolateYlOrBr : d3.interpolateYlOrBr).domain([0, maxDegreeCent]), [isDarkMode, maxDegreeCent]);
 
   const getNodeColor = useCallback((d: any) => {
-    const net = networkMetrics.find(m => m.id === d.id);
-    const defaultNodeColor = isDarkMode ? '#bbbbbb' : '#141414';
-    if (nodeColorBase === 'community') return communityColorMap[communityMap[d.id]] || defaultNodeColor;
+    const net = netMap.get(d.id);
+    const defaultNodeColor = isDarkMode ? '#E4E3E0' : '#141414';
+    if (nodeColorBase === 'uniform') {
+      if (!isDarkMode && (uniformNodeColor === '#cccccc' || uniformNodeColor === '#bbb' || uniformNodeColor === '#bbbbbb')) {
+        return '#141414';
+      }
+      return uniformNodeColor;
+    }
+    if (nodeColorBase === 'custom') return customColorMap[communityMap[d.id] ?? d.community] || defaultNodeColor;
+    if (nodeColorBase === 'louvain' && net?.louvain) return louvainColorMap[net.louvain] || defaultNodeColor;
+    if (nodeColorBase === 'leiden' && net?.leiden) return leidenColorMap[net.leiden] || defaultNodeColor;
     if (nodeColorBase === 'type' && d.type) return typeColorScale(d.type);
     if (nodeColorBase === 'eigenvector' && net?.eigenvector !== undefined) return eigenColorScale(parseFloat(net.eigenvector));
     if (nodeColorBase === 'pagerank' && net?.pagerank !== undefined) return prColorScale(parseFloat(net.pagerank));
@@ -292,7 +339,7 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
     if (nodeColorBase === 'inDegreeCentrality' && net?.inDegreeCentrality !== undefined) return degreeCentColorScale(parseFloat(net.inDegreeCentrality));
     if (nodeColorBase === 'outDegreeCentrality' && net?.outDegreeCentrality !== undefined) return degreeCentColorScale(parseFloat(net.outDegreeCentrality));
     return defaultNodeColor;
-  }, [isDarkMode, nodeColorBase, communityColorMap, communityMap, typeColorScale, eigenColorScale, prColorScale, betweennessColorScale, closenessColorScale, clusteringColorScale, degreeCentColorScale, networkMetrics]);
+  }, [isDarkMode, nodeColorBase, uniformNodeColor, customColorMap, louvainColorMap, leidenColorMap, communityMap, typeColorScale, eigenColorScale, prColorScale, betweennessColorScale, closenessColorScale, clusteringColorScale, degreeCentColorScale, netMap]);
 
   const maxRaw = useMemo(() => d3.max(edges, (d: any) => Number(d.weight_raw) || 0) || 1, [edges]);
   const maxSec = useMemo(() => d3.max(edges, (d: any) => Number(d.weight_secondary) || 0) || 1, [edges]);
@@ -300,10 +347,44 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
   const secColorScale = useMemo(() => d3.scaleSequential(isDarkMode ? d3.interpolateOrRd : d3.interpolateOranges).domain([0, maxSec]), [isDarkMode, maxSec]);
 
   const getEdgeColor = useCallback((d: any) => {
+    if (edgeColorBase === 'nodeMetric' && edgeColorNodeMetric) {
+      const targetId = edgeColorNodeTarget === 'source' ? (d.source.id || d.source) : (d.target.id || d.target);
+      const net = netMap.get(targetId);
+      const mBase = edgeColorNodeMetric;
+      const defaultColor = isDarkMode ? '#eeeeee' : '#141414';
+      if (mBase === 'custom') return customColorMap[communityMap[targetId]] || defaultColor;
+      if (mBase === 'louvain' && net?.louvain) return louvainColorMap[net.louvain] || defaultColor;
+      if (mBase === 'leiden' && net?.leiden) return leidenColorMap[net.leiden] || defaultColor;
+      if (mBase === 'type') {
+         const t = nodes.find(n => n.id === targetId)?.type;
+         if (t) return typeColorScale(t);
+      }
+      if (mBase === 'eigenvector' && net?.eigenvector !== undefined) return eigenColorScale(parseFloat(net.eigenvector));
+      if (mBase === 'pagerank' && net?.pagerank !== undefined) return prColorScale(parseFloat(net.pagerank));
+      if (mBase === 'betweenness' && net?.betweenness !== undefined) return betweennessColorScale(parseFloat(net.betweenness));
+      if (mBase === 'closeness' && net?.closeness !== undefined) return closenessColorScale(parseFloat(net.closeness));
+      if (mBase === 'clustering' && net?.clustering !== undefined) return clusteringColorScale(parseFloat(net.clustering));
+      if (mBase === 'degreeCentrality' && net?.degreeCentrality !== undefined) return degreeCentColorScale(parseFloat(net.degreeCentrality));
+      if (mBase === 'inDegreeCentrality' && net?.inDegreeCentrality !== undefined) return degreeCentColorScale(parseFloat(net.inDegreeCentrality));
+      if (mBase === 'outDegreeCentrality' && net?.outDegreeCentrality !== undefined) return degreeCentColorScale(parseFloat(net.outDegreeCentrality));
+    }
+    
     if (edgeColorBase === 'weight_raw' && d.weight_raw !== undefined) return rawColorScale(Number(d.weight_raw));
     if (edgeColorBase === 'weight_secondary' && d.weight_secondary !== undefined) return secColorScale(Number(d.weight_secondary));
-    return isDarkMode ? '#eeeeee' : '#141414';
-  }, [edgeColorBase, rawColorScale, secColorScale, isDarkMode]);
+    if (edgeColorBase === 'uniform') {
+      if (isDarkMode) {
+        if (uniformEdgeColor === '#000000' || uniformEdgeColor === '#000' || uniformEdgeColor === '#141414' || uniformEdgeColor === '#222222') {
+          return '#888888';
+        }
+      } else {
+        if (uniformEdgeColor === '#cccccc' || uniformEdgeColor === '#E4E3E0' || uniformEdgeColor === '#ffffff' || uniformEdgeColor === '#fff') {
+          return '#333333';
+        }
+      }
+      return uniformEdgeColor;
+    }
+    return isDarkMode ? '#888888' : '#333333';
+  }, [edgeColorBase, uniformEdgeColor, edgeColorNodeMetric, edgeColorNodeTarget, nodes, netMap, customColorMap, louvainColorMap, leidenColorMap, communityMap, typeColorScale, eigenColorScale, prColorScale, betweennessColorScale, closenessColorScale, clusteringColorScale, degreeCentColorScale, rawColorScale, secColorScale, isDarkMode]);
 
   const getEdgeOpacity = useCallback((d: any) => {
     if (edgeOpacityBase === 'weight_raw' && d.weight_raw !== undefined) return 0.1 + 0.9 * (Number(d.weight_raw) / maxRaw);
@@ -341,6 +422,53 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
     );
   };
 
+  
+  useEffect(() => {
+    if (selectedElement && svgRef.current && zoomBehaviorRef.current && simulationRef.current && containerRef.current) {
+      const svg = d3.select(svgRef.current);
+      const width = containerRef.current.clientWidth;
+      const height = containerRef.current.clientHeight;
+      const graphNodes = simulationRef.current.nodes();
+      
+      let targetNodes = [];
+      if (!selectedElement.includes('-')) {
+        const n = graphNodes.find(d => d.id === selectedElement);
+        if (n) targetNodes.push(n);
+      } else {
+        const parts = selectedElement.split('-');
+        if (parts.length >= 2) {
+          const src = parts[0];
+          const tgt = parts[1];
+          const n1 = graphNodes.find(d => d.id === src);
+          const n2 = graphNodes.find(d => d.id === tgt);
+          if (n1) targetNodes.push(n1);
+          if (n2) targetNodes.push(n2);
+        }
+      }
+      
+      if (targetNodes.length > 0) {
+        const minX = d3.min(targetNodes, d => d.x - (d.currentRadius || 0)) || 0;
+        const minY = d3.min(targetNodes, d => d.y - (d.currentRadius || 0)) || 0;
+        const maxX = d3.max(targetNodes, d => d.x + (d.currentRadius || 0)) || 0;
+        const maxY = d3.max(targetNodes, d => d.y + (d.currentRadius || 0)) || 0;
+        
+        const dx = maxX - minX;
+        const dy = maxY - minY;
+        const x = (minX + maxX) / 2;
+        const y = (minY + maxY) / 2;
+        
+        // Use a slightly larger max scale for single node focusing
+        const scale = dx === 0 && dy === 0 ? 2 : Math.max(0.1, Math.min(2.5, 0.9 / Math.max(dx / width, dy / height)));
+        const translate = [width / 2 - scale * x, height / 2 - scale * y];
+        
+        svg.transition().duration(750).call(
+          zoomBehaviorRef.current.transform, 
+          d3.zoomIdentity.translate(translate[0], translate[1]).scale(scale)
+        );
+      }
+    }
+  }, [selectedElement]);
+
   // 1. Initial Graph Setup & Rendering
   useEffect(() => {
     if (!containerRef.current || !svgRef.current) return;
@@ -356,7 +484,7 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
     // Setup zoom
     const zoomGroup = svg.append('g').attr('class', 'zoom-group');
     const zoom = d3.zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.1, 4])
+      .scaleExtent([0.01, 10])
       .on('zoom', (e) => {
         zoomGroup.attr('transform', e.transform);
       });
@@ -406,7 +534,7 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
     // Deep copy data for D3 mutation
     const graphNodes = nodes.map(d => {
       const gNode: any = { ...d };
-      const net = networkMetrics.find(m => m.id === d.id);
+      const net = netMap.get(d.id);
       
       let baseVal = 10;
       if (nodeSizeBase === 'abundance') baseVal = gNode.abundance || 10;
@@ -450,16 +578,11 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
     const maxWeight = d3.max(graphLinks, (d: void | any) => (d as any).weight) || 1;
     const strokeWidthScale = d3.scaleLinear().domain([0, maxWeight]).range([0.5, 4]);
 
-    
-                
-    
-    
-
     const simulation = d3.forceSimulation(graphNodes as d3.SimulationNodeDatum[])
       .force('link', d3.forceLink(graphLinks).id((d: any) => d.id).distance(30))
       .force('charge', d3.forceManyBody().strength(forceStrength))
       .force('center', d3.forceCenter(width / 2, height / 2))
-      .force('collide', d3.forceCollide().radius((d: any) => d.currentRadius + 2).iterations(2));
+      .force('collide', d3.forceCollide().radius((d: any) => d.currentRadius + 2).iterations(graphNodes.length > 1000 ? 1 : 2));
 
     simulationRef.current = simulation;
 
@@ -487,10 +610,10 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
       })
       .on("dblclick", (e: any, d: any) => {
         e.stopPropagation();
-        if (onElementDoubleClick) {
+        if (onDoubleClickRef.current) {
           const srcId = typeof d.source === 'object' ? d.source.id : d.source;
           const tgtId = typeof d.target === 'object' ? d.target.id : d.target;
-          onElementDoubleClick(`${srcId}-${tgtId}`, "edge");
+          onDoubleClickRef.current(`${srcId}-${tgtId}`, 'edge');
         }
       });
 
@@ -508,7 +631,7 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
     const typeBNodes = nodeGroup.filter(d => isTypeB(d));
 
     const drawNodeShape = (selection: any, isSquare: boolean) => {
-      const defaultNodeColor = isDarkMode ? '#bbbbbb' : '#141414';
+      const strokeColor = isDarkMode ? '#444444' : '#141414';
       if (isSquare) {
         return selection.append('rect')
           .attr('class', 'node-shape')
@@ -517,16 +640,16 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
           .attr('width', (d: any) => d.currentRadius * 2)
           .attr('height', (d: any) => d.currentRadius * 2)
           .attr('fill', (d: any) => getNodeColor(d))
-          .attr('stroke', isDarkMode ? '#222' : '#141414')
-          .attr('stroke-width', 0.5)
+          .attr('stroke', strokeColor)
+          .attr('stroke-width', 1)
           .style('cursor', 'pointer');
       } else {
         return selection.append('circle')
           .attr('class', 'node-shape')
           .attr('r', (d: any) => d.currentRadius)
           .attr('fill', (d: any) => getNodeColor(d))
-          .attr('stroke', isDarkMode ? '#222' : '#141414')
-          .attr('stroke-width', 0.5)
+          .attr('stroke', strokeColor)
+          .attr('stroke-width', 1)
           .style('cursor', 'pointer');
       }
     };
@@ -546,7 +669,7 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
       });
       selection.on("dblclick", (e: any, d: any) => {
         e.stopPropagation();
-        if (onElementDoubleClick) onElementDoubleClick(d.id, "node");
+        if (onDoubleClickRef.current) onDoubleClickRef.current(d.id, 'node');
       });
     };
 
@@ -564,12 +687,13 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
       .attr('font-size', '10px')
       .attr('font-family', 'var(--f-mono)')
       .attr('font-weight', 'bold')
-      .attr("fill", (d: any) => d.currentRadius >= 14 ? (isDarkMode ? "#222" : "#fff") : (isDarkMode ? "#ddd" : "#141414"))
+      .attr("fill", (d: any) => d.currentRadius >= 14 ? (isDarkMode ? "#222" : "#fff") : (isDarkMode ? "#E4E3E0" : "#141414"))
       .style('pointer-events', 'none')
       .style('display', showLabels ? 'block' : 'none');
 
     // Simulation Tick
     const defaultArrows = directed && graphLinks.length < 500;
+    const isLargeEdgeCount = graphLinks.length > 800;
     const tickDraw = () => {
       link.attr('d', (d: any) => {
         let targetX = d.target.x;
@@ -588,7 +712,7 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
           showArrow = directed && (srcId === cEdgeSrc && tgtId === cEdgeTgt);
         }
 
-        if (directed) {
+        if (directed && !isLargeEdgeCount) {
           const dx = d.target.x - d.source.x;
           const dy = d.target.y - d.source.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
@@ -618,7 +742,7 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
 
     // Make nodes draggable, but respect livePhysics
     function dragstarted(event: any, d: any) {
-      if (runtimeRef.current.livePhysics && !runtimeRef.current.isFrozen) {
+      if (runtimeRef.current.livePhysics) {
         if (!event.active) simulation.alphaTarget(0.3).restart();
         d.fx = d.x;
         d.fy = d.y;
@@ -626,7 +750,7 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
     }
     
     function dragged(event: any, d: any) {
-      if (runtimeRef.current.livePhysics && !runtimeRef.current.isFrozen) {
+      if (runtimeRef.current.livePhysics) {
         d.fx = event.x;
         d.fy = event.y;
       } else {
@@ -638,7 +762,7 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
     }
     
     function dragended(event: any, d: any) {
-      if (runtimeRef.current.livePhysics && !runtimeRef.current.isFrozen) {
+      if (runtimeRef.current.livePhysics) {
         if (!event.active) simulation.alphaTarget(0);
         d.fx = null;
         d.fy = null;
@@ -653,37 +777,57 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
 
     // Initial Physics Run
     if (livePhysics) {
+       // eslint-disable-next-line react-hooks/set-state-in-effect
+       setIsCalculatingLayout(false);
        simulation.alpha(1).restart();
-    } else if (isFrozen) {
-       simulation.stop();
-       tickDraw();
     } else {
-       // Static mode: compute synchronously to prevent lag from constant re-rendering
+       // Static mode: compute asynchronously to prevent UI freezing
        simulation.stop();
-       for (let i = 0; i < 300; i++) {
-          simulation.tick();
-       }
-       tickDraw();
+       // eslint-disable-next-line react-hooks/set-state-in-effect
+       setIsCalculatingLayout(true);
+       svg.style('opacity', 0); // Hide graph during computation
+       
+       let ticks = 0;
+       const maxTicks = 300;
+       const batchSize = 50;
+       
+       const computeBatch = () => {
+         if (!simulationRef.current) return;
+         for (let i = 0; i < batchSize && ticks < maxTicks; i++) {
+            simulation.tick();
+            ticks++;
+         }
+         if (ticks < maxTicks) {
+            setTimeout(computeBatch, 0);
+         } else {
+            tickDraw();
+            svg.transition().duration(300).style('opacity', 1);
+            setIsCalculatingLayout(false);
+         }
+       };
+       setTimeout(computeBatch, 50); // small delay to allow loader to render
     }
 
     return () => {
       simulation.stop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes, edges, communityMap, forceStrength, nodeSizeMult, directed, bipartite, refreshKey]);
+  }, [nodes, edges, communityMap, directed, bipartite, refreshKey]);
 
-  // 2. Play/Pause/Freeze Physics
+
+
+  // Fast Force Update & Physics toggle
   useEffect(() => {
-    const sim = simulationRef.current;
-    if (!sim) return;
-    
-    if (isFrozen) {
-      sim.stop();
-    } else if (livePhysics) {
-      sim.alpha(1).restart();
+    if (simulationRef.current) {
+      simulationRef.current.force('charge', d3.forceManyBody().strength(forceStrength));
+      if (livePhysics) {
+        simulationRef.current.alpha(1).restart();
+        setTimeout(() => { if (simulationRef.current) simulationRef.current.alphaTarget(0); }, 1000);
+      } else {
+        simulationRef.current.stop();
+      }
     }
-    // If not livePhysics but not frozen, let it settle naturally.
-  }, [livePhysics, isFrozen]);
+  }, [forceStrength, livePhysics]);
 
   // Fast Node Sizing Update
   useEffect(() => {
@@ -736,11 +880,11 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
 
     simulationRef.current.force('collide', d3.forceCollide().radius((d: any) => d.currentRadius + 2).iterations(2));
     
-    if (livePhysics && !isFrozen) {
+    if (livePhysics) {
       simulationRef.current.alphaTarget(0.1).restart();
       setTimeout(() => { if (simulationRef.current) simulationRef.current.alphaTarget(0); }, 1000);
     }
-  }, [nodeSizeBase, nodeSizeMult, networkMetrics, nodes, edges, isDarkMode, livePhysics, isFrozen]);
+  }, [nodeSizeBase, nodeSizeMult, networkMetrics, nodes, edges, isDarkMode, livePhysics]);
 
   // 3. Fast Dark Mode Styling Update
   useEffect(() => {
@@ -750,7 +894,7 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
     const defaultNodeColor = isDarkMode ? '#bbbbbb' : '#141414';
     
     svg.selectAll('.graph-link')
-      .attr('stroke', isDarkMode ? '#eeeeee' : '#141414');
+      .attr('stroke', (d: any) => getEdgeColor(d));
 
     svg.selectAll('.node-shape')
       .attr('fill', (d: any) => getNodeColor(d))
@@ -762,7 +906,7 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
     svg.selectAll('.arrowhead-path')
       .attr("fill", isDarkMode ? "#eeeeee" : "#141414")
       .attr("opacity", isDarkMode ? 0.9 : 0.6);
-  }, [isDarkMode, communityMap, communityColorMap, getNodeColor]);
+  }, [isDarkMode, communityMap, communityColorMap, getNodeColor, getEdgeColor]);
 
   // 4. Highlight Node Effect & Legend Visibility
   useEffect(() => {
@@ -778,8 +922,17 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
       if (isBipartiteNode && hiddenItems.has('element:bipartite')) return true;
       if (!isBipartiteNode && hiddenItems.has('element:standard')) return true;
       
-      const comm = communityMap[d.id];
-      if (comm && hiddenItems.has(`community:${comm}`)) return true;
+      const net = netMap.get(d.id);
+      let comm;
+      if (nodeColorBase === 'louvain') {
+          comm = net ? net.louvain : undefined;
+      } else if (nodeColorBase === 'leiden') {
+          comm = net ? net.leiden : undefined;
+      } else {
+          comm = communityMap[d.id] ?? d.community ?? net?.louvain ?? net?.leiden;
+      }
+
+      if (comm !== undefined && hiddenItems.has(`community:${comm}`)) return true;
 
       if (d.type && hiddenItems.has(`type:${d.type}`)) return true;
       
@@ -795,11 +948,20 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
       
       if (isolatedLegendItem.startsWith('community:')) {
          const c = isolatedLegendItem.split('community:')[1];
-         return communityMap[d.id] === c;
+         const net = netMap.get(d.id);
+         let comm;
+         if (nodeColorBase === 'louvain') {
+             comm = net ? net.louvain : undefined;
+         } else if (nodeColorBase === 'leiden') {
+             comm = net ? net.leiden : undefined;
+         } else {
+             comm = communityMap[d.id] ?? d.community ?? net?.louvain ?? net?.leiden;
+         }
+         return String(comm) === String(c);
       }
       if (isolatedLegendItem.startsWith('type:')) {
          const t = isolatedLegendItem.split('type:')[1];
-         return d.type === t;
+         return String(d.type) === String(t);
       }
       return false;
     };
@@ -851,12 +1013,18 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
       const baseOpacity = getEdgeOpacity(d);
 
       if (isolatedLegendItem) {
+        if (isolatedLegendItem.startsWith('element:') && isolatedLegendItem !== 'element:edges') {
+          return baseOpacity * 0.05;
+        }
+        if (isolatedLegendItem === 'element:edges') {
+          return baseOpacity;
+        }
         const srcNode = nodes.find(n => n.id === srcId);
         const tgtNode = nodes.find(n => n.id === tgtId);
         if (srcNode && tgtNode && isNodeInIsolatedGroup(srcNode) && isNodeInIsolatedGroup(tgtNode)) {
           return baseOpacity;
         }
-        return baseOpacity * 0.1;
+        return baseOpacity * 0.05;
       }
 
       if (clickedNode) {
@@ -1000,12 +1168,19 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
         tickDrawRef.current();
     }
 
-  }, [clickedNode, clickedEdge, selectedElement, hiddenItems, isolatedLegendItem, communityMap, nodes, bipartite, refreshKey, isDarkMode, directed, edges.length, nodeOpacity, edgeOpacity, searchQuery, getEdgeOpacity, getEdgeColor, edgeWeightBase, edgeWeightMult, maxRaw, maxSec, forceStrength, nodeSizeMult, nodeSizeBase]);
+  }, [clickedNode, clickedEdge, selectedElement, hiddenItems, isolatedLegendItem, communityMap, nodes, bipartite, refreshKey, isDarkMode, directed, edges.length, nodeOpacity, edgeOpacity, searchQuery, getEdgeOpacity, getEdgeColor, edgeWeightBase, edgeWeightMult, maxRaw, maxSec, nodeColorBase, networkMetrics]);
 
   return (
     <div ref={containerRef} className="w-full h-full relative cursor-crosshair">
-      <svg ref={svgRef} id="network-graph-svg" className="w-full h-full block" />
+            <svg ref={svgRef} id="network-graph-svg" className="w-full h-full block" />
       
+      {isCalculatingLayout && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/10 dark:bg-white/5 backdrop-blur-sm z-50">
+           <div className="w-6 h-6 border-2 border-t-transparent border-[#141414] dark:border-[#E4E3E0] rounded-full animate-spin mb-4"></div>
+           <span className="text-[10px] font-bold uppercase tracking-widest font-mono">Calculating Layout...</span>
+        </div>
+      )}
+
       {/* Tools Menu */}
       <div className="absolute top-6 right-6 flex flex-col space-y-2">
         <button 
@@ -1042,7 +1217,7 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
       </div>
 
       {clickedNode && (() => {
-        const net = networkMetrics.find(m => m.id === clickedNode.id);
+        const net = netMap.get(clickedNode.id);
         return (
           <div className="absolute bottom-6 right-6 flex space-x-2">
               <div className={`p-3 w-56 shadow-none border transition-colors ${
@@ -1065,10 +1240,16 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
                       <div className="flex justify-between text-[10px]">
                           <span className="opacity-50 uppercase font-bold">COMMUNITY</span>
                           <span className="font-mono font-bold">
-                              <div className="w-3 h-3 inline-block align-middle ml-1" style={{backgroundColor: communityColorMap[communityMap[clickedNode.id]] || (isDarkMode ? '#bbbbbb' : '#141414')}}></div>
+                              <div className="w-3 h-3 inline-block align-middle ml-1" style={{backgroundColor: customColorMap[communityMap[clickedNode.id]] || (isDarkMode ? '#bbbbbb' : '#141414')}}></div>
                           </span>
                       </div>
                       
+                      {Object.keys(clickedNode).filter(k => !['id', 'name', 'label', 'abundance', 'community', 'x', 'y', 'vx', 'vy', 'index', 'fx', 'fy', 'currentRadius', '_defaultStrokeWidth', 'type'].includes(k)).map(key => (
+                        <div key={key} className="flex justify-between text-[10px]">
+                          <span className="opacity-50 uppercase font-bold truncate max-w-[80px]" title={key}>{key}</span>
+                          <span className="font-mono font-bold truncate max-w-[100px] text-right" title={String((clickedNode as any)[key])}>{String((clickedNode as any)[key])}</span>
+                        </div>
+                      ))}
                       {net?.degreeCentrality !== undefined && (
                         <div className="flex justify-between text-[10px]">
                             <span className="opacity-50 uppercase font-bold" title="Degree Centrality">DEGREE CENT</span>
@@ -1150,6 +1331,12 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
                         <span className="opacity-50 uppercase font-bold">SEC WT</span>
                         <span className="font-mono font-bold">{clickedEdge.weight_secondary || '-'}</span>
                     </div>
+                    {Object.keys(clickedEdge).filter(k => !['source', 'target', 'weight', 'weight_raw', 'weight_secondary', 'index', '_defaultStrokeWidth'].includes(k)).map(key => (
+                        <div key={key} className="flex justify-between text-[10px]">
+                          <span className="opacity-50 uppercase font-bold truncate max-w-[80px]" title={key}>{key}</span>
+                          <span className="font-mono font-bold truncate max-w-[100px] text-right" title={String((clickedEdge as any)[key])}>{String((clickedEdge as any)[key])}</span>
+                        </div>
+                    ))}
                 </div>
             </div>
         </div>
