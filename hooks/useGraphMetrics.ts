@@ -115,11 +115,11 @@ export function useGraphMetrics(validNodes: any[], validEdges: any[], appliedFil
         return graph.nodes().map(nodeId => {
           const old = currentMap.get(nodeId) || {};
           return {
+            ...old,
             id: nodeId,
             degree: graph.degree ? graph.degree(nodeId) : 0,
             inDegree: directed && graph.inDegree ? graph.inDegree(nodeId) : 0,
-            outDegree: directed && graph.outDegree ? graph.outDegree(nodeId) : 0,
-            ...old // Preserve calculated metrics
+            outDegree: directed && graph.outDegree ? graph.outDegree(nodeId) : 0
           };
         });
       });

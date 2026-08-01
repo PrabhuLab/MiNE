@@ -170,11 +170,17 @@ export function computeTableDataNodes(validNodes: any[], networkMetrics: any[], 
       } else if (sortConfig.key === "abundance") {
         aVal = a.abundance || 0; bVal = b.abundance || 0;
       } else if (sortConfig.key === "degree") {
-        aVal = a.net.degree || 0; bVal = b.net.degree || 0;
+        aVal = a.net.degree ?? (parseFloat(a.net.degreeCentrality) || 0); bVal = b.net.degree ?? (parseFloat(b.net.degreeCentrality) || 0);
       } else if (sortConfig.key === "inDegree") {
-        aVal = a.net.inDegree || 0; bVal = b.net.inDegree || 0;
+        aVal = a.net.inDegree ?? (parseFloat(a.net.inDegreeCentrality) || 0); bVal = b.net.inDegree ?? (parseFloat(b.net.inDegreeCentrality) || 0);
       } else if (sortConfig.key === "outDegree") {
-        aVal = a.net.outDegree || 0; bVal = b.net.outDegree || 0;
+        aVal = a.net.outDegree ?? (parseFloat(a.net.outDegreeCentrality) || 0); bVal = b.net.outDegree ?? (parseFloat(b.net.outDegreeCentrality) || 0);
+      } else if (sortConfig.key === "inDegreeCentrality") {
+        aVal = parseFloat(a.net.inDegreeCentrality) || 0; bVal = parseFloat(b.net.inDegreeCentrality) || 0;
+      } else if (sortConfig.key === "outDegreeCentrality") {
+        aVal = parseFloat(a.net.outDegreeCentrality) || 0; bVal = parseFloat(b.net.outDegreeCentrality) || 0;
+      } else if (sortConfig.key === "degreeCentrality") {
+        aVal = parseFloat(a.net.degreeCentrality) || 0; bVal = parseFloat(b.net.degreeCentrality) || 0;
       } else if (sortConfig.key === "eigenvector") {
         aVal = parseFloat(a.net.eigenvector) || 0; bVal = parseFloat(b.net.eigenvector) || 0;
       } else if (sortConfig.key === "pagerank") {

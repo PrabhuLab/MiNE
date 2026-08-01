@@ -24,7 +24,7 @@ export const CustomizationControls = ({
   const [activeControlTab, setActiveControlTab] = React.useState('nodes');
   const hasLouvain = networkMetrics.some(m => m.louvain !== undefined);
   const hasLeiden = networkMetrics.some(m => m.leiden !== undefined);
-  const hasDegree = networkMetrics.some(m => m.degreeCentrality !== undefined || m.inDegreeCentrality !== undefined);
+  const hasDegree = networkMetrics.some(m => m.degree !== undefined || m.inDegree !== undefined || m.degreeCentrality !== undefined || m.inDegreeCentrality !== undefined) || networkMetrics.length > 0;
   const hasEigen = networkMetrics.some(m => m.eigenvector !== undefined);
   const hasPageRank = networkMetrics.some(m => m.pagerank !== undefined);
   const hasBetweenness = networkMetrics.some(m => m.betweenness !== undefined);

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { useStore } from '@/store/useStore';
 import { computeActiveNetwork } from '@/lib/workspaceUtils';
 
@@ -6,20 +6,40 @@ export function useGraphFilters() {
   const { rawNodes, rawEdges, filters, setFilter } = useStore();
   
   const [appliedFilters, setAppliedFilters] = useState(filters);
+  const [network, setNetwork] = useState(() => computeActiveNetwork(rawNodes, rawEdges, filters));
   
   useEffect(() => {
     if (filters.liveUpdate) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setAppliedFilters(filters);
     }
-  }, [filters, filters.liveUpdate]);
+  }, [filters]);
 
   const removedNodesStr = appliedFilters.removedNodes || '';
   const weightFiltersStr = JSON.stringify(appliedFilters.weightFilters || []);
 
-  const { validNodes, validEdges } = useMemo(() => {
-    return computeActiveNetwork(rawNodes, rawEdges, appliedFilters);
-  }, [rawNodes, rawEdges, removedNodesStr, weightFiltersStr]);
+  useEffect(() => {
+    const computed = computeActiveNetwork(rawNodes, rawEdges, appliedFilters);
+    
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setNetwork(prev => {
+      const nodesEqual = computed.validNodes.length === prev.validNodes.length &&
+        computed.validNodes.every((n, i) => n.id === prev.validNodes[i]?.id);
+        
+      const edgesEqual = computed.validEdges.length === prev.validEdges.length &&
+        computed.validEdges.every((e, i) => 
+          e.source === prev.validEdges[i]?.source && 
+          e.target === prev.validEdges[i]?.target && 
+          e.weight_raw === prev.validEdges[i]?.weight_raw && 
+          e.weight_secondary === prev.validEdges[i]?.weight_secondary
+        );
+
+      if (nodesEqual && edgesEqual) {
+        return prev;
+      }
+      return computed;
+    });
+  }, [rawNodes, rawEdges, removedNodesStr, weightFiltersStr, appliedFilters]);
 
   // Sync missing variables fallback logic (the one with useEffect)
   const hasType = rawNodes.some(n => n.type !== undefined);
@@ -41,8 +61,8 @@ export function useGraphFilters() {
     setFilter,
     appliedFilters,
     setAppliedFilters,
-    validNodes,
-    validEdges,
+    validNodes: network.validNodes,
+    validEdges: network.validEdges,
     hasType,
     hasAbundance,
     hasSecondaryWeight

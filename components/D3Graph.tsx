@@ -464,17 +464,18 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
 
   const handleZoomFit = () => {
     if (!svgRef.current || !zoomBehaviorRef.current || !simulationRef.current || !containerRef.current) return;
-    const svg = d3.select(svgRef.current);
     const width = containerRef.current.clientWidth;
     const height = containerRef.current.clientHeight;
+    if (width <= 0 || height <= 0) return;
     
+    const svg = d3.select(svgRef.current);
     const graphNodes = simulationRef.current.nodes();
-    if(graphNodes.length === 0) return;
+    if (graphNodes.length === 0) return;
     
-    const minX = d3.min(graphNodes, d => d.x - (d.currentRadius || 0)) || 0;
-    const minY = d3.min(graphNodes, d => d.y - (d.currentRadius || 0)) || 0;
-    const maxX = d3.max(graphNodes, d => d.x + (d.currentRadius || 0)) || 0;
-    const maxY = d3.max(graphNodes, d => d.y + (d.currentRadius || 0)) || 0;
+    const minX = d3.min(graphNodes, (d: any) => d.x - (d.currentRadius || 0)) || 0;
+    const minY = d3.min(graphNodes, (d: any) => d.y - (d.currentRadius || 0)) || 0;
+    const maxX = d3.max(graphNodes, (d: any) => d.x + (d.currentRadius || 0)) || 0;
+    const maxY = d3.max(graphNodes, (d: any) => d.y + (d.currentRadius || 0)) || 0;
 
     const dx = maxX - minX;
     const dy = maxY - minY;
@@ -492,43 +493,53 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
     );
   };
 
-  
   useEffect(() => {
-    if (selectedElement && svgRef.current && zoomBehaviorRef.current && simulationRef.current && containerRef.current) {
-      const svg = d3.select(svgRef.current);
+    if (!selectedElement || !svgRef.current || !zoomBehaviorRef.current || !simulationRef.current || !containerRef.current) return;
+    
+    let cancelled = false;
+    const focusElement = () => {
+      if (cancelled) return;
+      if (!containerRef.current || !svgRef.current || !zoomBehaviorRef.current || !simulationRef.current) return;
+      
       const width = containerRef.current.clientWidth;
       const height = containerRef.current.clientHeight;
+      if (width <= 0 || height <= 0) {
+        requestAnimationFrame(focusElement);
+        return;
+      }
+      
+      const svg = d3.select(svgRef.current);
       const graphNodes = simulationRef.current.nodes();
+      if (!graphNodes || graphNodes.length === 0) return;
       
       let targetNodes = [];
       if (!selectedElement.includes('-')) {
-        const n = graphNodes.find(d => d.id === selectedElement);
+        const n = graphNodes.find((d: any) => d.id === selectedElement);
         if (n) targetNodes.push(n);
       } else {
         const parts = selectedElement.split('-');
         if (parts.length >= 2) {
           const src = parts[0];
           const tgt = parts[1];
-          const n1 = graphNodes.find(d => d.id === src);
-          const n2 = graphNodes.find(d => d.id === tgt);
+          const n1 = graphNodes.find((d: any) => d.id === src);
+          const n2 = graphNodes.find((d: any) => d.id === tgt);
           if (n1) targetNodes.push(n1);
           if (n2) targetNodes.push(n2);
         }
       }
       
       if (targetNodes.length > 0) {
-        const minX = d3.min(targetNodes, d => d.x - (d.currentRadius || 0)) || 0;
-        const minY = d3.min(targetNodes, d => d.y - (d.currentRadius || 0)) || 0;
-        const maxX = d3.max(targetNodes, d => d.x + (d.currentRadius || 0)) || 0;
-        const maxY = d3.max(targetNodes, d => d.y + (d.currentRadius || 0)) || 0;
+        const minX = d3.min(targetNodes, (d: any) => d.x - (d.currentRadius || 0)) || 0;
+        const minY = d3.min(targetNodes, (d: any) => d.y - (d.currentRadius || 0)) || 0;
+        const maxX = d3.max(targetNodes, (d: any) => d.x + (d.currentRadius || 0)) || 0;
+        const maxY = d3.max(targetNodes, (d: any) => d.y + (d.currentRadius || 0)) || 0;
         
         const dx = maxX - minX;
         const dy = maxY - minY;
         const x = (minX + maxX) / 2;
         const y = (minY + maxY) / 2;
         
-        // Use a slightly larger max scale for single node focusing
-        const scale = dx === 0 && dy === 0 ? 2 : Math.max(0.1, Math.min(2.5, 0.9 / Math.max(dx / width, dy / height)));
+        const scale = (dx === 0 && dy === 0) ? 2 : Math.max(0.1, Math.min(2.5, 0.9 / Math.max(dx / width, dy / height)));
         const translate = [width / 2 - scale * x, height / 2 - scale * y];
         
         svg.transition().duration(750).call(
@@ -536,8 +547,29 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
           d3.zoomIdentity.translate(translate[0], translate[1]).scale(scale)
         );
       }
-    }
+    };
+    
+    focusElement();
+    return () => { cancelled = true; };
   }, [selectedElement]);
+
+  // ResizeObserver to handle container tab toggles and layout resizes
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const observer = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        if (width > 0 && height > 0) {
+          if (simulationRef.current) {
+            simulationRef.current.force('center', d3.forceCenter(width / 2, height / 2));
+            simulationRef.current.alpha(0.05).restart();
+          }
+        }
+      }
+    });
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, []);
 
   // 1. Initial Graph Setup & Rendering
   useEffect(() => {
@@ -601,10 +633,30 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
       });
     }
 
+    // Store existing node positions from previous simulation to prevent layout jump
+    const prevPositions = new Map<string, { x?: number; y?: number; vx?: number; vy?: number; fx?: number; fy?: number }>();
+    if (simulationRef.current) {
+      simulationRef.current.nodes().forEach((n: any) => {
+        if (n.id && n.x !== undefined && n.y !== undefined) {
+          prevPositions.set(n.id, { x: n.x, y: n.y, vx: n.vx, vy: n.vy, fx: n.fx, fy: n.fy });
+        }
+      });
+    }
+
     // Deep copy data for D3 mutation
     const graphNodes = nodes.map(d => {
       const gNode: any = { ...d };
       const net = netMap.get(d.id);
+      
+      const prevPos = prevPositions.get(d.id);
+      if (prevPos) {
+        gNode.x = prevPos.x;
+        gNode.y = prevPos.y;
+        gNode.vx = prevPos.vx;
+        gNode.vy = prevPos.vy;
+        if (prevPos.fx !== undefined) gNode.fx = prevPos.fx;
+        if (prevPos.fy !== undefined) gNode.fy = prevPos.fy;
+      }
       
       let baseVal = 10;
       if (nodeSizeBase === 'abundance') baseVal = gNode.abundance || 10;

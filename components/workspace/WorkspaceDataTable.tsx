@@ -25,6 +25,9 @@ export const WorkspaceDataTable = ({
   const { communityMap } = useStore();
   const allCommunityLabels = React.useMemo(() => Array.from(new Set(Object.values(communityMap))) as string[], [communityMap]);
 
+  const hasInDegree = networkMetrics.some(m => m.inDegree !== undefined) || (directed && tableData.length > 0);
+  const hasOutDegree = networkMetrics.some(m => m.outDegree !== undefined) || (directed && tableData.length > 0);
+  const hasDegree = networkMetrics.some(m => m.degree !== undefined) || (!directed && tableData.length > 0);
   const hasInDegreeCent = networkMetrics.some(m => m.inDegreeCentrality !== undefined);
   const hasOutDegreeCent = networkMetrics.some(m => m.outDegreeCentrality !== undefined);
   const hasDegreeCent = networkMetrics.some(m => m.degreeCentrality !== undefined);
@@ -50,23 +53,40 @@ export const WorkspaceDataTable = ({
               </th>
               {directed ? (
                 <>
-                  {hasInDegreeCent && (
+                  {hasInDegree && (
                     <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("inDegree")}>
                       In Degree {sortConfig?.key === "inDegree" && (sortConfig.direction === "asc" ? "↑" : "↓")}
                     </th>
                   )}
-                  {hasOutDegreeCent && (
+                  {hasOutDegree && (
                     <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("outDegree")}>
                       Out Degree {sortConfig?.key === "outDegree" && (sortConfig.direction === "asc" ? "↑" : "↓")}
                     </th>
                   )}
+                  {hasInDegreeCent && (
+                    <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("inDegreeCentrality")}>
+                      In Deg Cent {sortConfig?.key === "inDegreeCentrality" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                    </th>
+                  )}
+                  {hasOutDegreeCent && (
+                    <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("outDegreeCentrality")}>
+                      Out Deg Cent {sortConfig?.key === "outDegreeCentrality" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                    </th>
+                  )}
                 </>
               ) : (
-                hasDegreeCent && (
-                  <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("degree")}>
-                    Degree {sortConfig?.key === "degree" && (sortConfig.direction === "asc" ? "↑" : "↓")}
-                  </th>
-                )
+                <>
+                  {hasDegree && (
+                    <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("degree")}>
+                      Degree {sortConfig?.key === "degree" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                    </th>
+                  )}
+                  {hasDegreeCent && (
+                    <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("degreeCentrality")}>
+                      Degree Cent {sortConfig?.key === "degreeCentrality" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                    </th>
+                  )}
+                </>
               )}
               {hasEigenvectorCent && (
                 <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("eigenvector")}>
@@ -115,11 +135,16 @@ export const WorkspaceDataTable = ({
                   <td className="p-2 font-mono">{node.abundance || 0}</td>
                   {directed ? (
                     <>
+                      {hasInDegree && <td className="p-2 font-mono">{node.net.inDegree ?? 0}</td>}
+                      {hasOutDegree && <td className="p-2 font-mono">{node.net.outDegree ?? 0}</td>}
                       {hasInDegreeCent && <td className="p-2 font-mono">{node.net.inDegreeCentrality || 0}</td>}
                       {hasOutDegreeCent && <td className="p-2 font-mono">{node.net.outDegreeCentrality || 0}</td>}
                     </>
                   ) : (
-                    hasDegreeCent && <td className="p-2 font-mono">{node.net.degreeCentrality || 0}</td>
+                    <>
+                      {hasDegree && <td className="p-2 font-mono">{node.net.degree ?? 0}</td>}
+                      {hasDegreeCent && <td className="p-2 font-mono">{node.net.degreeCentrality || 0}</td>}
+                    </>
                   )}
                   {hasEigenvectorCent && <td className="p-2 font-mono">{node.net.eigenvector || 0}</td>}
                   {hasPagerankCent && <td className="p-2 font-mono">{node.net.pagerank || 0}</td>}
