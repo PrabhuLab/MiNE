@@ -72,6 +72,8 @@ interface AppState {
   setSearchQuery: (val: string) => void;
   showArrowheads: boolean;
   setShowArrowheads: (val: boolean) => void;
+  showNodeLabels: boolean;
+  setShowNodeLabels: (val: boolean) => void;
   projectName: string;
   setProjectName: (val: string) => void;
   clearStore: () => void;
@@ -98,6 +100,8 @@ export const useStore = create<AppState>((set) => ({
   setSearchQuery: (val) => set({ searchQuery: val }),
   showArrowheads: false,
   setShowArrowheads: (val) => set({ showArrowheads: val }),
+  showNodeLabels: false,
+  setShowNodeLabels: (val) => set({ showNodeLabels: val }),
 
   filters: {
     weightFilters: [],
@@ -139,6 +143,7 @@ export const useStore = create<AppState>((set) => ({
     hiddenLegendItems: [],
     isolatedLegendItem: null,
     showArrowheads: false,
+    showNodeLabels: false,
     filters: {
       weightFilters: [],
       searchEdges: false,

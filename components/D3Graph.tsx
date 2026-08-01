@@ -55,7 +55,7 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
   const [clickedEdge, setClickedEdge] = useState<RawEdge | null>(null);
   const [isCalculatingLayout, setIsCalculatingLayout] = useState(false);
   
-  const { hiddenLegendItems, setHiddenLegendItems, isolatedLegendItem, setIsolatedLegendItem, showArrowheads, setShowArrowheads } = useStore();
+  const { hiddenLegendItems, setHiddenLegendItems, isolatedLegendItem, setIsolatedLegendItem, showArrowheads, setShowArrowheads, showNodeLabels, setShowNodeLabels } = useStore();
   const hiddenItems = new Set(hiddenLegendItems);
   const setHiddenItems = (updater: (prev: Set<string>) => Set<string>) => {
     setHiddenLegendItems(Array.from(updater(new Set(hiddenLegendItems))));
@@ -798,8 +798,8 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
     attachClickEvent(shapeAClickParams);
     attachClickEvent(shapeBClickParams);
 
-    // Add labels (only if node count is small or emphasize on large nodes)
-    const showLabels = graphNodes.length < 300;
+    // Add labels
+    const showLabels = showNodeLabels;
     nodeGroup.append('text')
       .text((d: any) => d.label || d.name || d.id)
       .attr('class', 'node-label')
@@ -1081,7 +1081,7 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
     });
 
     const adjacencyList = adjacencyListRef.current;
-    const showLabels = nodes.length < 300;
+    const showLabels = showNodeLabels;
     
     const q = searchQuery.toLowerCase();
 
@@ -1196,7 +1196,7 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
     });
 
     labels.style('opacity', (d: any) => {
-      if (isNodeHidden(d)) return 0;
+      if (!showNodeLabels || isNodeHidden(d)) return 0;
       if (isolatedLegendItem) {
         return isNodeInIsolatedGroup(d) ? 1 : 0.1;
       }
@@ -1223,6 +1223,7 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
       }
       return 1;
     }).style('display', (d: any) => {
+      if (!showNodeLabels) return 'none';
       if (isNodeHidden(d)) return 'none';
       if (isolatedLegendItem) {
         return isNodeInIsolatedGroup(d) ? 'block' : 'none';
@@ -1255,7 +1256,7 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
         tickDrawRef.current();
     }
 
-  }, [clickedNode, clickedEdge, selectedElement, hiddenItems, isolatedLegendItem, communityMap, nodes, bipartite, refreshKey, isDarkMode, directed, edges.length, nodeOpacity, edgeOpacity, searchQuery, getEdgeOpacity, getEdgeColor, edgeWeightBase, edgeWeightMult, maxRaw, maxSec, nodeColorBase, networkMetrics, showArrowheads, getShouldShowArrowhead]);
+  }, [clickedNode, clickedEdge, selectedElement, hiddenItems, isolatedLegendItem, communityMap, nodes, bipartite, refreshKey, isDarkMode, directed, edges.length, nodeOpacity, edgeOpacity, searchQuery, getEdgeOpacity, getEdgeColor, edgeWeightBase, edgeWeightMult, maxRaw, maxSec, nodeColorBase, networkMetrics, showArrowheads, showNodeLabels, getShouldShowArrowhead]);
 
   return (
     <div ref={containerRef} className="w-full h-full relative cursor-crosshair">
@@ -1457,6 +1458,32 @@ export default function D3Graph({ nodes, edges, communityMap, networkMetrics = [
                     </div>
                   );
                 })}
+                <div 
+                  className={`flex items-center justify-between cursor-pointer p-1 -mx-1 rounded-sm transition-all ${
+                    showNodeLabels 
+                      ? 'opacity-100 font-bold bg-black/5 dark:bg-white/10' 
+                      : 'opacity-70 hover:opacity-100 hover:bg-black/5 dark:hover:bg-white/5'
+                  }`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowNodeLabels(!showNodeLabels);
+                  }}
+                  title="Click to toggle node labels on graph"
+                >
+                  <div className="flex items-center space-x-2">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className={showNodeLabels ? 'text-[#b4ff39]' : ''}>
+                      <path d="M2 12l3.5-8L9 12M3.2 9h4.6M10.5 12V8.5a1.5 1.5 0 1 1 3 0V12M10.5 10h3" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                    <span>Node Labels</span>
+                  </div>
+                  <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded border transition-colors ${
+                    showNodeLabels 
+                      ? 'bg-[#b4ff39] text-[#141414] border-[#b4ff39] font-bold' 
+                      : 'bg-transparent text-current opacity-70 border-current/30'
+                  }`}>
+                    {showNodeLabels ? 'ON' : 'OFF'}
+                  </span>
+                </div>
                 {directed && (
                   <div 
                     className={`flex items-center justify-between cursor-pointer p-1 -mx-1 rounded-sm transition-all ${
