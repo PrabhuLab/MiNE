@@ -121,92 +121,71 @@ export function useGraphSimulation({
     getShouldShowArrowheadRef.current = getShouldShowArrowhead;
   }, [getShouldShowArrowhead]);
 
-  const isNodeHidden = useCallback((d: any) => {
-    const isBipartiteNode = bipartite && (d.type === 'B' || d.group === 1);
-    if (isBipartiteNode && hiddenItems.has('element:bipartite')) return true;
-    if (!isBipartiteNode && hiddenItems.has('element:standard')) return true;
-
-    const net = netMap.get(d.id);
-    let comm;
-    if (nodeColorBase === 'louvain') {
-      comm = net ? net.louvain : undefined;
-    } else {
-      comm = communityMap[d.id] ?? d.community ?? net?.louvain;
-    }
-
-    if (comm !== undefined && hiddenItems.has(`community:${comm}`)) return true;
-    if (d.type && hiddenItems.has(`type:${d.type}`)) return true;
-
-    return false;
-  }, [bipartite, hiddenItems, netMap, nodeColorBase, communityMap]);
-
-  const isNodeInIsolatedGroup = useCallback((d: any, isolatedItem: string | null = isolatedLegendItem) => {
-    if (!isolatedItem) return false;
-    const isBipartiteNode = bipartite && (d.type === 'B' || d.group === 1);
-
-    if (isolatedItem === 'element:bipartite') return isBipartiteNode;
-    if (isolatedItem === 'element:standard') return !isBipartiteNode;
-
-    if (isolatedItem.startsWith('community:')) {
-      const c = isolatedItem.split('community:')[1];
-      const net = netMap.get(d.id);
-      let comm;
-      if (nodeColorBase === 'louvain') {
-        comm = net ? net.louvain : undefined;
-      } else {
-        comm = communityMap[d.id] ?? d.community ?? net?.louvain;
-      }
-      return String(comm) === String(c);
-    }
-    if (isolatedItem.startsWith('type:')) {
-      const t = isolatedItem.split('type:')[1];
-      return String(d.type) === String(t);
-    }
-    return false;
-  }, [bipartite, isolatedLegendItem, netMap, nodeColorBase, communityMap]);
-
-  const handleZoomFit = useCallback((targetNodeIds?: string[]) => {
+  const handleZoomFit = useCallback((target?: string | any[]) => {
     if (!svgRef.current || !zoomBehaviorRef.current || !simulationRef.current || !containerRef.current) return;
     const width = containerRef.current.clientWidth;
     const height = containerRef.current.clientHeight;
     if (width <= 0 || height <= 0) return;
 
     const svg = d3.select(svgRef.current);
-    let graphNodes = simulationRef.current.nodes();
-    if (graphNodes.length === 0) return;
+    const allGraphNodes = simulationRef.current.nodes();
+    if (allGraphNodes.length === 0) return;
 
-    if (targetNodeIds && targetNodeIds.length > 0) {
-      const targetSet = new Set(targetNodeIds);
-      const filtered = graphNodes.filter((d: any) => targetSet.has(d.id));
-      if (filtered.length > 0) graphNodes = filtered;
-    } else if (isolatedLegendItem) {
-      const filtered = graphNodes.filter((d: any) => isNodeInIsolatedGroup(d, isolatedLegendItem));
-      if (filtered.length > 0) graphNodes = filtered;
-    } else {
-      const filtered = graphNodes.filter((d: any) => !isNodeHidden(d));
-      if (filtered.length > 0) graphNodes = filtered;
+    const targetKey = typeof target === 'string' ? target : (isolatedLegendItem || undefined);
+
+    let graphNodes = allGraphNodes;
+
+    if (Array.isArray(target) && target.length > 0) {
+      const idSet = new Set(target.map((n: any) => (typeof n === 'string' ? n : n.id)));
+      graphNodes = allGraphNodes.filter((d: any) => idSet.has(d.id));
+    } else if (targetKey) {
+      if (targetKey.startsWith('community:')) {
+        const commTarget = targetKey.split('community:')[1];
+        graphNodes = allGraphNodes.filter((d: any) => {
+          const net = netMap.get(d.id);
+          let comm;
+          if (nodeColorBase && nodeColorBase !== 'custom' && net && net[nodeColorBase] !== undefined) {
+            comm = net[nodeColorBase];
+          } else {
+            comm = communityMap[d.id] ?? d.community ?? net?.louvain;
+          }
+          return String(comm) === String(commTarget);
+        });
+      } else if (targetKey.startsWith('type:')) {
+        const typeTarget = targetKey.split('type:')[1];
+        graphNodes = allGraphNodes.filter((d: any) => String(d.type) === String(typeTarget));
+      } else if (targetKey === 'element:bipartite') {
+        graphNodes = allGraphNodes.filter((d: any) => bipartite && (d.type === 'B' || d.group === 1));
+      } else if (targetKey === 'element:standard') {
+        graphNodes = allGraphNodes.filter((d: any) => !(bipartite && (d.type === 'B' || d.group === 1)));
+      }
     }
 
-    const minX = d3.min(graphNodes, (d: any) => (d.x ?? 0) - (d.currentRadius || 0)) ?? 0;
-    const minY = d3.min(graphNodes, (d: any) => (d.y ?? 0) - (d.currentRadius || 0)) ?? 0;
-    const maxX = d3.max(graphNodes, (d: any) => (d.x ?? 0) + (d.currentRadius || 0)) ?? 0;
-    const maxY = d3.max(graphNodes, (d: any) => (d.y ?? 0) + (d.currentRadius || 0)) ?? 0;
+    if (!graphNodes || graphNodes.length === 0) {
+      graphNodes = allGraphNodes;
+    }
+
+    const minX = d3.min(graphNodes, (d: any) => (typeof d.x === 'number' ? d.x - (d.currentRadius || 0) : 0)) ?? 0;
+    const minY = d3.min(graphNodes, (d: any) => (typeof d.y === 'number' ? d.y - (d.currentRadius || 0) : 0)) ?? 0;
+    const maxX = d3.max(graphNodes, (d: any) => (typeof d.x === 'number' ? d.x + (d.currentRadius || 0) : 0)) ?? 0;
+    const maxY = d3.max(graphNodes, (d: any) => (typeof d.y === 'number' ? d.y + (d.currentRadius || 0) : 0)) ?? 0;
 
     const dx = maxX - minX;
     const dy = maxY - minY;
     const x = (minX + maxX) / 2;
     const y = (minY + maxY) / 2;
 
-    if (dx === 0 && dy === 0) return;
+    const scale = (dx === 0 && dy === 0)
+      ? 2
+      : Math.max(0.1, Math.min(4, 0.85 / Math.max(dx / width, dy / height)));
 
-    const scale = Math.max(0.1, Math.min(3.5, 0.85 / Math.max((dx || 1) / width, (dy || 1) / height)));
     const translate = [width / 2 - scale * x, height / 2 - scale * y];
 
     svg.transition().duration(750).call(
       zoomBehaviorRef.current.transform,
       d3.zoomIdentity.translate(translate[0], translate[1]).scale(scale)
     );
-  }, [containerRef, svgRef, isolatedLegendItem, isNodeInIsolatedGroup, isNodeHidden]);
+  }, [containerRef, svgRef, isolatedLegendItem, netMap, nodeColorBase, communityMap, bipartite]);
 
   // Selected element auto-focus
   useEffect(() => {
@@ -431,120 +410,14 @@ export function useGraphSimulation({
 
     const maxWeight = d3.max(graphLinks, (d: void | any) => (d as any).weight) || 1;
     const strokeWidthScale = d3.scaleLinear().domain([0, maxWeight]).range([0.5, 4]);
-    const initialLinkDistance = Math.max(50, Math.min(180, 1200 / Math.sqrt(graphNodes.length || 1)));
-
-    // Extract communities to compute cluster anchor positions
-    const commSet = new Set<string>();
-    graphNodes.forEach((d: any) => {
-      const net = netMap.get(d.id);
-      let comm;
-      if (nodeColorBase === 'louvain') {
-        comm = net ? net.louvain : undefined;
-      } else {
-        comm = communityMap[d.id] ?? d.community ?? net?.louvain;
-      }
-      if (comm !== undefined && comm !== null && String(comm) !== '') commSet.add(String(comm));
-    });
-    const uniqueComms = Array.from(commSet);
-    const commCount = uniqueComms.length;
-
-    const commAnchorMap: Record<string, { x: number; y: number }> = {};
-    const clusterRadius = Math.min(width, height) * 0.3;
-    uniqueComms.forEach((c, idx) => {
-      const angle = (idx / Math.max(1, commCount)) * 2 * Math.PI;
-      commAnchorMap[c] = {
-        x: centerX + clusterRadius * Math.cos(angle),
-        y: centerY + clusterRadius * Math.sin(angle),
-      };
-    });
+    const initialLinkDistance = Math.max(35, Math.min(100, 1000 / Math.sqrt(graphNodes.length || 1)));
 
     const simulation = d3
       .forceSimulation(graphNodes as d3.SimulationNodeDatum[])
-      .force(
-        'link',
-        d3
-          .forceLink(graphLinks)
-          .id((d: any) => d.id)
-          .distance((d: any) => {
-            const srcId = typeof d.source === 'object' ? d.source.id : d.source;
-            const tgtId = typeof d.target === 'object' ? d.target.id : d.target;
-            const srcDeg = adjacencyList[srcId]?.size || 1;
-            const tgtDeg = adjacencyList[tgtId]?.size || 1;
-            const avgDeg = (srcDeg + tgtDeg) / 2;
-            return Math.max(45, Math.min(220, initialLinkDistance + avgDeg * 2));
-          })
-          .strength(0.35)
-      )
-      .force(
-        'charge',
-        d3
-          .forceManyBody()
-          .strength((d: any) => {
-            const base = forceStrength || -250;
-            const deg = adjacencyList[d.id]?.size || 1;
-            return base * (1 + Math.log2(deg));
-          })
-          .distanceMin(15)
-          .distanceMax(1800)
-      )
-      .force('center', d3.forceCenter(centerX, centerY).strength(0.05))
-      .force(
-        'collide',
-        d3
-          .forceCollide()
-          .radius((d: any) => (d.currentRadius || 8) + 6)
-          .strength(0.8)
-          .iterations(3)
-      );
-
-    if (bipartite) {
-      simulation.force(
-        'bipartiteX',
-        d3
-          .forceX((d: any) => {
-            const isB = d.type === 'B' || d.group === 1;
-            return isB ? centerX + 260 : centerX - 260;
-          })
-          .strength(0.4)
-      );
-    } else if (commCount > 1) {
-      simulation.force(
-        'clusterX',
-        d3
-          .forceX((d: any) => {
-            const net = netMap.get(d.id);
-            let comm;
-            if (nodeColorBase === 'louvain') {
-              comm = net ? net.louvain : undefined;
-            } else {
-              comm = communityMap[d.id] ?? d.community ?? net?.louvain;
-            }
-            if (comm !== undefined && commAnchorMap[String(comm)]) {
-              return commAnchorMap[String(comm)].x;
-            }
-            return centerX;
-          })
-          .strength(0.12)
-      );
-      simulation.force(
-        'clusterY',
-        d3
-          .forceY((d: any) => {
-            const net = netMap.get(d.id);
-            let comm;
-            if (nodeColorBase === 'louvain') {
-              comm = net ? net.louvain : undefined;
-            } else {
-              comm = communityMap[d.id] ?? d.community ?? net?.louvain;
-            }
-            if (comm !== undefined && commAnchorMap[String(comm)]) {
-              return commAnchorMap[String(comm)].y;
-            }
-            return centerY;
-          })
-          .strength(0.12)
-      );
-    }
+      .force('link', d3.forceLink(graphLinks).id((d: any) => d.id).distance(initialLinkDistance))
+      .force('charge', d3.forceManyBody().strength(forceStrength || -100))
+      .force('center', d3.forceCenter(centerX, centerY))
+      .force('collide', d3.forceCollide().radius((d: any) => d.currentRadius + 3).iterations(2));
 
     simulationRef.current = simulation;
 
@@ -802,19 +675,7 @@ export function useGraphSimulation({
   // Fast Force Update & Physics toggle
   useEffect(() => {
     if (simulationRef.current) {
-      const adjacencyList = adjacencyListRef.current;
-      simulationRef.current.force(
-        'charge',
-        d3
-          .forceManyBody()
-          .strength((d: any) => {
-            const base = forceStrength || -250;
-            const deg = adjacencyList[d.id]?.size || 1;
-            return base * (1 + Math.log2(deg));
-          })
-          .distanceMin(15)
-          .distanceMax(1800)
-      );
+      simulationRef.current.force('charge', d3.forceManyBody().strength(forceStrength));
       if (livePhysics) {
         simulationRef.current.alpha(1).restart();
         setTimeout(() => {
@@ -916,6 +777,50 @@ export function useGraphSimulation({
     const nodeGroup = svg.selectAll('.node-group');
     const link = svg.selectAll('.graph-link');
     const labels = svg.selectAll('.node-label');
+
+    const isNodeHidden = (d: any) => {
+      const isBipartiteNode = bipartite && (d.type === 'B' || d.group === 1);
+      if (isBipartiteNode && hiddenItems.has('element:bipartite')) return true;
+      if (!isBipartiteNode && hiddenItems.has('element:standard')) return true;
+
+      const net = netMap.get(d.id);
+      let comm;
+      if (nodeColorBase === 'louvain') {
+        comm = net ? net.louvain : undefined;
+      } else {
+        comm = communityMap[d.id] ?? d.community ?? net?.louvain;
+      }
+
+      if (comm !== undefined && hiddenItems.has(`community:${comm}`)) return true;
+      if (d.type && hiddenItems.has(`type:${d.type}`)) return true;
+
+      return false;
+    };
+
+    const isNodeInIsolatedGroup = (d: any) => {
+      if (!isolatedLegendItem) return false;
+      const isBipartiteNode = bipartite && (d.type === 'B' || d.group === 1);
+
+      if (isolatedLegendItem === 'element:bipartite') return isBipartiteNode;
+      if (isolatedLegendItem === 'element:standard') return !isBipartiteNode;
+
+      if (isolatedLegendItem.startsWith('community:')) {
+        const c = isolatedLegendItem.split('community:')[1];
+        const net = netMap.get(d.id);
+        let comm;
+        if (nodeColorBase === 'louvain') {
+          comm = net ? net.louvain : undefined;
+        } else {
+          comm = communityMap[d.id] ?? d.community ?? net?.louvain;
+        }
+        return String(comm) === String(c);
+      }
+      if (isolatedLegendItem.startsWith('type:')) {
+        const t = isolatedLegendItem.split('type:')[1];
+        return String(d.type) === String(t);
+      }
+      return false;
+    };
 
     const adjacencyList = adjacencyListRef.current;
     const showLabels = showNodeLabels;
@@ -1098,8 +1003,6 @@ export function useGraphSimulation({
     selectedElement,
     hiddenItems,
     isolatedLegendItem,
-    isNodeHidden,
-    isNodeInIsolatedGroup,
     communityMap,
     nodes,
     bipartite,

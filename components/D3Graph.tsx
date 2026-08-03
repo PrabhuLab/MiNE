@@ -266,23 +266,13 @@ export default function D3Graph({
             });
           }
         } else if (count === 2) {
-          if (isolatedLegendItem === id) {
-            setIsolatedLegendItem(null);
-            setHiddenItems((prev) => {
-              const next = new Set(prev);
-              categoryIds.forEach((cid) => next.delete(cid));
-              return next;
-            });
-            setTimeout(() => handleZoomFit(), 50);
-          } else {
-            setIsolatedLegendItem(id);
-            setHiddenItems((prev) => {
-              const next = new Set(prev);
-              next.delete(id);
-              return next;
-            });
-            setTimeout(() => handleZoomFit(), 50);
-          }
+          setIsolatedLegendItem(id);
+          setHiddenItems((prev) => {
+            const next = new Set(prev);
+            next.delete(id);
+            return next;
+          });
+          handleZoomFit(id);
         }
       }, 300);
     }

@@ -131,7 +131,7 @@ export const CustomizationControls = ({
             />
           </label>
           <CustomSlider 
-            min="-1000" max="-10" step="10"
+            min="-300" max="-10" step="10"
             value={filters.forceStrength}
             onChange={(v: number) => setFilter('forceStrength', v)}
             isDarkMode={isDarkMode}
