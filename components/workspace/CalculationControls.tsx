@@ -42,8 +42,7 @@ export const CalculationControls = ({ metricsToRun, setMetricsToRun, runSelected
             </label>
             <div className="space-y-3">
               {[
-                { key: "louvain", label: "Louvain" },
-                { key: "leiden", label: "Leiden" }
+                { key: "louvain", label: "Louvain" }
               ].map(({ key, label }) => (
                 <label key={key} className="flex items-center space-x-2 cursor-pointer">
                   <input
@@ -81,7 +80,7 @@ export const CalculationControls = ({ metricsToRun, setMetricsToRun, runSelected
 
             <button
               onClick={runSelectedMetrics}
-              disabled={metricsLoading || (!metricsToRun.louvain && !metricsToRun.leiden)}
+              disabled={metricsLoading || !metricsToRun.louvain}
               className={`mt-6 w-full py-2 text-[10px] uppercase font-bold tracking-widest border transition-colors ${
                 metricsLoading 
                 ? "opacity-50 cursor-not-allowed border-gray-400 text-gray-400" 
@@ -124,7 +123,7 @@ export const CalculationControls = ({ metricsToRun, setMetricsToRun, runSelected
             </div>
             <button
               onClick={runSelectedMetrics}
-              disabled={metricsLoading || !Object.values({ ...metricsToRun, louvain: false, leiden: false }).some(v => v)}
+              disabled={metricsLoading || !Object.values({ ...metricsToRun, louvain: false }).some(v => v)}
               className={`mt-6 w-full py-2 text-[10px] uppercase font-bold tracking-widest border transition-colors ${
                 metricsLoading 
                 ? "opacity-50 cursor-not-allowed border-gray-400 text-gray-400" 

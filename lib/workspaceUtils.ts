@@ -146,7 +146,7 @@ export function computeTableDataNodes(validNodes: any[], networkMetrics: any[], 
   let data = validNodes.map(node => {
     const net = netMap.get(node.id) || {};
     const mod = modMap.get(node.id) || {};
-    const comm = mod.community || net.louvain || net.leiden || communityMap[node.id] || node.community || "";
+    const comm = mod.community || net.louvain || communityMap[node.id] || node.community || "";
     return { ...node, net, mod, comm };
   });
 
@@ -189,8 +189,6 @@ export function computeTableDataNodes(validNodes: any[], networkMetrics: any[], 
         aVal = a.comm; bVal = b.comm;
       } else if (sortConfig.key === "louvain") {
         aVal = a.net.louvain || ""; bVal = b.net.louvain || "";
-      } else if (sortConfig.key === "leiden") {
-        aVal = a.net.leiden || ""; bVal = b.net.leiden || "";
       } else if (sortConfig.key === "deltaQ") {
         aVal = parseFloat(a.mod.deltaQ) || 0; bVal = parseFloat(b.mod.deltaQ) || 0;
       }

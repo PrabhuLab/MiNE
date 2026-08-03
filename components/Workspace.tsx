@@ -340,7 +340,10 @@ export default function Workspace() {
                 livePhysics={appliedFilters.livePhysics}
                 isDarkMode={isDarkMode}
                 refreshKey={refreshKey}
-                onRefresh={() => setRefreshKey(k => k + 1)}
+                onRefresh={() => {
+                  setRefreshKey(k => k + 1);
+                  runSelectedMetrics();
+                }}
                 onElementDoubleClick={handleElementDoubleClick}
                 onClearSelection={() => setSelectedElement(null)}
                 searchQuery={searchQuery}

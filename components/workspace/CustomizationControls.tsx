@@ -23,7 +23,6 @@ export const CustomizationControls = ({
   const { filters, setFilter, isDarkMode } = useStore();
   const [activeControlTab, setActiveControlTab] = React.useState('nodes');
   const hasLouvain = networkMetrics.some(m => m.louvain !== undefined);
-  const hasLeiden = networkMetrics.some(m => m.leiden !== undefined);
   const hasDegree = networkMetrics.some(m => m.degree !== undefined || m.inDegree !== undefined || m.degreeCentrality !== undefined || m.inDegreeCentrality !== undefined) || networkMetrics.length > 0;
   const hasEigen = networkMetrics.some(m => m.eigenvector !== undefined);
   const hasPageRank = networkMetrics.some(m => m.pagerank !== undefined);
@@ -65,7 +64,6 @@ export const CustomizationControls = ({
             <option value="custom">Custom Community</option>
             {hasType && <option value="type">Node Type</option>}
             {hasLouvain && <option value="louvain">Louvain</option>}
-            {hasLeiden && <option value="leiden">Leiden</option>}
             {hasDegree && <option value="degreeCentrality">Node Degree</option>}
             {hasEigen && <option value="eigenvector">Eigenvector Centrality</option>}
             {hasPageRank && <option value="pagerank">PageRank</option>}
@@ -133,7 +131,7 @@ export const CustomizationControls = ({
             />
           </label>
           <CustomSlider 
-            min="-300" max="-10" step="10"
+            min="-1000" max="-10" step="10"
             value={filters.forceStrength}
             onChange={(v: number) => setFilter('forceStrength', v)}
             isDarkMode={isDarkMode}
@@ -196,7 +194,6 @@ export const CustomizationControls = ({
               <option value="custom">Custom Community</option>
               {hasType && <option value="type">Node Type</option>}
               {hasLouvain && <option value="louvain">Louvain</option>}
-              {hasLeiden && <option value="leiden">Leiden</option>}
               {hasDegree && <option value="degreeCentrality">Node Degree</option>}
               {hasEigen && <option value="eigenvector">Eigenvector Centrality</option>}
               {hasPageRank && <option value="pagerank">PageRank</option>}

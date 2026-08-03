@@ -30,10 +30,8 @@ export function useGraphMetrics(validNodes: any[], validEdges: any[], appliedFil
   
   const [modularity, setModularity] = useState<number | null>(null);
   
-  const [metricsToRun, // eslint-disable-next-line react-hooks/set-state-in-effect
-    setMetricsToRun] = useState({
+  const [metricsToRun, setMetricsToRun] = useState({
     louvain: false,
-    leiden: false,
     degree: false,
     betweenness: false,
     closeness: false,
@@ -44,27 +42,24 @@ export function useGraphMetrics(validNodes: any[], validEdges: any[], appliedFil
   const [metricsLoading, setMetricsLoading] = useState(false);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setNetworkMetrics([]);
-    setMetricsToRun({
-      louvain: false,
-      leiden: false,
-      degree: false,
-      betweenness: false,
-      closeness: false,
-      clustering: false,
-      pagerank: false,
-      eigenvector: false
-    });
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setFilter('nodeColorBase', 'custom');
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setFilter('nodeSizeBase', 'abundance');
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setFilter('edgeColorBase', 'uniform');
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setFilter('edgeColorNodeMetric', 'custom');
-  }, [rawNodes]);
+    const timer = setTimeout(() => {
+      setNetworkMetrics([]);
+      setMetricsToRun({
+        louvain: false,
+        degree: false,
+        betweenness: false,
+        closeness: false,
+        clustering: false,
+        pagerank: false,
+        eigenvector: false
+      });
+      setFilter('nodeColorBase', 'custom');
+      setFilter('nodeSizeBase', 'abundance');
+      setFilter('edgeColorBase', 'uniform');
+      setFilter('edgeColorNodeMetric', 'custom');
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [rawNodes, setFilter]);
 
   // Compute Communities and Metrics
   useEffect(() => {
@@ -154,19 +149,19 @@ export function useGraphMetrics(validNodes: any[], validEdges: any[], appliedFil
           newMetrics[node] = {};
         });
 
-        if (metricsToRun.louvain || metricsToRun.leiden) {
+        const runLouvain = metricsToRun.louvain || appliedFilters?.nodeColorBase === 'louvain';
+        if (runLouvain) {
           try {
             const options = { 
-              rng: seedrandom(appliedFilters.louvainSeed || 42),
-              resolution: appliedFilters.resolution || 1.0, 
+              rng: seedrandom(appliedFilters?.louvainSeed || 42),
+              resolution: appliedFilters?.resolution || 1.0, 
               getEdgeWeight: "weight",
               fastLocalMoves: true
             };
             const details = louvain.detailed(graph, options);
             const norm = normalize_communities(details.communities as Record<string, number>);
             Object.keys(norm).forEach(node => {
-              if (metricsToRun.louvain) newMetrics[node].louvain = `Cluster ${norm[node] + 1}`;
-              if (metricsToRun.leiden) newMetrics[node].leiden = `Cluster ${norm[node] + 1}`; // fallback
+              newMetrics[node].louvain = `Cluster ${norm[node] + 1}`;
             });
             setModularity(details.modularity);
           } catch (e) { console.warn("Community detection failed", e); }
@@ -269,6 +264,20 @@ export function useGraphMetrics(validNodes: any[], validEdges: any[], appliedFil
       }
     }, 100);
   };
+
+  // Auto recalculate active metrics or Louvain when validNodes, validEdges, or filter parameters change
+  useEffect(() => {
+    const isLouvainActive = metricsToRun.louvain || appliedFilters?.nodeColorBase === 'louvain';
+    const hasAnyMetricActive = Object.values(metricsToRun).some(Boolean) || isLouvainActive;
+
+    if (hasAnyMetricActive && validNodes.length > 0 && validEdges.length > 0) {
+      const timer = setTimeout(() => {
+        runSelectedMetrics();
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [validNodes, validEdges, appliedFilters?.resolution, appliedFilters?.louvainSeed, appliedFilters?.nodeColorBase, metricsToRun]);
 
   return {
     networkMetrics,

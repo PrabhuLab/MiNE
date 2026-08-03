@@ -22,10 +22,8 @@ export function useDataTableSort(validNodes: any[], validEdges: any[], networkMe
       let comm: any;
       if (filters.nodeColorBase === 'louvain') {
         comm = net?.louvain;
-      } else if (filters.nodeColorBase === 'leiden') {
-        comm = net?.leiden;
       } else {
-        comm = communityMap[d.id] ?? d.community ?? net?.louvain ?? net?.leiden;
+        comm = communityMap[d.id] ?? d.community ?? net?.louvain;
       }
 
       if (comm !== undefined && comm !== null && hiddenSet.has(`community:${comm}`)) return false;

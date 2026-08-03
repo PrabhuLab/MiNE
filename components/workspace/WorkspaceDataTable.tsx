@@ -34,7 +34,6 @@ export const WorkspaceDataTable = ({
   const hasEigenvectorCent = networkMetrics.some(m => m.eigenvector !== undefined);
   const hasPagerankCent = networkMetrics.some(m => m.pagerank !== undefined);
   const hasLouvain = networkMetrics.some(m => m.louvain !== undefined);
-  const hasLeiden = networkMetrics.some(m => m.leiden !== undefined);
 
   return (
     <div className="flex-1 w-full h-full overflow-auto">
@@ -106,11 +105,6 @@ export const WorkspaceDataTable = ({
                   Louvain {sortConfig?.key === "louvain" && (sortConfig.direction === "asc" ? "↑" : "↓")}
                 </th>
               )}
-              {hasLeiden && (
-                <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("leiden")}>
-                  Leiden {sortConfig?.key === "leiden" && (sortConfig.direction === "asc" ? "↑" : "↓")}
-                </th>
-              )}
               <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("deltaQ")}>
                 Mod. Contribution {sortConfig?.key === "deltaQ" && (sortConfig.direction === "asc" ? "↑" : "↓")}
               </th>
@@ -156,7 +150,6 @@ export const WorkspaceDataTable = ({
                     ) : "-"}
                   </td>
                   {hasLouvain && <td className="p-2 font-mono">{node.net.louvain || "-"}</td>}
-                  {hasLeiden && <td className="p-2 font-mono">{node.net.leiden || "-"}</td>}
                   <td className="p-2 font-mono">{node.mod.deltaQ || 0}</td>
                 </tr>
               );
