@@ -94,7 +94,6 @@ export default function SmartUploadWizard() {
     if (format === 'Standard JSON') return filesState.jsonFile !== null;
     if (isFormatDualMatrix) return filesState.countsFile !== null && filesState.percentagesFile !== null;
     if (isFormatMatrix) return filesState.singleMatrixFile !== null;
-    if (format === 'Bipartite Edge List' || format === 'Directed Bipartite Edge List') return filesState.edgesFile !== null && filesState.nodesFile !== null;
     if (isFormatEdgeList) return filesState.edgesFile !== null;
     if (isFormatAdjList) return filesState.adjListFile !== null;
     return false;
