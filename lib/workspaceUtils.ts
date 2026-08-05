@@ -185,6 +185,22 @@ export function computeTableDataNodes(validNodes: any[], networkMetrics: any[], 
         aVal = parseFloat(a.net.eigenvector) || 0; bVal = parseFloat(b.net.eigenvector) || 0;
       } else if (sortConfig.key === "pagerank") {
         aVal = parseFloat(a.net.pagerank) || 0; bVal = parseFloat(b.net.pagerank) || 0;
+      } else if (sortConfig.key === "betweenness") {
+        aVal = parseFloat(a.net.betweenness) || 0; bVal = parseFloat(b.net.betweenness) || 0;
+      } else if (sortConfig.key === "closeness") {
+        aVal = parseFloat(a.net.closeness) || 0; bVal = parseFloat(b.net.closeness) || 0;
+      } else if (sortConfig.key === "clustering") {
+        aVal = parseFloat(a.net.clustering ?? a.net.bipartiteClustering) || 0; bVal = parseFloat(b.net.clustering ?? b.net.bipartiteClustering) || 0;
+      } else if (sortConfig.key === "bipartitePartition") {
+        aVal = a.net.bipartitePartition || ""; bVal = b.net.bipartitePartition || "";
+      } else if (sortConfig.key === "bipartiteNormDegree") {
+        aVal = parseFloat(a.net.bipartiteNormDegree) || 0; bVal = parseFloat(b.net.bipartiteNormDegree) || 0;
+      } else if (sortConfig.key === "bipartiteClustering") {
+        aVal = parseFloat(a.net.bipartiteClustering) || 0; bVal = parseFloat(b.net.bipartiteClustering) || 0;
+      } else if (sortConfig.key === "bipartiteRedundancy") {
+        aVal = parseFloat(a.net.bipartiteRedundancy) || 0; bVal = parseFloat(b.net.bipartiteRedundancy) || 0;
+      } else if (sortConfig.key === "bipartiteProjectionDegree") {
+        aVal = a.net.bipartiteProjectionDegree || 0; bVal = b.net.bipartiteProjectionDegree || 0;
       } else if (sortConfig.key === "community") {
         aVal = a.comm; bVal = b.comm;
       } else if (sortConfig.key === "louvain") {

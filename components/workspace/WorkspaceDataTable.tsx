@@ -31,9 +31,18 @@ export const WorkspaceDataTable = ({
   const hasInDegreeCent = networkMetrics.some(m => m.inDegreeCentrality !== undefined);
   const hasOutDegreeCent = networkMetrics.some(m => m.outDegreeCentrality !== undefined);
   const hasDegreeCent = networkMetrics.some(m => m.degreeCentrality !== undefined);
+  const hasBetweennessCent = networkMetrics.some(m => m.betweenness !== undefined);
+  const hasClosenessCent = networkMetrics.some(m => m.closeness !== undefined);
+  const hasClusteringCoeff = networkMetrics.some(m => m.clustering !== undefined);
   const hasEigenvectorCent = networkMetrics.some(m => m.eigenvector !== undefined);
   const hasPagerankCent = networkMetrics.some(m => m.pagerank !== undefined);
   const hasLouvain = networkMetrics.some(m => m.louvain !== undefined);
+
+  const hasBipartitePartition = networkMetrics.some(m => m.bipartitePartition !== undefined);
+  const hasBipartiteNormDeg = networkMetrics.some(m => m.bipartiteNormDegree !== undefined);
+  const hasBipartiteClustering = networkMetrics.some(m => m.bipartiteClustering !== undefined);
+  const hasBipartiteRedundancy = networkMetrics.some(m => m.bipartiteRedundancy !== undefined);
+  const hasBipartiteProjDeg = networkMetrics.some(m => m.bipartiteProjectionDegree !== undefined);
 
   return (
     <div className="flex-1 w-full h-full overflow-auto">
@@ -50,6 +59,11 @@ export const WorkspaceDataTable = ({
               <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("abundance")}>
                 Abundance {sortConfig?.key === "abundance" && (sortConfig.direction === "asc" ? "↑" : "↓")}
               </th>
+              {hasBipartitePartition && (
+                <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("bipartitePartition")}>
+                  Partition {sortConfig?.key === "bipartitePartition" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                </th>
+              )}
               {directed ? (
                 <>
                   {hasInDegree && (
@@ -86,6 +100,41 @@ export const WorkspaceDataTable = ({
                     </th>
                   )}
                 </>
+              )}
+              {hasBipartiteNormDeg && (
+                <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("bipartiteNormDegree")}>
+                  Bip. Norm Deg {sortConfig?.key === "bipartiteNormDegree" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                </th>
+              )}
+              {hasBetweennessCent && (
+                <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("betweenness")}>
+                  Betweenness {sortConfig?.key === "betweenness" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                </th>
+              )}
+              {hasClosenessCent && (
+                <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("closeness")}>
+                  Closeness {sortConfig?.key === "closeness" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                </th>
+              )}
+              {hasClusteringCoeff && (
+                <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("clustering")}>
+                  Clustering {sortConfig?.key === "clustering" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                </th>
+              )}
+              {hasBipartiteClustering && (
+                <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("bipartiteClustering")}>
+                  Bip. C4 Clustering {sortConfig?.key === "bipartiteClustering" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                </th>
+              )}
+              {hasBipartiteRedundancy && (
+                <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("bipartiteRedundancy")}>
+                  Bip. Redundancy {sortConfig?.key === "bipartiteRedundancy" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                </th>
+              )}
+              {hasBipartiteProjDeg && (
+                <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("bipartiteProjectionDegree")}>
+                  Proj. Degree {sortConfig?.key === "bipartiteProjectionDegree" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                </th>
               )}
               {hasEigenvectorCent && (
                 <th className="p-3 font-bold uppercase tracking-wider cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => handleSort("eigenvector")}>
@@ -127,6 +176,7 @@ export const WorkspaceDataTable = ({
                   <td className="p-2 font-mono break-all">{node.id}</td>
                   <td className="p-2 break-all">{node.label || node.name || "-"}</td>
                   <td className="p-2 font-mono">{node.abundance || 0}</td>
+                  {hasBipartitePartition && <td className="p-2 font-mono">{node.net.bipartitePartition || "-"}</td>}
                   {directed ? (
                     <>
                       {hasInDegree && <td className="p-2 font-mono">{node.net.inDegree ?? 0}</td>}
@@ -140,6 +190,13 @@ export const WorkspaceDataTable = ({
                       {hasDegreeCent && <td className="p-2 font-mono">{node.net.degreeCentrality || 0}</td>}
                     </>
                   )}
+                  {hasBipartiteNormDeg && <td className="p-2 font-mono">{node.net.bipartiteNormDegree || 0}</td>}
+                  {hasBetweennessCent && <td className="p-2 font-mono">{node.net.betweenness || 0}</td>}
+                  {hasClosenessCent && <td className="p-2 font-mono">{node.net.closeness || 0}</td>}
+                  {hasClusteringCoeff && <td className="p-2 font-mono">{node.net.clustering || 0}</td>}
+                  {hasBipartiteClustering && <td className="p-2 font-mono">{node.net.bipartiteClustering || 0}</td>}
+                  {hasBipartiteRedundancy && <td className="p-2 font-mono">{node.net.bipartiteRedundancy || 0}</td>}
+                  {hasBipartiteProjDeg && <td className="p-2 font-mono">{node.net.bipartiteProjectionDegree || 0}</td>}
                   {hasEigenvectorCent && <td className="p-2 font-mono">{node.net.eigenvector || 0}</td>}
                   {hasPagerankCent && <td className="p-2 font-mono">{node.net.pagerank || 0}</td>}
                   <td className="p-2">

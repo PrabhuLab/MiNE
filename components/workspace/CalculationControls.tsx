@@ -11,7 +11,7 @@ interface CalculationControlsProps {
 }
 
 export const CalculationControls = ({ metricsToRun, setMetricsToRun, runSelectedMetrics, metricsLoading }: CalculationControlsProps) => {
-  const { filters, setFilter, isDarkMode, directed } = useStore();
+  const { filters, setFilter, isDarkMode, directed, bipartite } = useStore();
   const [activeControlTab, setActiveControlTab] = useState<"communities" | "metrics">("communities");
 
   return (
@@ -42,7 +42,7 @@ export const CalculationControls = ({ metricsToRun, setMetricsToRun, runSelected
             </label>
             <div className="space-y-3">
               {[
-                { key: "louvain", label: "Louvain" }
+                { key: "louvain", label: bipartite ? "Louvain (Barber Bipartite Q_B)" : "Louvain" }
               ].map(({ key, label }) => (
                 <label key={key} className="flex items-center space-x-2 cursor-pointer">
                   <input
@@ -101,10 +101,10 @@ export const CalculationControls = ({ metricsToRun, setMetricsToRun, runSelected
             </label>
             <div className="space-y-3">
               {[
-                { key: "degree", label: directed ? "In/Out Degree Centrality" : "Degree Centrality" },
+                { key: "degree", label: directed ? "In/Out Degree Centrality" : (bipartite ? "Degree & Bip. Norm Degree" : "Degree Centrality") },
                 { key: "betweenness", label: "Betweenness Centrality" },
                 { key: "closeness", label: "Closeness Centrality" },
-                { key: "clustering", label: "Clustering Coefficient" },
+                { key: "clustering", label: bipartite ? "Bipartite C4 Clustering & Redundancy" : "Clustering Coefficient" },
                 { key: "pagerank", label: "PageRank" },
                 { key: "eigenvector", label: "Eigenvector Centrality" }
               ].map(({ key, label }) => (

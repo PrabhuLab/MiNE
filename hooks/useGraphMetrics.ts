@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useStore } from '@/store/useStore';
 import { computeCommunityMetrics } from '@/lib/workspaceUtils';
+import { computeBipartiteLouvain, computeBipartiteMetrics } from '@/lib/bipartiteUtils';
 import Graph from 'graphology';
 import louvainPkg from 'graphology-communities-louvain';
 import pagerankPkg from 'graphology-metrics/centrality/pagerank';
@@ -23,7 +24,7 @@ const outDegreeCentrality = degreePkg.outDegreeCentrality || (degreePkg as any).
 const seedrandom = (typeof seedrandomPkg === 'function') ? seedrandomPkg : (seedrandomPkg as any).default || seedrandomPkg;
 
 export function useGraphMetrics(validNodes: any[], validEdges: any[], appliedFilters: any, rawNodes: any[]) {
-  const { directed, communityMap, setCommunityMap, setFilter } = useStore();
+  const { directed, bipartite, communityMap, setCommunityMap, setFilter } = useStore();
   
   const [networkMetrics, setNetworkMetrics] = useState<any[]>([]);
   const [nodeMetrics, setNodeMetrics] = useState<any[]>([]);
@@ -152,19 +153,43 @@ export function useGraphMetrics(validNodes: any[], validEdges: any[], appliedFil
         const runLouvain = metricsToRun.louvain || appliedFilters?.nodeColorBase === 'louvain';
         if (runLouvain) {
           try {
-            const options = { 
-              rng: seedrandom(appliedFilters?.louvainSeed || 42),
-              resolution: appliedFilters?.resolution || 1.0, 
-              getEdgeWeight: "weight",
-              fastLocalMoves: true
-            };
-            const details = louvain.detailed(graph, options);
-            const norm = normalize_communities(details.communities as Record<string, number>);
-            Object.keys(norm).forEach(node => {
-              newMetrics[node].louvain = `Cluster ${norm[node] + 1}`;
-            });
-            setModularity(details.modularity);
+            if (bipartite) {
+              const details = computeBipartiteLouvain(graph, {
+                resolution: appliedFilters?.resolution || 1.0,
+                seed: appliedFilters?.louvainSeed || 42
+              });
+              Object.keys(details.communities).forEach(node => {
+                newMetrics[node].louvain = details.communities[node];
+              });
+              setModularity(details.modularity);
+            } else {
+              const options = { 
+                rng: seedrandom(appliedFilters?.louvainSeed || 42),
+                resolution: appliedFilters?.resolution || 1.0, 
+                getEdgeWeight: "weight",
+                fastLocalMoves: true
+              };
+              const details = louvain.detailed(graph, options);
+              const norm = normalize_communities(details.communities as Record<string, number>);
+              Object.keys(norm).forEach(node => {
+                newMetrics[node].louvain = `Cluster ${norm[node] + 1}`;
+              });
+              setModularity(details.modularity);
+            }
           } catch (e) { console.warn("Community detection failed", e); }
+        }
+
+        if (bipartite) {
+          try {
+            const bipMetrics = computeBipartiteMetrics(graph);
+            Object.keys(bipMetrics).forEach(node => {
+              newMetrics[node].bipartitePartition = bipMetrics[node].bipartitePartition;
+              newMetrics[node].bipartiteNormDegree = bipMetrics[node].bipartiteNormDegree;
+              newMetrics[node].bipartiteClustering = bipMetrics[node].bipartiteClustering;
+              newMetrics[node].bipartiteRedundancy = bipMetrics[node].bipartiteRedundancy;
+              newMetrics[node].bipartiteProjectionDegree = bipMetrics[node].bipartiteProjectionDegree;
+            });
+          } catch (e) { console.warn("Bipartite metrics calculation failed", e); }
         }
 
         if (metricsToRun.degree) {
