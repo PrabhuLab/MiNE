@@ -342,7 +342,6 @@ export default function Workspace() {
                 refreshKey={refreshKey}
                 onRefresh={() => {
                   setRefreshKey(k => k + 1);
-                  runSelectedMetrics();
                 }}
                 onElementDoubleClick={handleElementDoubleClick}
                 onClearSelection={() => setSelectedElement(null)}

@@ -1,64 +1,36 @@
 export function normalize_communities(communities: Record<string, number>): Record<string, number> {
-  let mappedCommunities = { ...communities };
-
-  // Identify groups used by small clusters (2-10)
-  let usedNumbers = new Set(
-    Object.values(communities).filter((v) => v >= 2 && v <= 10)
-  );
-
-  // Identify groups used by large clusters (>10)
-  let largeValues = [
-    ...new Set(Object.values(communities).filter((v) => v > 10))
-  ].sort((a, b) => a - b);
-
-  // Find available numbers in the 2-10 range
-  let availableNumbers = new Set(
-    Array.from({ length: 9 }, (_, i) => i + 2).filter((i) => !usedNumbers.has(i))
-  );
-
-  // Map large group IDs to available small IDs
-  let mapping: Record<number, number> = {};
-  for (let value of largeValues) {
-    if (availableNumbers.size === 0) break;
-    let minAvailable = Array.from(availableNumbers)[0];
-    mapping[value] = minAvailable;
-    availableNumbers.delete(minAvailable);
-  }
-
-  // Apply mapping
-  for (let key in communities) {
-    if (communities[key] > 10) {
-      mappedCommunities[key] = mapping[communities[key]] ?? communities[key];
+  const countMap: Record<number, number> = {};
+  for (const node in communities) {
+    const commId = communities[node];
+    if (commId !== -1 && commId !== undefined && commId !== null && Number.isFinite(commId)) {
+      countMap[commId] = (countMap[commId] || 0) + 1;
     }
   }
 
-  // Recalculate frequencies to sort by size
-  let countMap: Record<number, number> = {};
-  for (let value of Object.values(mappedCommunities)) {
-    if (value !== -1) {
-      countMap[value] = (countMap[value] || 0) + 1;
-    }
-  }
+  const sortedCommunityIds = Object.keys(countMap)
+    .map(Number)
+    .sort((a, b) => {
+      const sizeDiff = countMap[b] - countMap[a];
+      if (sizeDiff !== 0) return sizeDiff;
+      return a - b;
+    });
 
-  // Sort groups by abundance
-  let sortedGroups = Object.entries(countMap).sort((a, b) => b[1] - a[1]);
-
-  // Create final mapping (Top groups get indices 0-10)
-  let finalMapping: Record<number, number> = {};
-  sortedGroups.forEach(([originalValue, count], index) => {
-    if (index <= 10) {
-      finalMapping[Number(originalValue)] = index;
-    }
+  const idToNormalizedIndexMap = new Map<number, number>();
+  sortedCommunityIds.forEach((origId, index) => {
+    idToNormalizedIndexMap.set(origId, index);
   });
 
-  // Apply final mapping
-  for (let key in mappedCommunities) {
-    if (mappedCommunities[key] !== -1) {
-      mappedCommunities[key] = finalMapping[mappedCommunities[key]] ?? mappedCommunities[key];
+  const normalizedCommunities: Record<string, number> = {};
+  for (const node in communities) {
+    const origId = communities[node];
+    if (origId === -1 || origId === undefined || origId === null || !Number.isFinite(origId)) {
+      normalizedCommunities[node] = -1;
+    } else {
+      normalizedCommunities[node] = idToNormalizedIndexMap.get(origId) ?? origId;
     }
   }
 
-  return mappedCommunities;
+  return normalizedCommunities;
 }
 
 export const COMMUNITY_COLORS = [
@@ -82,5 +54,11 @@ export const COMMUNITY_COLORS = [
 export function getCommunityColor(community: string | number, allCommunities: string[]): string {
   const index = allCommunities.indexOf(String(community));
   if (index === -1) return COMMUNITY_COLORS[0];
-  return COMMUNITY_COLORS[index % COMMUNITY_COLORS.length];
+  if (index < COMMUNITY_COLORS.length) {
+    return COMMUNITY_COLORS[index];
+  }
+  const hue = (index * 137.508) % 360;
+  const sat = 70 + (index % 3) * 10;
+  const light = 45 + (index % 4) * 8;
+  return `hsl(${hue.toFixed(1)}, ${sat}%, ${light}%)`;
 }

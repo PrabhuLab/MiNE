@@ -290,20 +290,6 @@ export function useGraphMetrics(validNodes: any[], validEdges: any[], appliedFil
     }, 100);
   };
 
-  // Auto recalculate active metrics or Louvain when validNodes, validEdges, or filter parameters change
-  useEffect(() => {
-    const isLouvainActive = metricsToRun.louvain || appliedFilters?.nodeColorBase === 'louvain';
-    const hasAnyMetricActive = Object.values(metricsToRun).some(Boolean) || isLouvainActive;
-
-    if (hasAnyMetricActive && validNodes.length > 0 && validEdges.length > 0) {
-      const timer = setTimeout(() => {
-        runSelectedMetrics();
-      }, 0);
-      return () => clearTimeout(timer);
-    }
-    /* eslint-disable-next-line react-hooks/exhaustive-deps */
-  }, [validNodes, validEdges, appliedFilters?.resolution, appliedFilters?.louvainSeed, appliedFilters?.nodeColorBase, metricsToRun]);
-
   return {
     networkMetrics,
     nodeMetrics,

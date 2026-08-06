@@ -3,7 +3,7 @@
 import React, { useMemo, useCallback } from 'react';
 import * as d3 from 'd3';
 import { RawNode, RawEdge } from '@/store/useStore';
-import { COMMUNITY_COLORS } from '@/lib/communityUtils';
+import { COMMUNITY_COLORS, getCommunityColor } from '@/lib/communityUtils';
 import { ElementLegendItem } from '@/components/graph/GraphLegend';
 
 interface UseGraphStylesProps {
@@ -73,16 +73,16 @@ export function useGraphStyles({
 
   const customColorMap = useMemo(() => {
     const map: Record<string, string> = {};
-    customLabels.forEach((label, i) => {
-      map[label] = COMMUNITY_COLORS[i % COMMUNITY_COLORS.length] || COMMUNITY_COLORS[0];
+    customLabels.forEach((label) => {
+      map[label] = getCommunityColor(label, customLabels);
     });
     return map;
   }, [customLabels]);
 
   const louvainColorMap = useMemo(() => {
     const map: Record<string, string> = {};
-    louvainLabels.forEach((label, i) => {
-      map[label] = COMMUNITY_COLORS[i % COMMUNITY_COLORS.length] || COMMUNITY_COLORS[0];
+    louvainLabels.forEach((label) => {
+      map[label] = getCommunityColor(label, louvainLabels);
     });
     return map;
   }, [louvainLabels]);
