@@ -1,4 +1,5 @@
 import type Graph from 'graphology';
+import modularityMetric from 'graphology-metrics/graph/modularity';
 
 export function computeMaxRelWeight(rawEdges: any[]): number {
   if (!rawEdges || rawEdges.length === 0) return 100;
@@ -130,20 +131,21 @@ export function computeCommunityMetrics(graph: Graph, newCommunityMap: Record<st
         if (newCommunityMap[target] === comm) k_out_to_comm += (atts.weight || 1);
       });
           
-      const deltaQ = totalWeight > 0 ? 
-        ((k_in_from_comm + k_out_to_comm) / totalWeight) - 
-        ((nodeOutDegree * commInDegree + nodeInDegree * commOutDegree) / Math.pow(totalWeight, 2)) : 0;
+      const nodeCommunityDegree = k_in_from_comm + k_out_to_comm;
+      const deltaQ = totalWeight > 0
+        ? modularityMetric.directedDelta(totalWeight, commInDegree, commOutDegree, nodeInDegree, nodeOutDegree, nodeCommunityDegree)
+        : 0;
             
       return {
         id: nodeId,
         community: comm,
-        k_i_in: (k_in_from_comm + k_out_to_comm).toFixed(4),
+        k_i_in: nodeCommunityDegree,
         nodeDegree: `↓${nodeInDegree.toFixed(2)} ↑${nodeOutDegree.toFixed(2)}`,
         communityDegree: `↓${commInDegree.toFixed(2)} ↑${commOutDegree.toFixed(2)}`,
-        deltaQ: deltaQ.toFixed(6)
+        deltaQ
       };
     } else {
-      const totalWeight2m = sumWeights * 2;
+      const totalWeight = sumWeights;
       let nodeDegree = 0;
       graph.forEachEdge(nodeId, (e: any, atts: any) => { nodeDegree += (atts.weight || 1); });
           
@@ -162,15 +164,15 @@ export function computeCommunityMetrics(graph: Graph, newCommunityMap: Record<st
         }
       });
 
-      const deltaQ = totalWeight2m > 0 ? (k_i_in / totalWeight2m) - ((nodeDegree * communityDegree) / Math.pow(totalWeight2m, 2)) : 0;
+      const deltaQ = totalWeight > 0 ? modularityMetric.undirectedDelta(totalWeight, communityDegree, nodeDegree, k_i_in * 2) : 0;
           
       return {
         id: nodeId,
         community: comm,
-        k_i_in: k_i_in.toFixed(4),
-        nodeDegree: nodeDegree.toFixed(4),
-        communityDegree: communityDegree.toFixed(4),
-        deltaQ: deltaQ.toFixed(6)
+        k_i_in,
+        nodeDegree,
+        communityDegree,
+        deltaQ
       };
     }
   });
@@ -200,8 +202,8 @@ export function computeTableDataNodes(validNodes: any[], networkMetrics: any[], 
 
   if (sortConfig) {
     data.sort((a, b) => {
-      let aVal: any = a.id;
-      let bVal: any = b.id;
+      let aVal: any = a[sortConfig.key] ?? a.net?.[sortConfig.key] ?? a.mod?.[sortConfig.key] ?? a.id;
+      let bVal: any = b[sortConfig.key] ?? b.net?.[sortConfig.key] ?? b.mod?.[sortConfig.key] ?? b.id;
 
       if (sortConfig.key === "id") {
         aVal = a.id; bVal = b.id;
@@ -254,8 +256,8 @@ export function computeTableDataEdges(validEdges: any[], searchQuery: string, so
   
   if (sortConfig) {
     data = [...data].sort((a, b) => {
-      let aVal: any = a.source;
-      let bVal: any = b.source;
+      let aVal: any = a[sortConfig.key] ?? a.source;
+      let bVal: any = b[sortConfig.key] ?? b.source;
 
       if (sortConfig.key === "source") {
         aVal = a.source; bVal = b.source;

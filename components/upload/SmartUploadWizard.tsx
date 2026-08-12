@@ -13,6 +13,7 @@ import {
   createRandomClusterAllInOne,
   graphFromRaw,
   graphToRaw,
+  inferCustomEdgeAttributes,
   inferCustomNodeAttributes,
   parseNetworkFiles,
   type ParsedNetwork,
@@ -235,10 +236,16 @@ export default function SmartUploadWizard() {
     clearStore();
     const canonical = graphToRaw(graphFromRaw(previewGraph.nodes, previewGraph.edges, isDirected, topology === 'Bipartite'));
     setRawData(canonical.nodes, canonical.edges, isDirected, topology === 'Bipartite');
-    const inferredCustomAttributes = inferCustomNodeAttributes(canonical.nodes);
+    const inferredCustomAttributes = [...inferCustomNodeAttributes(canonical.nodes), ...inferCustomEdgeAttributes(canonical.edges)];
     if (inferredCustomAttributes.length) {
+      const firstNodeAttribute = inferredCustomAttributes.find((attribute) => attribute.scope === 'node');
+      const firstEdgeAttribute = inferredCustomAttributes.find((attribute) => attribute.scope === 'edge');
       useStore.setState((state) => ({
-        filters: { ...state.filters, customNodeAttribute: state.filters.customNodeAttribute || inferredCustomAttributes[0].name },
+        filters: {
+          ...state.filters,
+          customNodeAttribute: state.filters.customNodeAttribute || firstNodeAttribute?.name || '',
+          customEdgeAttribute: state.filters.customEdgeAttribute || firstEdgeAttribute?.name || '',
+        },
         customAttributes: inferredCustomAttributes,
       }));
     }
@@ -248,7 +255,7 @@ export default function SmartUploadWizard() {
   const applyParsedNetwork = (parsed: ParsedNetwork) => {
     const { nodes, edges } = graphToRaw(parsed.graph);
     const workspace = parsed.workspace;
-    const inferredCustomAttributes = inferCustomNodeAttributes(nodes);
+    const inferredCustomAttributes = [...inferCustomNodeAttributes(nodes), ...inferCustomEdgeAttributes(edges)];
     resetCommunityColorCache();
     clearStore();
     useStore.setState({

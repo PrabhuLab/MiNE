@@ -29,7 +29,8 @@ interface WorkspaceIOOptions {
   networkMetrics: any[];
   nodeMetrics: any[];
   edgeMetrics: any[];
-  modularity: number | null;
+  graphMetrics: Record<string, any>;
+  metricValidity: Record<string, any>;
   metricsToRun: Record<string, boolean>;
   setMetricsToRun: (updater: (current: any) => any) => void;
   setAppliedFilters: (filters: WorkspaceFilters) => void;
@@ -157,8 +158,8 @@ export function useWorkspaceIO(options: WorkspaceIOOptions) {
       options.networkMetrics,
       options.nodeMetrics,
       options.edgeMetrics,
-      { modularity: options.modularity },
-      { selectedMetrics: options.metricsToRun },
+      options.graphMetrics,
+      { selectedMetrics: options.metricsToRun, validity: options.metricValidity },
     );
     const exportGraph = canonicalExportGraph(
       options.graph,

@@ -10,6 +10,7 @@ import type {
   RawNode,
 } from '@/store/useStore';
 import { cleanAttributes, meaningful, numeric } from '@/services/graphIO/attributes';
+import { orderPartitionValues } from '@/services/graphPresentation/visibility';
 import {
   EMPTY_METRICS,
   GRAPH_IO_VERSION,
@@ -32,9 +33,11 @@ export { writeGraphML } from '@/services/graphIO/graphml';
 export { writeGexf } from '@/services/graphIO/gexf';
 export { createMetricsBundle } from '@/services/graphIO/metrics';
 export {
+  availableCustomEdgeAttributes,
   availableCustomNodeAttributes,
   availableNumericCustomEdgeAttributes,
   detectCustomAttributeType,
+  inferCustomEdgeAttributes,
   inferCustomNodeAttributes,
 } from '@/services/graphIO/customAttributes';
 export { buildAllInOne, createRandomClusterAllInOne } from '@/services/graphIO/allInOne';
@@ -51,15 +54,16 @@ export function graphFromRaw(
   graph.setAttribute('weighted', edges.some((edge) => numeric(edge.weight_raw, 1) !== 1 || numeric(edge.weight_secondary, 1) !== 1));
   graph.setAttribute('partitionAttribute', 'partition');
 
-  const partitionValues = new Map<string, number>();
+  const partitionValueSet = new Set<string>();
   if (bipartite) {
     nodes.forEach((node) => {
       const value = meaningful(node.partition)
         ? node.partition
         : node.bipartite ?? node.group ?? (node.type === 'A' || node.type === 'B' ? node.type : undefined);
-      if (meaningful(value) && !partitionValues.has(String(value))) partitionValues.set(String(value), partitionValues.size);
+      if (meaningful(value)) partitionValueSet.add(String(value));
     });
   }
+  const partitionValues = new Map(orderPartitionValues(partitionValueSet).map((value, index) => [value, index]));
 
   nodes.forEach((node, index) => {
     const id = String(node.id ?? `node_${index}`);
@@ -175,6 +179,24 @@ function graphFromSerialized(serialized: any): Graph {
 }
 
 function normalizeParsedGraph(graph: Graph, metadata: Record<string, any> = {}): ParsedNetwork {
+  let embeddedGraphMetrics: Record<string, any> = {};
+  let embeddedMetricsMetadata: Record<string, any> = {};
+  graph.forEachNode((node, attrs) => {
+    if (typeof attrs.__mineGraphMetrics === 'string') {
+      try { embeddedGraphMetrics = JSON.parse(attrs.__mineGraphMetrics); } catch { /* retain the graph even if embedded metadata is malformed */ }
+    }
+    if (typeof attrs.__mineMetricsMetadata === 'string') {
+      try { embeddedMetricsMetadata = JSON.parse(attrs.__mineMetricsMetadata); } catch { /* retain the graph even if embedded metadata is malformed */ }
+    }
+    if (attrs.__mineGraphMetrics !== undefined || attrs.__mineMetricsMetadata !== undefined) {
+      graph.removeNodeAttribute(node, '__mineGraphMetrics');
+      graph.removeNodeAttribute(node, '__mineMetricsMetadata');
+    }
+  });
+  if (Object.keys(embeddedGraphMetrics).length) graph.mergeAttributes(embeddedGraphMetrics);
+  if (Object.keys(embeddedMetricsMetadata).length && !graph.hasAttribute('metricsMetadata')) {
+    graph.setAttribute('metricsMetadata', JSON.stringify(embeddedMetricsMetadata));
+  }
   const directed = metadata.directed ?? graph.getAttribute('directed') ?? graph.type === 'directed';
   const partitionValues = new Set<string>();
   graph.forEachNode((_node, attrs) => {
@@ -189,7 +211,7 @@ function normalizeParsedGraph(graph: Graph, metadata: Record<string, any> = {}):
     }
   }
   if (bipartite && partitionValues.size) {
-    const partitionIndexes = new Map(Array.from(partitionValues).map((value, index) => [value, index]));
+    const partitionIndexes = new Map(orderPartitionValues(partitionValues).map((value, index) => [value, index]));
     graph.forEachNode((node, attrs) => {
       if (meaningful(attrs.partition)) graph.setNodeAttribute(node, 'partitionIndex', partitionIndexes.get(String(attrs.partition)) ?? 0);
     });
@@ -203,7 +225,8 @@ function normalizeParsedGraph(graph: Graph, metadata: Record<string, any> = {}):
   const metricNames = new Set([
     'community', 'deltaQ', 'k_i_in', 'nodeDegree', 'communityDegree', 'degree', 'inDegree', 'outDegree',
     'degreeCentrality', 'inDegreeCentrality', 'outDegreeCentrality', 'betweenness', 'closeness', 'clustering',
-    'pagerank', 'eigenvector', 'eccentricity', 'weightedDegree', 'louvain', 'edgeBetweenness', 'disparity',
+    'pagerank', 'eigenvector', 'eccentricity', 'weightedDegree', 'weightedInDegree', 'weightedOutDegree',
+    'hub', 'authority', 'louvain', 'edgeBetweenness', 'disparity',
     'simmelianStrength', 'chiSquare', 'gSquare',
   ]);
   const metrics: ImportedMetricsBundle = { graph: {}, nodes: {}, edges: {}, metadata: {} };
@@ -266,10 +289,16 @@ async function parseCsvZip(file: File): Promise<ParsedNetwork> {
   ]);
   const parseRows = (text: string) => Papa.parse<Record<string, any>>(text, { header: true, skipEmptyLines: true, dynamicTyping: true }).data;
   const metadata = JSON.parse(metadataText || '{}');
-  return normalizeParsedGraph(
+  const parsed = normalizeParsedGraph(
     graphFromRaw(parseRows(nodesText) as RawNode[], parseRows(edgesText) as RawEdge[], Boolean(metadata.directed), Boolean(metadata.bipartite)),
     metadata,
   );
+  if (metadata.metrics) {
+    parsed.metrics = parsed.metrics || { ...EMPTY_METRICS, graph: {}, nodes: {}, edges: {}, metadata: {} };
+    parsed.metrics.graph = { ...parsed.metrics.graph, ...(metadata.metrics.graph || {}) };
+    parsed.metrics.metadata = { ...parsed.metrics.metadata, ...(metadata.metrics.metadata || {}) };
+  }
+  return parsed;
 }
 
 async function parseCsvPair(files: File[]): Promise<ParsedNetwork> {

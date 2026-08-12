@@ -26,6 +26,11 @@ export function useSharedPhysics({
   const d3TickListenersRef = useRef<Set<() => void>>(new Set());
   const activeRendererRef = useRef(activeRenderer);
   const appliedForceStrengthRef = useRef<number | null>(null);
+  const forceStrengthRef = useRef(forceStrength);
+
+  useEffect(() => {
+    forceStrengthRef.current = forceStrength;
+  }, [forceStrength]);
 
   const registerD3TickListener = useCallback((listener: () => void) => {
     d3TickListenersRef.current.add(listener);
@@ -60,7 +65,8 @@ export function useSharedPhysics({
   useEffect(() => {
     if (!graph || !livePhysics) return;
 
-    const repulsionVal = typeof forceStrength === 'number' ? forceStrength : -100;
+    const currentForceStrength = forceStrengthRef.current;
+    const repulsionVal = typeof currentForceStrength === 'number' ? currentForceStrength : -100;
 
     // Build shared D3 nodes array from Graphology graph
     const d3Nodes: any[] = [];

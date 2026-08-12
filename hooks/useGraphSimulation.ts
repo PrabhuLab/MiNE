@@ -10,6 +10,7 @@ import {
   getD3NodePresentation,
   type D3PresentationContext,
 } from '@/components/graph/d3/presentation';
+import { isSecondaryNode } from '@/services/graphPresentation/visibility';
 
 interface UseGraphSimulationProps {
   graph: Graph | null;
@@ -285,7 +286,7 @@ export function useGraphSimulation({
         y = d.y ?? (Math.random() - 0.5) * 600;
       }
 
-      const currentRadius = Math.max(2, Number(getNodeSize(d)) || 2);
+      const baseRadius = Math.max(2, Number(getNodeSize(d)) || 2);
 
       if (!sharedNode) {
         sharedNode = {
@@ -316,8 +317,32 @@ export function useGraphSimulation({
         ...metadata
       } = d as RawNode & d3.SimulationNodeDatum;
       Object.assign(sharedNode, metadata);
-      sharedNode.currentRadius = currentRadius;
+      sharedNode.baseRadius = baseRadius;
       return sharedNode;
+    });
+
+    // Sigma sizes nodes in screen pixels. D3 circles live inside the zoomed
+    // graph coordinate system, so using the same raw radius makes nodes nearly
+    // disappear when a large topology is initially fitted (often at k=0.05).
+    // Normalize against the transform that will be active after this render;
+    // subsequent user zooming can still enlarge/shrink nodes naturally.
+    const fitIdSet = new Set(fitNodeIds.length > 0 ? fitNodeIds : graphNodes.map((node: any) => String(node.id)));
+    const fittedGraphNodes = graphNodes.filter((node: any) => fitIdSet.has(String(node.id)));
+    let referenceScale = Math.max(0.05, Number(previousTransform.k) || 1);
+    if (shouldFitTopology && fittedGraphNodes.length === 1) {
+      referenceScale = 1.5;
+    } else if (shouldFitTopology && fittedGraphNodes.length > 1) {
+      const minX = d3.min(fittedGraphNodes, (node: any) => Number(node.x)) ?? 0;
+      const maxX = d3.max(fittedGraphNodes, (node: any) => Number(node.x)) ?? 0;
+      const minY = d3.min(fittedGraphNodes, (node: any) => Number(node.y)) ?? 0;
+      const maxY = d3.max(fittedGraphNodes, (node: any) => Number(node.y)) ?? 0;
+      const dx = Math.max(20, maxX - minX);
+      const dy = Math.max(20, maxY - minY);
+      referenceScale = Math.max(0.1, Math.min(4, 0.75 / Math.max(dx / width, dy / height)));
+    }
+    graphNodes.forEach((node: any) => {
+      node.currentRadius = node.baseRadius / referenceScale;
+      node.presentationScale = referenceScale;
     });
 
     const sharedD3Links = d3LinksRef?.current;
@@ -474,7 +499,7 @@ export function useGraphSimulation({
 
     nodeGroup.each(function (d: any) {
       const g = d3.select(this);
-      const isSquare = bipartite && (Number(d.partitionIndex) === 1 || d.partition === 'B' || d.partition === 1 || d.type === 'B' || d.type === 'secondary' || d.group === 1 || (d as any).bipartite === 1);
+      const isSquare = isSecondaryNode(d, bipartite);
       const presentation = nodePresentation.get(String(d.id));
       const strokeWidth = presentation?.focused ? 2.5 : presentation?.neighbor || presentation?.communityMember ? 2 : 1.5;
 
@@ -485,12 +510,12 @@ export function useGraphSimulation({
           .attr('y', -d.currentRadius)
           .attr('width', d.currentRadius * 2)
           .attr('height', d.currentRadius * 2)
-          .attr('rx', Math.min(3, d.currentRadius * 0.2))
-          .attr('ry', Math.min(3, d.currentRadius * 0.2))
+          .attr('rx', Math.min(3, d.baseRadius * 0.2) / d.presentationScale)
+          .attr('ry', Math.min(3, d.baseRadius * 0.2) / d.presentationScale)
           .attr('fill', getNodeColor(d))
           .attr('opacity', presentation?.opacity ?? nodeOpacity)
           .attr('stroke', strokeColor)
-          .attr('stroke-width', strokeWidth)
+          .attr('stroke-width', strokeWidth / d.presentationScale)
           .style('cursor', 'pointer');
       } else {
         g.append('circle')
@@ -499,7 +524,7 @@ export function useGraphSimulation({
           .attr('fill', getNodeColor(d))
           .attr('opacity', presentation?.opacity ?? nodeOpacity)
           .attr('stroke', strokeColor)
-          .attr('stroke-width', strokeWidth)
+          .attr('stroke-width', strokeWidth / d.presentationScale)
           .style('cursor', 'pointer');
       }
     });
@@ -547,10 +572,10 @@ export function useGraphSimulation({
       .append('text')
       .text((d: any) => d.label || d.name || d.id)
       .attr('class', 'node-label')
-      .attr('text-anchor', (d: any) => (d.currentRadius >= 14 ? 'middle' : 'start'))
-      .attr('dx', (d: any) => (d.currentRadius >= 14 ? 0 : d.currentRadius + 4))
+      .attr('text-anchor', (d: any) => (d.baseRadius >= 14 ? 'middle' : 'start'))
+      .attr('dx', (d: any) => (d.baseRadius >= 14 ? 0 : d.currentRadius + (4 / d.presentationScale)))
       .attr('dy', '0.3em')
-      .attr('font-size', '10px')
+      .attr('font-size', (d: any) => `${10 / d.presentationScale}px`)
       .attr('font-family', 'var(--f-mono)')
       .attr('font-weight', 'bold')
       .attr('fill', isDarkMode ? '#ffffff' : '#141414')
@@ -604,15 +629,7 @@ export function useGraphSimulation({
             const targetTangentLength = Math.hypot(targetTangentX, targetTangentY) || 1;
             const boundaryDistance = (node: any, tangentX: number, tangentY: number, tangentLength: number) => {
               const radius = Math.max(0, Number(node.currentRadius) || 0) + 1;
-              const isSquare = bipartite && (
-                Number(node.partitionIndex) === 1
-                || node.partition === 'B'
-                || node.partition === 1
-                || node.type === 'B'
-                || node.type === 'secondary'
-                || node.group === 1
-                || node.bipartite === 1
-              );
+              const isSquare = isSecondaryNode(node, bipartite);
               if (!isSquare) return radius;
               const unitX = Math.abs(tangentX / tangentLength);
               const unitY = Math.abs(tangentY / tangentLength);

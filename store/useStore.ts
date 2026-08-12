@@ -67,9 +67,12 @@ export interface WorkspaceFilters {
   edgeOpacityBase: string;
   forceStrength: number;
   louvainSeed: number;
+  metricWeightAttribute: string;
   liveUpdate: boolean;
   livePhysics: boolean;
+  customAttributeScope: 'node' | 'edge';
   customNodeAttribute: string;
+  customEdgeAttribute: string;
 }
 
 interface AppState {
@@ -179,9 +182,12 @@ export const useStore = create<AppState>((set) => ({
     edgeOpacityBase: 'uniform',
     forceStrength: -100,
     louvainSeed: 42,
+    metricWeightAttribute: 'weight_raw',
     liveUpdate: true,
     livePhysics: false,
+    customAttributeScope: 'node',
     customNodeAttribute: '',
+    customEdgeAttribute: '',
   },
   setFilter: (key, value) => 
     set((state) => ({ filters: { ...state.filters, [key]: value } })),
@@ -227,9 +233,12 @@ export const useStore = create<AppState>((set) => ({
       edgeOpacityBase: 'uniform',
       forceStrength: -100,
       louvainSeed: 42,
+      metricWeightAttribute: 'weight_raw',
       liveUpdate: true,
       livePhysics: false,
+      customAttributeScope: 'node',
       customNodeAttribute: '',
+      customEdgeAttribute: '',
     }
   })
 }));

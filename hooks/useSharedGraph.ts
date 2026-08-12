@@ -4,17 +4,7 @@ import { useEffect, useCallback, useState, useMemo, useRef } from 'react';
 import Graph from 'graphology';
 import { RawNode, RawEdge } from '@/store/useStore';
 import { computeForceDirectedLayout } from '@/lib/layoutUtils';
-
-function checkIsSecondary(node: any, isBipartite: boolean): boolean {
-  if (!isBipartite || !node) return false;
-  if (node.partitionIndex !== undefined && node.partitionIndex !== null) return Number(node.partitionIndex) === 1;
-  const t = String(node.type || '').toUpperCase();
-  const g = String(node.group || '').toUpperCase();
-  const b = String(node.bipartite || '').toUpperCase();
-  const s = String(node.set || '').toUpperCase();
-  const p = String(node.partition || '').toUpperCase();
-  return p === '1' || p === 'B' || p === 'SECONDARY' || t === 'B' || t === 'SECONDARY' || g === '1' || g === 'B' || b === '1' || b === 'B' || b === 'SECONDARY' || s === '1' || s === 'B';
-}
+import { isSecondaryNode } from '@/services/graphPresentation/visibility';
 
 interface UseSharedGraphProps {
   nodes: RawNode[];
@@ -102,7 +92,7 @@ export function useSharedGraph({
     nodes.forEach((n) => {
       const size = getNodeSize(n);
       const color = getNodeColor(n);
-      const isSecondary = checkIsSecondary(n, bipartite);
+      const isSecondary = isSecondaryNode(n, bipartite);
       const shape = isSecondary ? 'square' : 'circle';
 
       if (!graph.hasNode(n.id)) {
@@ -241,10 +231,13 @@ export function useSharedGraph({
     }
   }, [graph, applyD3StaticLayout]);
 
+  const notifyLayoutChange = useCallback(() => setLayoutRevision((revision) => revision + 1), []);
+
   return {
     graph,
     isReady,
     layoutRevision,
     runRefreshLayout,
+    notifyLayoutChange,
   };
 }

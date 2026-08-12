@@ -7,15 +7,20 @@ import { SearchControls } from './SearchControls';
 import { CustomizationControls } from './CustomizationControls';
 import { CalculationControls } from './CalculationControls';
 import { FilterControls } from './FilterControls';
+import type { MetricGraphContext, MetricsSelection } from '@/services/metrics/types';
 
 interface WorkspaceSidebarProps {
   isSidebarCollapsed: boolean;
   setIsSidebarCollapsed: (v: boolean) => void;
   handleImportWorkspace: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  metricsToRun: any;
-  setMetricsToRun: React.Dispatch<React.SetStateAction<any>>;
-  runSelectedMetrics: () => void;
+  metricsToRun: MetricsSelection;
+  setMetricsToRun: React.Dispatch<React.SetStateAction<MetricsSelection>>;
+  runSelectedMetrics: (metricIds?: string[]) => void;
   metricsLoading: boolean;
+  metricContext: MetricGraphContext;
+  staleMetricIds: string[];
+  metricWarnings: Record<string, string>;
+  layoutControls: React.ReactNode;
   hasType: boolean;
   hasAbundance: boolean;
   hasSecondaryWeight: boolean;
@@ -37,6 +42,10 @@ export const WorkspaceSidebar = ({
   setMetricsToRun,
   runSelectedMetrics,
   metricsLoading,
+  metricContext,
+  staleMetricIds,
+  metricWarnings,
+  layoutControls,
   hasType,
   hasAbundance,
   hasSecondaryWeight,
@@ -120,6 +129,11 @@ export const WorkspaceSidebar = ({
         setMetricsToRun={setMetricsToRun}
         runSelectedMetrics={runSelectedMetrics}
         metricsLoading={metricsLoading}
+        metricContext={metricContext}
+        staleMetricIds={staleMetricIds}
+        metricWarnings={metricWarnings}
+        rawEdges={rawEdges}
+        layoutControls={layoutControls}
       />
          
       <div className={`h-px w-full my-4 ${isDarkMode ? 'bg-[#333]' : 'bg-[#ccc]'}`}></div>

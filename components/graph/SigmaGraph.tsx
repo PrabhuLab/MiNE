@@ -130,13 +130,8 @@ export default function SigmaGraph({
 
   // Precompute secondary status for all nodes
   const isSecondaryMap = useMemo(() => {
-    if (!graph) return new Map<string, boolean>();
-    const map = new Map<string, boolean>();
-    graph.forEachNode((id: string, attrs: any) => {
-      map.set(id, isSecondaryNode(attrs.rawNode, bipartite));
-    });
-    return map;
-  }, [graph, bipartite]);
+    return new Map(nodes.map((node) => [String(node.id), isSecondaryNode(node, bipartite)]));
+  }, [nodes, bipartite]);
 
   // Dynamic Global Label Gating
   const shouldRenderLabels = useMemo(() => {

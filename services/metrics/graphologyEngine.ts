@@ -1,163 +1,124 @@
 import Graph from 'graphology';
 import louvainPkg from 'graphology-communities-louvain';
-import pagerankPkg from 'graphology-metrics/centrality/pagerank';
-import eigenvectorPkg from 'graphology-metrics/centrality/eigenvector';
-import betweennessPkg from 'graphology-metrics/centrality/betweenness';
-import closenessPkg from 'graphology-metrics/centrality/closeness';
-import * as degreePkg from 'graphology-metrics/centrality/degree';
 import seedrandomPkg from 'seedrandom';
 import { normalize_communities } from '@/lib/communityUtils';
 import { computeCommunityMetrics } from '@/lib/workspaceUtils';
+import { METRIC_BY_ID, isMetricCompatible } from './registry';
 import type { MetricsEngine } from './engine';
-import type { MetricsRequest, MetricsResult, TopologyMetrics } from './types';
+import type { MetricGraphContext, MetricsRequest, MetricsResult, TopologyMetrics } from './types';
 
-// Handle Next.js ESM/CJS interop for graphology plugins.
 const louvain = typeof louvainPkg === 'function' ? louvainPkg : (louvainPkg as any).default || louvainPkg;
-const pagerank = typeof pagerankPkg === 'function' ? pagerankPkg : (pagerankPkg as any).default || pagerankPkg;
-const eigenvector = typeof eigenvectorPkg === 'function' ? eigenvectorPkg : (eigenvectorPkg as any).default || eigenvectorPkg;
-const betweenness = typeof betweennessPkg === 'function' ? betweennessPkg : (betweennessPkg as any).default || betweennessPkg;
-const closeness = typeof closenessPkg === 'function' ? closenessPkg : (closenessPkg as any).default || closenessPkg;
-const degreeCentrality = degreePkg.degreeCentrality || (degreePkg as any).default?.degreeCentrality;
-const inDegreeCentrality = degreePkg.inDegreeCentrality || (degreePkg as any).default?.inDegreeCentrality;
-const outDegreeCentrality = degreePkg.outDegreeCentrality || (degreePkg as any).default?.outDegreeCentrality;
 const seedrandom = typeof seedrandomPkg === 'function' ? seedrandomPkg : (seedrandomPkg as any).default || seedrandomPkg;
 
-function createGraph(nodes: any[], edges: any[], directed: boolean): any {
-  const graph: any = new (Graph as any)({
-    type: directed ? 'directed' : 'undirected',
-    multi: false,
-    allowSelfLoops: false,
+function finiteWeight(value: unknown, fallback = 1): number {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function createGraph(request: Pick<MetricsRequest, 'nodes' | 'edges' | 'directed' | 'weightAttribute'>): any {
+  const graph: any = new (Graph as any)({ type: request.directed ? 'directed' : 'undirected', multi: false, allowSelfLoops: false });
+  request.nodes.forEach((node) => {
+    if (!graph.hasNode(String(node.id))) graph.addNode(String(node.id), { ...node });
   });
-  nodes.forEach((node) => {
-    if (!graph.hasNode(node.id)) graph.addNode(node.id, { ...node });
-  });
-  edges.forEach((edge) => {
-    if (graph.hasNode(edge.source) && graph.hasNode(edge.target) && !graph.hasEdge(edge.source, edge.target)) {
-      graph.addEdge(edge.source, edge.target, { weight: edge.weight_raw || 1 });
-    }
+  request.edges.forEach((edge) => {
+    const source = String(edge.source);
+    const target = String(edge.target);
+    if (!graph.hasNode(source) || !graph.hasNode(target) || source === target || graph.hasEdge(source, target)) return;
+    const weightSource = request.weightAttribute || 'weight_raw';
+    const weight = finiteWeight(edge[weightSource] ?? edge.weight_raw ?? edge.weight, 1);
+    graph.addEdgeWithKey(String(edge.key ?? `${source}${request.directed ? '->' : '--'}${target}`), source, target, { ...edge, weight });
   });
   return graph;
 }
 
 export function calculateTopologyMetrics(nodes: any[], edges: any[], directed: boolean): TopologyMetrics {
-  const graph = createGraph(nodes, edges, directed);
+  const graph = createGraph({ nodes, edges, directed, weightAttribute: 'weight_raw' });
   const degreeByNode: TopologyMetrics['degreeByNode'] = {};
   const declaredCommunities: Record<string, string> = {};
   nodes.forEach((node) => {
-    if (node.community !== undefined && node.community !== null && node.community !== '') {
-      declaredCommunities[node.id] = String(node.community);
-    }
+    if (node.community !== undefined && node.community !== null && node.community !== '') declaredCommunities[String(node.id)] = String(node.community);
   });
   graph.forEachNode((nodeId: string) => {
     degreeByNode[nodeId] = directed
-      ? { inDegree: graph.inDegree ? graph.inDegree(nodeId) : 0, outDegree: graph.outDegree ? graph.outDegree(nodeId) : 0 }
-      : { degree: graph.degree ? graph.degree(nodeId) : 0 };
+      ? { inDegree: graph.inDegree(nodeId), outDegree: graph.outDegree(nodeId) }
+      : { degree: graph.degree(nodeId) };
   });
   return { nodeIds: graph.nodes(), degreeByNode, declaredCommunities };
 }
 
+function graphContext(graph: any, request: MetricsRequest): MetricGraphContext {
+  const weights = graph.mapEdges((_edge: string, attributes: any) => Number(attributes.weight)).filter(Number.isFinite);
+  const weighted = weights.some((weight: number) => weight !== 1);
+  return {
+    directed: request.directed,
+    weighted,
+    bipartite: request.bipartite,
+    multi: Boolean(graph.multi),
+    hasEdges: graph.size > 0,
+    hasPositiveWeights: weights.length > 0 && weights.every((weight: number) => weight > 0),
+    hasCommunities: graph.someNode((_node: string, attributes: any) => attributes.community !== undefined && attributes.community !== null && attributes.community !== ''),
+    hasPositions: graph.everyNode((_node: string, attributes: any) => Number.isFinite(Number(attributes.x)) && Number.isFinite(Number(attributes.y))),
+  };
+}
+
 class GraphologyMetricsEngine implements MetricsEngine {
   async compute(request: MetricsRequest): Promise<MetricsResult> {
-    const graph = createGraph(request.nodes, request.edges, request.directed);
-    const metricsByNode: Record<string, Record<string, any>> = {};
-    graph.forEachNode((node: string) => { metricsByNode[node] = {}; });
+    const graph = createGraph(request);
+    const metricsByNode: Record<string, Record<string, any>> = Object.fromEntries(graph.nodes().map((node: string) => [node, {}]));
+    const metricsByEdge: Record<string, Record<string, any>> = {};
+    const graphMetrics: Record<string, any> = {};
+    const validity: MetricsResult['validity'] = {};
+    const warnings: Record<string, string> = {};
+    const calculatedMetricIds: string[] = [];
     let louvainResult: MetricsResult['louvain'] = null;
 
-    if (request.runLouvain) {
+    if (request.runLouvain && graph.size > 0) {
       try {
-        const details = louvain.detailed(graph, {
-          rng: seedrandom(request.louvainSeed),
-          resolution: request.resolution,
-          getEdgeWeight: 'weight',
-          fastLocalMoves: true,
-        });
+        const details = louvain.detailed(graph, { rng: seedrandom(request.louvainSeed), resolution: request.resolution, getEdgeWeight: 'weight', fastLocalMoves: true });
         const normalized = normalize_communities(details.communities as Record<string, number>);
-        Object.keys(normalized).forEach((node) => {
-          metricsByNode[node].louvain = `Cluster ${normalized[node] + 1}`;
+        const communityMap = Object.fromEntries(Object.entries(normalized).map(([node, community]) => [node, String(community)]));
+        Object.entries(normalized).forEach(([node, community]) => {
+          const label = `Cluster ${Number(community) + 1}`;
+          metricsByNode[node].louvain = label;
+          graph.setNodeAttribute(node, 'community', String(community));
         });
-        const communityMap = Object.fromEntries(
-          Object.entries(normalized).map(([node, community]) => [node, String(community)]),
-        );
-        louvainResult = {
-          nodeMetrics: computeCommunityMetrics(graph, communityMap, request.directed),
-          modularity: details.modularity,
+        const nodeMetrics = computeCommunityMetrics(graph, communityMap, request.directed);
+        nodeMetrics.forEach((entry: any) => Object.assign(metricsByNode[String(entry.id)], entry));
+        louvainResult = { nodeMetrics, modularity: details.modularity };
+        graphMetrics.louvainModularity = details.modularity;
+        validity.louvain = { graphRevision: request.graphRevision, filterRevision: request.filterRevision, calculatedAt: new Date().toISOString() };
+      } catch (error) {
+        warnings.louvain = error instanceof Error ? error.message : String(error);
+      }
+    }
+
+    const context = graphContext(graph, request);
+    const requestedIds = request.metricIds || Object.entries(request.selected).filter(([id, selected]) => id !== 'louvain' && selected).map(([id]) => id);
+    for (const id of requestedIds) {
+      const definition = METRIC_BY_ID.get(id);
+      if (!definition || !isMetricCompatible(definition, context)) continue;
+      try {
+        const computed = definition.compute(graph, context);
+        if (computed.graph !== undefined) graphMetrics[id] = computed.graph;
+        Object.entries(computed.nodes || {}).forEach(([node, values]) => {
+          if (metricsByNode[node]) Object.assign(metricsByNode[node], values);
+        });
+        Object.entries(computed.edges || {}).forEach(([edge, values]) => {
+          metricsByEdge[edge] = { ...(metricsByEdge[edge] || {}), ...values };
+        });
+        validity[id] = {
+          graphRevision: request.graphRevision,
+          filterRevision: request.filterRevision,
+          ...(definition.scope === 'layout' ? { layoutRevision: request.layoutRevision } : {}),
+          calculatedAt: new Date().toISOString(),
         };
+        calculatedMetricIds.push(id);
       } catch (error) {
-        console.warn('Community detection failed', error);
+        warnings[id] = error instanceof Error ? error.message : String(error);
       }
     }
 
-    if (request.selected.degree) {
-      try {
-        if (request.directed) {
-          const inDegree = inDegreeCentrality(graph);
-          const outDegree = outDegreeCentrality(graph);
-          Object.keys(inDegree).forEach((node) => { metricsByNode[node].inDegreeCentrality = inDegree[node].toFixed(6); });
-          Object.keys(outDegree).forEach((node) => { metricsByNode[node].outDegreeCentrality = outDegree[node].toFixed(6); });
-        } else {
-          const degree = degreeCentrality(graph);
-          Object.keys(degree).forEach((node) => { metricsByNode[node].degreeCentrality = degree[node].toFixed(6); });
-        }
-      } catch (error) {
-        console.warn('Degree Centrality failed', error);
-      }
-    }
-    if (request.selected.betweenness) {
-      try {
-        const values = betweenness(graph);
-        Object.keys(values).forEach((node) => { metricsByNode[node].betweenness = values[node].toFixed(6); });
-      } catch (error) {
-        console.warn('Betweenness Centrality failed', error);
-      }
-    }
-    if (request.selected.closeness) {
-      try {
-        const values = closeness(graph);
-        Object.keys(values).forEach((node) => { metricsByNode[node].closeness = values[node].toFixed(6); });
-      } catch (error) {
-        console.warn('Closeness Centrality failed', error);
-      }
-    }
-    if (request.selected.clustering) {
-      try {
-        graph.forEachNode((node: string) => {
-          const neighbors = graph.neighbors(node);
-          const count = neighbors.length;
-          if (count < 2) {
-            metricsByNode[node].clustering = '0.000000';
-            return;
-          }
-          let edgesBetween = 0;
-          for (let first = 0; first < count; first++) {
-            for (let second = first + 1; second < count; second++) {
-              if (graph.hasEdge(neighbors[first], neighbors[second]) || graph.hasEdge(neighbors[second], neighbors[first])) edgesBetween++;
-            }
-          }
-          const possibleEdges = request.directed ? count * (count - 1) : (count * (count - 1)) / 2;
-          metricsByNode[node].clustering = (edgesBetween / possibleEdges).toFixed(6);
-        });
-      } catch (error) {
-        console.warn('Clustering Coefficient failed', error);
-      }
-    }
-    if (request.selected.pagerank) {
-      try {
-        const values = pagerank(graph);
-        Object.keys(values).forEach((node) => { metricsByNode[node].pagerank = values[node].toFixed(6); });
-      } catch (error) {
-        console.warn('PageRank failed', error);
-      }
-    }
-    if (request.selected.eigenvector) {
-      try {
-        const values = eigenvector(graph);
-        Object.keys(values).forEach((node) => { metricsByNode[node].eigenvector = values[node].toFixed(6); });
-      } catch (error) {
-        console.warn('Eigenvector Centrality failed', error);
-      }
-    }
-
-    return { nodeIds: graph.nodes(), metricsByNode, louvain: louvainResult };
+    return { nodeIds: graph.nodes(), metricsByNode, metricsByEdge, graphMetrics, validity, calculatedMetricIds, warnings, louvain: louvainResult };
   }
 }
 

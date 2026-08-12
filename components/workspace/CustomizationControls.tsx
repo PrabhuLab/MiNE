@@ -2,7 +2,8 @@ import React from 'react';
 import { useStore } from '@/store/useStore';
 import { SyncInput } from '@/components/ui/SyncInput';
 import { CustomSlider } from '@/components/ui/CustomSlider';
-import { availableCustomNodeAttributes, availableNumericCustomEdgeAttributes, detectCustomAttributeType } from '@/lib/graphIO';
+import { availableCustomEdgeAttributes, availableCustomNodeAttributes, availableNumericCustomEdgeAttributes, detectCustomAttributeType } from '@/lib/graphIO';
+import type { CustomAttributeType } from '@/store/useStore';
 
 interface CustomizationControlsProps {
   networkMetrics: any[];
@@ -26,29 +27,62 @@ export const CustomizationControls = ({
   const hasBetweenness = networkMetrics.some(m => m.betweenness !== undefined);
   const hasCloseness = networkMetrics.some(m => m.closeness !== undefined);
   const hasClustering = networkMetrics.some(m => m.clustering !== undefined);
-  const customOptions = React.useMemo(() => availableCustomNodeAttributes(rawNodes), [rawNodes]);
-  const numericCustomOptions = React.useMemo(() => customOptions.filter((attribute) => {
+  const customNodeOptions = React.useMemo(() => availableCustomNodeAttributes(rawNodes), [rawNodes]);
+  const customEdgeOptions = React.useMemo(() => availableCustomEdgeAttributes(rawEdges), [rawEdges]);
+  const numericCustomOptions = React.useMemo(() => customNodeOptions.filter((attribute) => {
     const values = rawNodes
       .map((node) => node[attribute])
       .filter((value) => value !== null && value !== undefined && String(value).trim() !== '');
     return values.length > 0 && values.every((value) => Number.isFinite(Number(value)));
-  }), [customOptions, rawNodes]);
+  }), [customNodeOptions, rawNodes]);
   const numericCustomEdgeOptions = React.useMemo(() => availableNumericCustomEdgeAttributes(rawEdges), [rawEdges]);
-  const selectedCustomMetadata = customAttributes.find((attribute) => attribute.scope === 'node' && attribute.name === filters.customNodeAttribute);
-  const selectCustomAttribute = (name: string) => {
-    setFilter('customNodeAttribute', name);
+  const customScope = filters.customAttributeScope || 'node';
+  const selectedCustomName = customScope === 'node' ? filters.customNodeAttribute : filters.customEdgeAttribute;
+  const selectedCustomMetadata = customAttributes.find((attribute) => attribute.scope === customScope && attribute.name === selectedCustomName);
+  const selectedNodeCustomMetadata = customAttributes.find((attribute) => attribute.scope === 'node' && attribute.name === filters.customNodeAttribute);
+  const selectCustomAttribute = (scope: 'node' | 'edge', name: string) => {
+    setFilter('customAttributeScope', scope);
+    setFilter(scope === 'node' ? 'customNodeAttribute' : 'customEdgeAttribute', name);
     if (!name) return;
-    const detectedType = detectCustomAttributeType(rawNodes.map((node) => node[name]));
+    const values = scope === 'node' ? rawNodes.map((node) => node[name]) : rawEdges.map((edge) => edge[name]);
+    const detectedType = detectCustomAttributeType(values);
     setCustomAttributes([
-      ...customAttributes.filter((attribute) => attribute.scope !== 'node' || attribute.name !== name),
-      { name, scope: 'node', detectedType, selectedType: detectedType },
+      ...customAttributes.filter((attribute) => attribute.scope !== scope || attribute.name !== name),
+      { name, scope, detectedType, selectedType: detectedType },
     ]);
+  };
+  const changeCustomScope = (scope: 'node' | 'edge') => {
+    const current = scope === 'node' ? filters.customNodeAttribute : filters.customEdgeAttribute;
+    const options = scope === 'node' ? customNodeOptions : customEdgeOptions;
+    selectCustomAttribute(scope, current || options[0] || '');
   };
 
   return (
     <div>
     <div className="flex items-center justify-between mb-4">
       <h3 className={`text-[10px] font-bold uppercase tracking-widest opacity-70 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Visual Customization</h3>
+    </div>
+
+    <div className={`mb-5 border p-3 ${isDarkMode ? 'border-[#333]' : 'border-[#bbb]'}`}>
+      <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Workspace Custom Attribute</label>
+      <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-2 mb-2">
+        <select value={customScope} onChange={(event) => changeCustomScope(event.target.value as 'node' | 'edge')} className={`w-full min-w-0 bg-transparent border p-2 text-[10px] font-mono ${isDarkMode ? 'border-[#444]' : 'border-[#141414]'}`}>
+          <option value="node">Node</option>
+          <option value="edge">Edge</option>
+        </select>
+        <select value={selectedCustomName || ''} onChange={(event) => selectCustomAttribute(customScope, event.target.value)} className={`w-full min-w-0 bg-transparent border p-2 text-[10px] font-mono ${isDarkMode ? 'border-[#444]' : 'border-[#141414]'}`}>
+          <option value="">{customScope === 'node' ? 'Community (legacy)' : 'Choose edge attribute'}</option>
+          {(customScope === 'node' ? customNodeOptions : customEdgeOptions).map((attribute) => <option key={attribute} value={attribute}>{attribute}</option>)}
+        </select>
+      </div>
+      <select disabled={!selectedCustomMetadata} value={selectedCustomMetadata?.selectedType || 'nominal'} onChange={(event) => setCustomAttributes(customAttributes.map((attribute) => attribute === selectedCustomMetadata ? { ...attribute, selectedType: event.target.value as CustomAttributeType } : attribute))} className={`w-full min-w-0 bg-transparent border p-2 text-[10px] font-mono disabled:opacity-40 ${isDarkMode ? 'border-[#444]' : 'border-[#141414]'}`}>
+        <option value="binary">Binary</option>
+        <option value="discrete">Discrete</option>
+        <option value="continuous">Continuous</option>
+        <option value="nominal">Nominal</option>
+        <option value="ordinal">Ordinal</option>
+      </select>
+      <p className="mt-2 text-[9px] font-mono opacity-55">Select and reinterpret a custom node or edge field independently of the customization tabs.</p>
     </div>
     
     <div className="flex border-b mb-6">
@@ -86,26 +120,6 @@ export const CustomizationControls = ({
             {hasClustering && <option value="clustering">Clustering Coefficient</option>}
             <option value="uniform">Uniform</option>
           </select>
-          {filters.nodeColorBase === 'custom' && (
-            <div className="grid grid-cols-2 gap-2 mb-2">
-              <select value={filters.customNodeAttribute} onChange={(event) => selectCustomAttribute(event.target.value)} className={`w-full bg-transparent border p-2 text-[10px] font-mono ${isDarkMode ? 'border-[#333]' : 'border-[#141414]'}`}>
-                <option value="">Community (legacy)</option>
-                {customOptions.map((attribute) => <option key={attribute} value={attribute}>{attribute}</option>)}
-              </select>
-              <select
-                disabled={!selectedCustomMetadata}
-                value={selectedCustomMetadata?.selectedType || 'nominal'}
-                onChange={(event) => setCustomAttributes(customAttributes.map((attribute) => attribute === selectedCustomMetadata ? { ...attribute, selectedType: event.target.value as any } : attribute))}
-                className={`w-full bg-transparent border p-2 text-[10px] font-mono disabled:opacity-40 ${isDarkMode ? 'border-[#333]' : 'border-[#141414]'}`}
-              >
-                <option value="binary">Binary</option>
-                <option value="discrete">Discrete</option>
-                <option value="continuous">Continuous</option>
-                <option value="nominal">Nominal</option>
-                <option value="ordinal">Ordinal</option>
-              </select>
-            </div>
-          )}
           {filters.nodeColorBase === 'uniform' && (
              <div className="flex items-center space-x-2 mt-2">
                 <input 
@@ -134,8 +148,8 @@ export const CustomizationControls = ({
             {hasBetweenness && <option value="betweenness">Betweenness Centrality</option>}
             {hasCloseness && <option value="closeness">Closeness Centrality</option>}
             {hasClustering && <option value="clustering">Clustering Coefficient</option>}
-            {selectedCustomMetadata && ['discrete', 'continuous'].includes(selectedCustomMetadata.selectedType) && (
-              <option value="custom">Custom: {selectedCustomMetadata.name}</option>
+            {selectedNodeCustomMetadata && ['discrete', 'continuous'].includes(selectedNodeCustomMetadata.selectedType) && (
+              <option value="custom">Custom: {selectedNodeCustomMetadata.name}</option>
             )}
           </select>
         </div>
@@ -269,7 +283,7 @@ export const CustomizationControls = ({
               className={`w-full bg-transparent border p-2 mt-2 text-xs font-mono outline-none transition-colors ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0] [&>option]:bg-[#1a1a1a]' : 'border-[#141414] focus:border-black text-[#141414] [&>option]:bg-white'}`}
             >
               <option value="custom">Custom</option>
-              {customOptions.map((attribute) => <option key={`edge-node-custom-${attribute}`} value={`custom:${attribute}`}>Custom: {attribute}</option>)}
+              {customNodeOptions.map((attribute) => <option key={`edge-node-custom-${attribute}`} value={`custom:${attribute}`}>Custom: {attribute}</option>)}
               {hasType && <option value="type">Node Type</option>}
               {hasLouvain && <option value="louvain">Louvain</option>}
               {hasDegree && <option value="degreeCentrality">Node Degree</option>}

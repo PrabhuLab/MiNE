@@ -8,6 +8,7 @@ import { useStore, RawNode, RawEdge } from '@/store/useStore';
 import * as d3 from 'd3';
 import { Download } from 'lucide-react';
 import type Sigma from 'sigma';
+import type Graph from 'graphology';
 import { useGraphFilters } from '@/hooks/useGraphFilters';
 import { useGraphMetrics } from '@/hooks/useGraphMetrics';
 import { useDataTableSort } from '@/hooks/useDataTableSort';
@@ -16,6 +17,8 @@ import { useSharedGraph } from '@/hooks/useSharedGraph';
 import { useSharedPhysics } from '@/hooks/useSharedPhysics';
 import { useWorkspaceSelection } from '@/hooks/useWorkspaceSelection';
 import { useWorkspaceIO } from '@/hooks/useWorkspaceIO';
+import { useGraphLayouts } from '@/hooks/useGraphLayouts';
+import { METRIC_REGISTRY } from '@/services/metrics/registry';
 
 // Dynamically import D3Graph & SigmaGraph so they only run on the client due to canvas/SVG dependencies
 const D3Graph = dynamic(() => import('./D3Graph'), { ssr: false });
@@ -23,6 +26,9 @@ const SigmaGraph = dynamic(() => import('./graph/SigmaGraph'), { ssr: false });
 
 import { WorkspaceSidebar } from "@/components/workspace/WorkspaceSidebar";
 import { WorkspaceDataTable } from "@/components/workspace/WorkspaceDataTable";
+import { GraphMetricCarousel } from '@/components/workspace/GraphMetricCarousel';
+import { isSecondaryNode } from '@/services/graphPresentation/visibility';
+import { LayoutControls } from '@/components/workspace/LayoutControls';
 
 export default function Workspace() {
   const { rawNodes, rawEdges, filters, communityMap, customAttributes, directed, bipartite, isDarkMode, selectedElement, setSelectedElement, projectName, rendererEngine, setRendererEngine } = useStore();
@@ -39,6 +45,16 @@ export default function Workspace() {
 
   const [isSwitchingRenderer, setIsSwitchingRenderer] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const metricsGraphRef = useRef<Graph | null>(null);
+  const metricsLayoutRevisionRef = useRef(0);
+  const metricAccessors = useMemo(() => ({
+    getPositionedNodes: () => {
+      const currentGraph = metricsGraphRef.current;
+      if (!currentGraph) return validNodes;
+      return validNodes.map((node) => currentGraph.hasNode(node.id) ? { ...node, ...currentGraph.getNodeAttributes(node.id) } : node);
+    },
+    getLayoutRevision: () => metricsLayoutRevisionRef.current,
+  }), [validNodes]);
 
   const useSigma = rendererEngine === 'sigma' || (rendererEngine === 'auto' && (validNodes.length >= 1000 || validEdges.length >= 3000));
   const topologyKey = useMemo(
@@ -58,12 +74,18 @@ export default function Workspace() {
   const {
     networkMetrics,
     nodeMetrics,
-    modularity,
+    edgeMetrics,
+    graphMetrics,
+    metricValidity,
+    metricWarnings,
+    metricContext,
+    staleMetricIds,
     metricsToRun,
     setMetricsToRun,
     metricsLoading,
-    runSelectedMetrics
-  } = useGraphMetrics(validNodes, validEdges, appliedFilters, rawNodes);
+    runSelectedMetrics,
+    invalidateLayoutMetrics,
+  } = useGraphMetrics(validNodes, validEdges, appliedFilters, rawNodes, metricAccessors);
 
   const {
     searchQuery,
@@ -151,7 +173,7 @@ export default function Workspace() {
         if (Number.isFinite(value)) baseVal = max === min ? 5 : 1 + ((value - min) / (max - min)) * 9;
       }
 
-      const isSecondary = bipartite && (Number(node.partitionIndex) === 1 || node.partition === 'B' || node.partition === 1 || node.type === 'B' || node.type === 'secondary' || node.group === 1 || (node as any).bipartite === 1);
+      const isSecondary = isSecondaryNode(node, bipartite);
       const mult = isSecondary ? (appliedFilters.bipartiteNodeSize || 2) : (appliedFilters.nodeSize || 3);
 
       return mult * Math.max(Math.log(baseVal + 2), 1) + 2;
@@ -200,7 +222,7 @@ export default function Workspace() {
   }, [appliedFilters.edgeWeight, edgeSizeDomain, edgeSizeValue]);
 
   // Unified persistent Graphology instance (using D3 static layout pre-rendering)
-  const { graph, isReady, layoutRevision, runRefreshLayout } = useSharedGraph({
+  const { graph, isReady, layoutRevision, runRefreshLayout, notifyLayoutChange } = useSharedGraph({
     nodes: validNodes,
     edges: validEdges,
     directed,
@@ -215,6 +237,26 @@ export default function Workspace() {
     getEdgeOpacity,
     getShouldShowArrowhead,
     nodeOpacity: appliedFilters.nodeOpacity ?? 1,
+  });
+  useEffect(() => {
+    metricsGraphRef.current = graph;
+    metricsLayoutRevisionRef.current = layoutRevision;
+  }, [graph, layoutRevision]);
+
+  const selectedLayoutMetricIds = useMemo(() => METRIC_REGISTRY.filter((metric) => metric.scope === 'layout' && metricsToRun[metric.id]).map((metric) => metric.id), [metricsToRun]);
+  const handleLayoutStopped = useCallback(() => {
+    if (selectedLayoutMetricIds.length) runSelectedMetrics(selectedLayoutMetricIds);
+  }, [runSelectedMetrics, selectedLayoutMetricIds]);
+  const layoutController = useGraphLayouts({
+    graph,
+    nodes: validNodes,
+    edges: validEdges,
+    topologyKey,
+    livePhysics: appliedFilters.livePhysics,
+    setLivePhysics: (enabled) => useStore.getState().setFilter('livePhysics', enabled),
+    notifyLayoutChange,
+    onLayoutStarted: invalidateLayoutMetrics,
+    onLayoutStopped: handleLayoutStopped,
   });
 
   // Unified live D3-force simulation controller
@@ -277,8 +319,9 @@ export default function Workspace() {
     communityMap,
     networkMetrics,
     nodeMetrics,
-    edgeMetrics: tableDataEdges,
-    modularity,
+    edgeMetrics,
+    graphMetrics,
+    metricValidity,
     metricsToRun,
     setMetricsToRun,
     setAppliedFilters,
@@ -307,6 +350,10 @@ export default function Workspace() {
         setMetricsToRun={setMetricsToRun}
         runSelectedMetrics={runSelectedMetrics}
         metricsLoading={metricsLoading}
+        metricContext={metricContext}
+        staleMetricIds={staleMetricIds}
+        metricWarnings={metricWarnings}
+        layoutControls={<LayoutControls {...layoutController} />}
         hasType={hasType}
         hasAbundance={hasAbundance}
         hasSecondaryWeight={hasSecondaryWeight}
@@ -337,35 +384,14 @@ export default function Workspace() {
               Data
             </button>
           </div>
-          
-          <div className="flex items-center space-x-6">
-            {activeTab === "data" && (
-              <>
-                {typeof modularity === "number" && !isNaN(modularity) && (
-                  <div className="flex items-center space-x-2 text-[10px] font-bold uppercase tracking-widest mr-4">
-                    <span className="opacity-60">Modularity (Q):</span>
-                    <span className={`font-mono px-2 py-1 rounded ${isDarkMode ? "bg-white/10" : "bg-black/5"}`}>
-                      {modularity.toFixed(4)}
-                    </span>
-                  </div>
-                )}
-                <div className="flex text-[10px] uppercase font-bold tracking-widest bg-white dark:bg-[#141414] border border-[#141414] dark:border-[#333] shadow-sm">
-                  <button 
-                    className={`px-4 py-2 transition-colors ${dataTab === "nodes" ? (isDarkMode ? "bg-[#333] text-white" : "bg-[#141414] text-white") : (isDarkMode ? "text-[#888] hover:bg-[#222]" : "text-[#888] hover:bg-[#f5f5f5]")}`}
-                    onClick={() => setDataTab("nodes")}
-                  >
-                    Nodes
-                  </button>
-                  <button 
-                    className={`px-4 py-2 transition-colors border-l border-[#141414] dark:border-[#333] ${dataTab === "edges" ? (isDarkMode ? "bg-[#333] text-white" : "bg-[#141414] text-white") : (isDarkMode ? "text-[#888] hover:bg-[#222]" : "text-[#888] hover:bg-[#f5f5f5]")}`}
-                    onClick={() => setDataTab("edges")}
-                  >
-                    Edges
-                  </button>
-                </div>
-              </>
+
+          <div className="flex items-center gap-3">
+            {activeTab === 'data' && (
+              <div className="flex text-[10px] uppercase font-bold tracking-widest bg-white dark:bg-[#141414] border border-[#141414] dark:border-[#333] shadow-sm">
+                <button className={`px-4 py-2 ${dataTab === 'nodes' ? 'bg-[#141414] text-white dark:bg-[#333]' : 'text-[#888]'}`} onClick={() => setDataTab('nodes')}>Nodes</button>
+                <button className={`px-4 py-2 border-l border-[#141414] dark:border-[#333] ${dataTab === 'edges' ? 'bg-[#141414] text-white dark:bg-[#333]' : 'text-[#888]'}`} onClick={() => setDataTab('edges')}>Edges</button>
+              </div>
             )}
-            
             <div className="relative">
               <button
                 onClick={() => setShowExportMenu(!showExportMenu)}
@@ -396,6 +422,10 @@ export default function Workspace() {
             </div>
           </div>
         </div>
+
+        {activeTab === 'data' && (
+          <GraphMetricCarousel metrics={graphMetrics} />
+        )}
 
         {validNodes.length > 0 ? (
           <>
@@ -496,7 +526,7 @@ export default function Workspace() {
             </div>
             
             <div className={`flex-1 w-full h-full overflow-hidden ${activeTab === "data" ? "block" : "hidden"}`}>
-              <WorkspaceDataTable dataTab={dataTab} tableData={tableData} tableDataEdges={tableDataEdges} networkMetrics={networkMetrics} handleSort={handleSort} sortConfig={sortConfig} handleElementDoubleClick={handleElementDoubleClick} />
+              <WorkspaceDataTable dataTab={dataTab} tableData={tableData} tableDataEdges={tableDataEdges} edgeMetrics={edgeMetrics} handleSort={handleSort} sortConfig={sortConfig} handleElementDoubleClick={handleElementDoubleClick} />
             </div>
           </>
         ) : (
