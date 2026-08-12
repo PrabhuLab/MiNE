@@ -19,6 +19,7 @@ import { useWorkspaceSelection } from '@/hooks/useWorkspaceSelection';
 import { useWorkspaceIO } from '@/hooks/useWorkspaceIO';
 import { useGraphLayouts } from '@/hooks/useGraphLayouts';
 import { METRIC_REGISTRY } from '@/services/metrics/registry';
+import { numericExtent } from '@/lib/utils';
 
 // Dynamically import D3Graph & SigmaGraph so they only run on the client due to canvas/SVG dependencies
 const D3Graph = dynamic(() => import('./D3Graph'), { ssr: false });
@@ -156,8 +157,7 @@ export default function Workspace() {
   const selectedCustomAttribute = customAttributes.find((attribute) => attribute.scope === 'node' && attribute.name === appliedFilters.customNodeAttribute);
   const customSizeDomain = useMemo(() => {
     if (!selectedCustomAttribute || !['discrete', 'continuous'].includes(selectedCustomAttribute.selectedType)) return null;
-    const values = validNodes.map((node) => Number(node[selectedCustomAttribute.name])).filter(Number.isFinite);
-    return values.length ? [Math.min(...values), Math.max(...values)] as const : null;
+    return numericExtent(validNodes.map((node) => Number(node[selectedCustomAttribute.name])));
   }, [selectedCustomAttribute, validNodes]);
 
   const getNodeSize = useCallback(
@@ -206,10 +206,9 @@ export default function Workspace() {
   }, [appliedFilters.edgeWeightBase, degreeMap, metricMap, visibleNodeMap]);
 
   const edgeSizeDomain = useMemo(() => {
-    const values = validEdges.map(edgeSizeValue).filter((value): value is number => value !== null && Number.isFinite(value));
-    if (!values.length) return null;
-    const min = Math.min(...values);
-    const max = Math.max(...values);
+    const extent = numericExtent(validEdges.map((edge) => edgeSizeValue(edge) ?? Number.NaN));
+    if (!extent) return null;
+    const [min, max] = extent;
     return [min, max === min ? min + 1 : max] as const;
   }, [edgeSizeValue, validEdges]);
 

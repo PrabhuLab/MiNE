@@ -3,6 +3,7 @@ import { useStore } from '@/store/useStore';
 import { SyncTextInput } from '@/components/ui/SyncInput';
 import { CustomSlider } from '@/components/ui/CustomSlider';
 import { availableNumericCustomEdgeAttributes, detectCustomAttributeType } from '@/lib/graphIO';
+import { numericExtent } from '@/lib/utils';
 
 interface FilterControlsProps {
   hasSecondaryWeight: boolean;
@@ -88,8 +89,7 @@ export const FilterControls = ({
   const sourceRange = (type: string) => {
     const values = sourceValues(type);
     if (!values.length) return { min: 0, max: 1, step: 1 };
-    const minValue = Math.min(...values);
-    const maxValue = Math.max(...values);
+    const [minValue, maxValue] = numericExtent(values) || [0, 1];
     const min = Math.min(0, minValue);
     const max = maxValue === min ? min + 1 : maxValue;
     const integers = values.every(Number.isInteger);

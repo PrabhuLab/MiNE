@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import * as d3 from 'd3';
 import type { RawNode } from '@/store/useStore';
 import type { LegendMetricScale } from '@/services/graphStyles/types';
+import { numericExtent } from '@/lib/utils';
 
 interface GraphColorScaleOptions {
   nodes: RawNode[];
@@ -20,10 +21,9 @@ export function useGraphColorScales({
 }: GraphColorScaleOptions) {
   const customNumericDomain = useMemo(() => {
     if (!customIsNumeric || !customNodeAttribute) return [0, 1] as [number, number];
-    const values = nodes.map((node) => Number(node[customNodeAttribute])).filter(Number.isFinite);
-    if (!values.length) return [0, 1] as [number, number];
-    const min = Math.min(...values);
-    const max = Math.max(...values);
+    const extent = numericExtent(nodes.map((node) => Number(node[customNodeAttribute])));
+    if (!extent) return [0, 1] as [number, number];
+    const [min, max] = extent;
     return [min, max === min ? min + 1 : max] as [number, number];
   }, [customIsNumeric, customNodeAttribute, nodes]);
   const customNumericColorScale = useMemo(

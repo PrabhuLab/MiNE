@@ -6,6 +6,7 @@ import { RawNode, RawEdge } from '@/store/useStore';
 import { getCommunityDisplayMap, getCommunityColor } from '@/lib/communityUtils';
 import { useStore } from '@/store/useStore';
 import { useGraphColorScales } from '@/hooks/graphStyles/useGraphColorScales';
+import { numericExtent } from '@/lib/utils';
 export type { LegendMetricScale } from '@/services/graphStyles/types';
 
 interface UseGraphStylesProps {
@@ -358,13 +359,16 @@ export function useGraphStyles({
     if (edgeOpacityBase.startsWith('edge:')) attributes.add(edgeOpacityBase.slice('edge:'.length));
     const result = new Map<string, (value: number) => string>();
     attributes.forEach((attribute) => {
-      const values = edges.map((edge: any) => Number(edge[attribute])).filter(Number.isFinite);
-      const min = values.length ? Math.min(...values) : 0;
-      const max = values.length ? Math.max(...values) : 1;
+      const [min, max] = numericExtent(edges.map((edge: any) => Number(edge[attribute]))) || [0, 1];
       result.set(attribute, d3.scaleSequential(d3.interpolateTurbo).domain([min, max === min ? min + 1 : max]));
     });
     return result;
   }, [edgeColorBase, edgeOpacityBase, edges]);
+  const customEdgeOpacityMax = useMemo(() => {
+    if (!edgeOpacityBase.startsWith('edge:')) return 1;
+    const attribute = edgeOpacityBase.slice('edge:'.length);
+    return numericExtent(edges.map((edge: any) => Number(edge[attribute])))?.[1] ?? 1;
+  }, [edgeOpacityBase, edges]);
   const getNodeMetricValue = useCallback((nodeId: string, metric: string): number | null => {
     const node = nodeById.get(String(nodeId));
     const net = netMap.get(String(nodeId));
@@ -384,11 +388,7 @@ export function useGraphStyles({
     return Number.isFinite(value) ? value : null;
   }, [customNodeAttribute, netMap, nodeById]);
   const nodeMetricExtent = useMemo(() => {
-    const values = nodes
-      .map((node) => getNodeMetricValue(node.id, edgeColorNodeMetric))
-      .filter((value): value is number => value !== null);
-    const min = values.length ? Math.min(...values) : 0;
-    const max = values.length ? Math.max(...values) : 1;
+    const [min, max] = numericExtent(nodes.map((node) => getNodeMetricValue(node.id, edgeColorNodeMetric) ?? Number.NaN)) || [0, 1];
     return { min, max: max === min ? min + 1 : max };
   }, [edgeColorNodeMetric, getNodeMetricValue, nodes]);
   const nodeMetricColorScale = useMemo(
@@ -510,10 +510,8 @@ export function useGraphStyles({
         alpha = edgeOpacity * ratio;
       } else if (edgeOpacityBase.startsWith('edge:')) {
         const attribute = edgeOpacityBase.slice('edge:'.length);
-        const values = edges.map((edge: any) => Number(edge[attribute])).filter(Number.isFinite);
-        const max = values.length ? Math.max(...values) : 1;
         const value = Number(d[attribute]);
-        if (Number.isFinite(value)) alpha = edgeOpacity * (max > 0 ? value / max : 1);
+        if (Number.isFinite(value)) alpha = edgeOpacity * (customEdgeOpacityMax > 0 ? value / customEdgeOpacityMax : 1);
       } else if (edgeOpacityBase === 'nodeMetric' && edgeColorNodeMetric) {
         const sourceId = typeof d.source === 'object' ? d.source.id : d.source;
         const targetId = typeof d.target === 'object' ? d.target.id : d.target;
@@ -527,7 +525,7 @@ export function useGraphStyles({
       }
       return Math.max(0, Math.min(1, alpha));
     },
-    [edgeOpacityBase, edgeColorNodeMetric, edgeOpacity, edges, getNodeMetricValue, maxRaw, maxSec, nodeMetricExtent]
+    [edgeOpacityBase, edgeColorNodeMetric, edgeOpacity, customEdgeOpacityMax, getNodeMetricValue, maxRaw, maxSec, nodeMetricExtent]
   );
 
   return {
