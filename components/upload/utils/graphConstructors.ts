@@ -108,7 +108,7 @@ export function constructGraph(
       const matrix = parsedData.matrix;
 
       for (let col = safeDataStartCol; col < (matrix[safeColHeadersRow]?.length || 0); col++) {
-        const colNodeId = matrix[safeColHeadersRow]?.[col]?.trim();
+        const colNodeId = String(matrix[safeColHeadersRow]?.[col] ?? '').trim();
         if (colNodeId) {
           nodesMap.set(colNodeId, { id: colNodeId, name: colNodeId, label: colNodeId, partition: 'B', abundance: 0 });
         }
@@ -116,7 +116,7 @@ export function constructGraph(
 
       for (let row = safeDataStartRow; row < matrix.length; row++) {
         if (!matrix[row] || matrix[row].length === 0) continue;
-        const rowNodeId = matrix[row][safeRowHeadersCol]?.trim();
+        const rowNodeId = String(matrix[row][safeRowHeadersCol] ?? '').trim();
         if (!rowNodeId) continue;
 
         if (!nodesMap.has(rowNodeId)) {
@@ -124,7 +124,7 @@ export function constructGraph(
         }
 
         for (let col = safeDataStartCol; col < matrix[row].length; col++) {
-          const rawVal = matrix[row][col]?.trim();
+          const rawVal = String(matrix[row][col] ?? '').trim();
           let isConnected = false;
           let parsedWeight = parseFloat(rawVal);
 
@@ -136,7 +136,7 @@ export function constructGraph(
           }
 
           if (isConnected) {
-            const colNodeId = matrix[safeColHeadersRow]?.[col]?.trim();
+            const colNodeId = String(matrix[safeColHeadersRow]?.[col] ?? '').trim();
             if (colNodeId) {
               edges.push({
                 source: rowNodeId,
@@ -215,23 +215,71 @@ export function constructGraph(
     } else if (isFormatMatrix && parsedData.matrix) {
       const data = parsedData.matrix;
       const headers = data[safeColHeadersRow] || [];
+
+      // Keep every column-header node. This is important for triangular matrices,
+      // whose final nodes may only appear as targets (or have no off-diagonal ties).
+      const headerIndexById = new Map<string, number>();
+      for (let j = safeDataStartCol; j < headers.length; j++) {
+        const headerId = String(headers[j] ?? '').trim();
+        if (!headerId) continue;
+        headerIndexById.set(headerId, j);
+        nodesMap.set(headerId, { id: headerId, name: headerId, abundance: 10 });
+      }
+
+      /**
+       * A triangular CSV can be represented in either of two ways:
+       *
+       * - padded: empty lower-left cells keep every row aligned with its header;
+       * - compact: those cells are omitted, so each row starts at its diagonal
+       *   (or immediately after it).
+       *
+       * Rows that remain header-width are always treated as padded. For shorter
+       * rows, their expected remaining cell count tells us whether the diagonal
+       * is included. This keeps compact matrices from being shifted onto the
+       * wrong target labels while leaving ordinary square matrices unchanged.
+       */
+      const resolveHeaderIndex = (row: any[], sourceHeaderIndex: number, cellIndex: number) => {
+        if (sourceHeaderIndex < safeDataStartCol || row.length >= headers.length) return cellIndex;
+
+        const valueOffset = cellIndex - safeDataStartCol;
+        const valueCount = Math.max(0, row.length - safeDataStartCol);
+        const remainingWithDiagonal = Math.max(0, headers.length - sourceHeaderIndex);
+        const remainingWithoutDiagonal = Math.max(0, remainingWithDiagonal - 1);
+
+        if (valueCount === remainingWithoutDiagonal) return sourceHeaderIndex + 1 + valueOffset;
+        if (valueCount === remainingWithDiagonal) return sourceHeaderIndex + valueOffset;
+        return cellIndex;
+      };
+
       for (let i = safeDataStartRow; i < data.length; i++) {
-        const row = data[i];
-        const sourceId = row[safeRowHeadersCol];
+        const row = data[i] || [];
+        const sourceId = String(row[safeRowHeadersCol] ?? '').trim();
         if (!sourceId) continue;
 
         let abundance = 0;
-        const colIndex = headers.indexOf(sourceId);
-        if (colIndex !== -1) abundance = parseFloat(row[colIndex]) || 0;
+        const colIndex = headerIndexById.get(sourceId);
+        if (colIndex !== undefined) {
+          if (row.length >= headers.length) {
+            abundance = parseFloat(row[colIndex]) || 0;
+          } else {
+            const valueCount = Math.max(0, row.length - safeDataStartCol);
+            const remainingWithDiagonal = Math.max(0, headers.length - colIndex);
+            if (valueCount === remainingWithDiagonal) {
+              abundance = parseFloat(row[safeDataStartCol]) || 0;
+            }
+          }
+        }
         if (abundance === 0) abundance = 10;
         nodesMap.set(sourceId, { id: sourceId, name: sourceId, abundance });
       }
       for (let i = safeDataStartRow; i < data.length; i++) {
-        const row = data[i];
-        const sourceId = row[safeRowHeadersCol];
+        const row = data[i] || [];
+        const sourceId = String(row[safeRowHeadersCol] ?? '').trim();
         if (!sourceId) continue;
-        for (let j = safeDataStartCol; j < Math.min(row.length, headers.length); j++) {
-          const targetId = headers[j];
+        const sourceHeaderIndex = headerIndexById.get(sourceId) ?? -1;
+        for (let j = safeDataStartCol; j < row.length; j++) {
+          const headerIndex = resolveHeaderIndex(row, sourceHeaderIndex, j);
+          const targetId = String(headers[headerIndex] ?? '').trim();
           if (!targetId || sourceId === targetId) continue;
           const value = parseFloat(row[j]) || 0;
           if (value !== 0) {
