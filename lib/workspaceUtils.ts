@@ -1,4 +1,4 @@
-import Graph from 'graphology';
+import type Graph from 'graphology';
 
 export function computeMaxRelWeight(rawEdges: any[]): number {
   if (!rawEdges || rawEdges.length === 0) return 100;
@@ -29,7 +29,7 @@ export function computeActiveNetwork(rawNodes: any[], rawEdges: any[], appliedFi
       .filter(Boolean)
   );
 
-  const filteredEdges = rawEdges.filter(e => {
+  const filteredEdges = (rawEdges || []).filter(e => {
     const passesWeightFilters = (appliedFilters.weightFilters || []).every((filter: any) => {
       const val = e[filter.type];
       if (val === undefined || val === null) return true;
@@ -37,31 +37,34 @@ export function computeActiveNetwork(rawNodes: any[], rawEdges: any[], appliedFi
     });
 
     return passesWeightFilters &&
-      !removedSet.has(e.source) &&
-      !removedSet.has(e.target);
+      !removedSet.has(String(e.source)) &&
+      !removedSet.has(String(e.target));
   });
 
-  const nodesWithEdges = new Set<string>();
-  filteredEdges.forEach(e => {
-    nodesWithEdges.add(e.source);
-    nodesWithEdges.add(e.target);
+  const eligibleNodes = (rawNodes || []).filter(n => {
+    const nodeIdStr = String(n.id);
+    return !removedSet.has(nodeIdStr);
   });
-
-  const filteredNodes = rawNodes.filter(n => 
-    nodesWithEdges.has(n.id) && !removedSet.has(n.id)
+  const eligibleNodeIds = new Set(eligibleNodes.map(n => String(n.id)));
+  const strictlyValidEdges = filteredEdges.filter(e =>
+    eligibleNodeIds.has(String(e.source)) && eligibleNodeIds.has(String(e.target))
   );
 
-  const validNodeIds = new Set(filteredNodes.map(n => n.id));
-  const strictlyValidEdges = filteredEdges.filter(e => validNodeIds.has(e.source) && validNodeIds.has(e.target));
+  const nodesWithEdges = new Set<string>();
+  strictlyValidEdges.forEach(e => {
+    nodesWithEdges.add(String(e.source));
+    nodesWithEdges.add(String(e.target));
+  });
+  const filteredNodes = eligibleNodes.filter(n => nodesWithEdges.has(String(n.id)));
 
   return { validNodes: filteredNodes, validEdges: strictlyValidEdges };
 }
 
 export function computeCommunityMetrics(graph: Graph, newCommunityMap: Record<string, any>, directed: boolean) {
   let sumWeights = 0;
-  graph.forEachEdge((e, atts) => { sumWeights += (atts.weight || 1); });
+  graph.forEachEdge((e: any, atts: any) => { sumWeights += (atts.weight || 1); });
       
-  const metrics = graph.nodes().map(nodeId => {
+  const metrics = graph.nodes().map((nodeId: string) => {
     const comm = newCommunityMap[nodeId] || "";
         
     if (directed) {
@@ -69,24 +72,24 @@ export function computeCommunityMetrics(graph: Graph, newCommunityMap: Record<st
       let nodeInDegree = 0;
       let nodeOutDegree = 0;
           
-      graph.forEachInEdge(nodeId, (e, atts) => { nodeInDegree += (atts.weight || 1); });
-      graph.forEachOutEdge(nodeId, (e, atts) => { nodeOutDegree += (atts.weight || 1); });
+      graph.forEachInEdge(nodeId, (e: any, atts: any) => { nodeInDegree += (atts.weight || 1); });
+      graph.forEachOutEdge(nodeId, (e: any, atts: any) => { nodeOutDegree += (atts.weight || 1); });
 
       let commInDegree = 0;
       let commOutDegree = 0;
-      graph.forEachNode(n => {
+      graph.forEachNode((n: any) => {
         if (newCommunityMap[n] === comm) {
-          graph.forEachInEdge(n, (e, atts) => { commInDegree += (atts.weight || 1); });
-          graph.forEachOutEdge(n, (e, atts) => { commOutDegree += (atts.weight || 1); });
+          graph.forEachInEdge(n, (e: any, atts: any) => { commInDegree += (atts.weight || 1); });
+          graph.forEachOutEdge(n, (e: any, atts: any) => { commOutDegree += (atts.weight || 1); });
         }
       });
 
       let k_in_from_comm = 0;
       let k_out_to_comm = 0;
-      graph.forEachInEdge(nodeId, (e, atts, source) => {
+      graph.forEachInEdge(nodeId, (e: any, atts: any, source: any) => {
         if (newCommunityMap[source] === comm) k_in_from_comm += (atts.weight || 1);
       });
-      graph.forEachOutEdge(nodeId, (e, atts, source, target) => {
+      graph.forEachOutEdge(nodeId, (e: any, atts: any, source: any, target: any) => {
         if (newCommunityMap[target] === comm) k_out_to_comm += (atts.weight || 1);
       });
           
@@ -105,17 +108,17 @@ export function computeCommunityMetrics(graph: Graph, newCommunityMap: Record<st
     } else {
       const totalWeight2m = sumWeights * 2;
       let nodeDegree = 0;
-      graph.forEachEdge(nodeId, (e, atts) => { nodeDegree += (atts.weight || 1); });
+      graph.forEachEdge(nodeId, (e: any, atts: any) => { nodeDegree += (atts.weight || 1); });
           
       let communityDegree = 0;
-      graph.forEachNode(n => {
+      graph.forEachNode((n: any) => {
         if (newCommunityMap[n] === comm) {
-          graph.forEachEdge(n, (e, atts) => { communityDegree += (atts.weight || 1); });
+          graph.forEachEdge(n, (e: any, atts: any) => { communityDegree += (atts.weight || 1); });
         }
       });
 
       let k_i_in = 0;
-      graph.forEachEdge(nodeId, (edge, atts, source, target) => {
+      graph.forEachEdge(nodeId, (edge: any, atts: any, source: any, target: any) => {
         const neighbor = source === nodeId ? target : source;
         if (newCommunityMap[neighbor] === comm) {
           k_i_in += (atts.weight || 1);
@@ -135,7 +138,7 @@ export function computeCommunityMetrics(graph: Graph, newCommunityMap: Record<st
     }
   });
 
-  metrics.sort((a,b) => parseFloat(b.deltaQ) - parseFloat(a.deltaQ));
+  metrics.sort((a: any, b: any) => parseFloat(b.deltaQ) - parseFloat(a.deltaQ));
   return metrics;
 }
 
@@ -185,22 +188,6 @@ export function computeTableDataNodes(validNodes: any[], networkMetrics: any[], 
         aVal = parseFloat(a.net.eigenvector) || 0; bVal = parseFloat(b.net.eigenvector) || 0;
       } else if (sortConfig.key === "pagerank") {
         aVal = parseFloat(a.net.pagerank) || 0; bVal = parseFloat(b.net.pagerank) || 0;
-      } else if (sortConfig.key === "betweenness") {
-        aVal = parseFloat(a.net.betweenness) || 0; bVal = parseFloat(b.net.betweenness) || 0;
-      } else if (sortConfig.key === "closeness") {
-        aVal = parseFloat(a.net.closeness) || 0; bVal = parseFloat(b.net.closeness) || 0;
-      } else if (sortConfig.key === "clustering") {
-        aVal = parseFloat(a.net.clustering ?? a.net.bipartiteClustering) || 0; bVal = parseFloat(b.net.clustering ?? b.net.bipartiteClustering) || 0;
-      } else if (sortConfig.key === "bipartitePartition") {
-        aVal = a.net.bipartitePartition || ""; bVal = b.net.bipartitePartition || "";
-      } else if (sortConfig.key === "bipartiteNormDegree") {
-        aVal = parseFloat(a.net.bipartiteNormDegree) || 0; bVal = parseFloat(b.net.bipartiteNormDegree) || 0;
-      } else if (sortConfig.key === "bipartiteClustering") {
-        aVal = parseFloat(a.net.bipartiteClustering) || 0; bVal = parseFloat(b.net.bipartiteClustering) || 0;
-      } else if (sortConfig.key === "bipartiteRedundancy") {
-        aVal = parseFloat(a.net.bipartiteRedundancy) || 0; bVal = parseFloat(b.net.bipartiteRedundancy) || 0;
-      } else if (sortConfig.key === "bipartiteProjectionDegree") {
-        aVal = a.net.bipartiteProjectionDegree || 0; bVal = b.net.bipartiteProjectionDegree || 0;
       } else if (sortConfig.key === "community") {
         aVal = a.comm; bVal = b.comm;
       } else if (sortConfig.key === "louvain") {

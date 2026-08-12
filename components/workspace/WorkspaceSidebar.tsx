@@ -81,7 +81,7 @@ export const WorkspaceSidebar = ({
       <div className="flex items-center justify-between">
         <h2 className="text-xs font-bold uppercase tracking-widest">Controls</h2>
         <div className="flex items-center space-x-2">
-          <label className={`p-1.5 rounded-full hover:bg-black/10 dark:hover:bg-white/10 transition-colors cursor-pointer ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`} title="Import Workspace">
+          <label className={`p-1.5 rounded-full hover:bg-black/10 dark:hover:bg-white/10 transition-colors cursor-pointer ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`} title="Import Workspace Settings JSON (settings only)">
             <Download size={16} className="rotate-180" />
             <input type="file" accept=".json" className="hidden" onChange={handleImportWorkspace} />
           </label>

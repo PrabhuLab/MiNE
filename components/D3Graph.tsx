@@ -3,6 +3,7 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 
 import React, { useEffect, useRef, useState } from 'react';
+import type Graph from 'graphology';
 import { useStore, RawNode, RawEdge } from '@/store/useStore';
 import GraphLegend from '@/components/graph/GraphLegend';
 import GraphControlOverlay from '@/components/graph/GraphControlOverlay';
@@ -12,11 +13,13 @@ import { useGraphStyles } from '@/hooks/useGraphStyles';
 import { useGraphSimulation } from '@/hooks/useGraphSimulation';
 
 interface D3GraphProps {
+  graph: Graph;
   nodes: RawNode[];
   edges: RawEdge[];
   communityMap: Record<string, string>;
   networkMetrics?: any[];
   nodeSizeMult: number;
+  bipartiteNodeSizeMult?: number;
   nodeSizeBase?: string;
   nodeColorBase?: string;
   uniformNodeColor?: string;
@@ -40,14 +43,25 @@ interface D3GraphProps {
   onClearSelection?: () => void;
   searchQuery?: string;
   selectedElement?: string | null;
+  onSwitchRenderer?: (engine: 'd3' | 'sigma') => void;
+  isRendererSwitching?: boolean;
+  registerD3TickListener?: (cb: () => void) => () => void;
+  beginDrag?: (id: string, x: number, y: number) => void;
+  movePinnedNode?: (id: string, x: number, y: number) => void;
+  endDrag?: (id: string) => void;
+  d3NodesRef?: React.RefObject<any[]>;
+  d3LinksRef?: React.RefObject<any[]>;
+  d3NodesMapRef?: React.RefObject<Map<string, any>>;
 }
 
 export default function D3Graph({
+  graph,
   nodes,
   edges,
   communityMap,
   networkMetrics = [],
   nodeSizeMult,
+  bipartiteNodeSizeMult = 2,
   nodeSizeBase = 'abundance',
   nodeColorBase = 'custom',
   uniformNodeColor = '#cccccc',
@@ -71,6 +85,15 @@ export default function D3Graph({
   onClearSelection,
   searchQuery = '',
   selectedElement = null,
+  onSwitchRenderer,
+  isRendererSwitching = false,
+  registerD3TickListener,
+  beginDrag,
+  movePinnedNode,
+  endDrag,
+  d3NodesRef,
+  d3LinksRef,
+  d3NodesMapRef,
 }: D3GraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -87,6 +110,12 @@ export default function D3Graph({
     setHiddenLegendItems,
     isolatedLegendItem,
     setIsolatedLegendItem,
+    selectedCommunityId,
+    setSelectedCommunityId,
+    isolatedCommunityId,
+    setIsolatedCommunityId,
+    hoveredCommunityId,
+    setHoveredCommunityId,
     showArrowheads,
     setShowArrowheads,
     showNodeLabels,
@@ -105,27 +134,22 @@ export default function D3Graph({
 
   useEffect(() => {
     if (selectedElement) {
-      if (!selectedElement.includes('-')) {
-        const node = nodes.find((n) => n.id === selectedElement);
-        if (node) {
-          setClickedNode(node);
-          setClickedEdge(null);
-          return;
-        }
-      } else {
-        const parts = selectedElement.split('-');
-        if (parts.length >= 2) {
-          const edge = edges.find(
-            (e) =>
-              (e.source === parts[0] && e.target === parts[1]) ||
-              (!directed && e.source === parts[1] && e.target === parts[0])
-          );
-          if (edge) {
-            setClickedEdge(edge);
-            setClickedNode(null);
-            return;
-          }
-        }
+      const node = nodes.find((candidate) => candidate.id === selectedElement);
+      if (node) {
+        setClickedNode(node);
+        setClickedEdge(null);
+        return;
+      }
+
+      const edge = edges.find((candidate) => {
+        const forward = `${candidate.source}-${candidate.target}`;
+        const reverse = `${candidate.target}-${candidate.source}`;
+        return selectedElement === forward || (!directed && selectedElement === reverse);
+      });
+      if (edge) {
+        setClickedEdge(edge);
+        setClickedNode(null);
+        return;
       }
       setClickedNode(null);
       setClickedEdge(null);
@@ -139,7 +163,7 @@ export default function D3Graph({
 
   const {
     customColorMap,
-    communityColorMap,
+    communityDisplay,
     netMap,
     maxRaw,
     maxSec,
@@ -147,6 +171,7 @@ export default function D3Graph({
     elementLegendItems,
     elementLegendIds,
     legendCategories,
+    legendMetricScale,
     getNodeColor,
     getEdgeColor,
     getEdgeOpacity,
@@ -177,6 +202,7 @@ export default function D3Graph({
   });
 
   const { handleZoomFit } = useGraphSimulation({
+    graph,
     containerRef,
     svgRef,
     nodes,
@@ -184,6 +210,7 @@ export default function D3Graph({
     communityMap,
     networkMetrics,
     nodeSizeMult,
+    bipartiteNodeSizeMult,
     nodeSizeBase,
     nodeColorBase,
     uniformNodeColor,
@@ -216,6 +243,7 @@ export default function D3Graph({
     getEdgeColor,
     getEdgeOpacity,
     netMap,
+    displayMap: communityDisplay.displayMap,
     maxRaw,
     maxSec,
     clickedNode,
@@ -226,56 +254,73 @@ export default function D3Graph({
     setTooltip,
     isCalculatingLayout,
     setIsCalculatingLayout,
+    registerD3TickListener,
+    beginDrag,
+    movePinnedNode,
+    endDrag,
+    d3NodesRef,
+    d3LinksRef,
+    d3NodesMapRef,
   });
-
-  const clickTimers = useRef<{ [key: string]: NodeJS.Timeout }>({});
-  const clickCounts = useRef<{ [key: string]: number }>({});
 
   const handleLegendClick = (e: React.MouseEvent, id: string, categoryIds: string[]) => {
     e.stopPropagation();
-    clickCounts.current[id] = (clickCounts.current[id] || 0) + 1;
+    setHiddenItems((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
-    if (clickTimers.current[id]) {
-      clearTimeout(clickTimers.current[id]);
-    }
+  const handleCommunitySingleClick = (id: string) => {
+    setHiddenItems((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
-    if (clickCounts.current[id] >= 3) {
-      clickCounts.current[id] = 0;
-      setIsolatedLegendItem(null);
-      setHiddenItems((prev) => {
-        const next = new Set(prev);
-        categoryIds.forEach((cid) => next.delete(cid));
-        return next;
-      });
-      handleZoomFit();
+  const handleElementSingleClick = (id: string) => {
+    setHiddenItems((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleCommunityDoubleClick = (id: string) => {
+    const isCurrentlyIsolated = isolatedCommunityId === id || isolatedLegendItem === id;
+    if (isCurrentlyIsolated) {
+      setIsolatedCommunityId(null);
+      setSelectedCommunityId(null);
     } else {
-      clickTimers.current[id] = setTimeout(() => {
-        const count = clickCounts.current[id];
-        clickCounts.current[id] = 0;
-        delete clickTimers.current[id];
-
-        if (count === 1) {
-          if (isolatedLegendItem === id) {
-            setIsolatedLegendItem(null);
-          } else {
-            setHiddenItems((prev) => {
-              const next = new Set(prev);
-              if (next.has(id)) next.delete(id);
-              else next.add(id);
-              return next;
-            });
-          }
-        } else if (count === 2) {
-          setIsolatedLegendItem(id);
-          setHiddenItems((prev) => {
-            const next = new Set(prev);
-            next.delete(id);
-            return next;
-          });
-          handleZoomFit(id);
-        }
-      }, 300);
+      setIsolatedCommunityId(id);
+      setSelectedCommunityId(id);
     }
+  };
+
+  const handleElementDoubleClick = (id: string) => {
+    const isCurrentlyIsolated = isolatedLegendItem === id;
+    if (isCurrentlyIsolated) {
+      setIsolatedLegendItem(null);
+    } else {
+      setIsolatedLegendItem(id);
+    }
+  };
+
+  const handleResetView = () => {
+    setIsolatedCommunityId(null);
+    setSelectedCommunityId(null);
+    setIsolatedLegendItem(null);
+    setHiddenLegendItems([]);
+    setHoveredCommunityId(null);
+    setClickedNode(null);
+    setClickedEdge(null);
+    if (onClearSelection) onClearSelection();
+    handleZoomFit();
   };
 
   return (
@@ -285,18 +330,14 @@ export default function D3Graph({
       <GraphControlOverlay
         isDarkMode={isDarkMode}
         onZoomFit={handleZoomFit}
+        onResetView={handleResetView}
         onRefreshGraph={() => {
-          nodes.forEach((n: any) => {
-            n.x = undefined;
-            n.y = undefined;
-            n.vx = undefined;
-            n.vy = undefined;
-            n.fx = undefined;
-            n.fy = undefined;
-          });
-          onRefresh && onRefresh();
+          if (onRefresh) onRefresh();
         }}
         isCalculatingLayout={isCalculatingLayout}
+        activeRenderer="d3"
+        onSwitchRenderer={onSwitchRenderer}
+        isRendererSwitching={isRendererSwitching}
       />
 
       <NodeDetailsSidebar
@@ -321,13 +362,21 @@ export default function D3Graph({
         elementLegendIds={elementLegendIds}
         hiddenItems={hiddenItems}
         isolatedLegendItem={isolatedLegendItem}
+        selectedCommunityId={selectedCommunityId}
+        isolatedCommunityId={isolatedCommunityId}
         handleLegendClick={handleLegendClick}
+        onElementSingleClick={handleElementSingleClick}
+        onElementDoubleClick={handleElementDoubleClick}
+        onCommunitySingleClick={handleCommunitySingleClick}
+        onCommunityDoubleClick={handleCommunityDoubleClick}
+        onCommunityHover={setHoveredCommunityId}
         showNodeLabels={showNodeLabels}
         setShowNodeLabels={setShowNodeLabels}
         directed={directed}
         showArrowheads={showArrowheads}
         setShowArrowheads={setShowArrowheads}
         legendCategories={legendCategories}
+        legendMetricScale={legendMetricScale}
         isLegendMinimized={isLegendMinimized}
         setIsLegendMinimized={setIsLegendMinimized}
       />

@@ -2,6 +2,7 @@ import React from 'react';
 import { useStore } from '@/store/useStore';
 import { SyncInput } from '@/components/ui/SyncInput';
 import { CustomSlider } from '@/components/ui/CustomSlider';
+import { availableCustomNodeAttributes, detectCustomAttributeType } from '@/lib/graphIO';
 
 interface CustomizationControlsProps {
   networkMetrics: any[];
@@ -17,10 +18,8 @@ export const CustomizationControls = ({
   hasType,
   hasAbundance,
   hasSecondaryWeight,
-  maxRelWeight,
-  maxRawWeight
 }: CustomizationControlsProps) => {
-  const { filters, setFilter, isDarkMode } = useStore();
+  const { filters, setFilter, isDarkMode, bipartite, rawNodes, customAttributes, setCustomAttributes } = useStore();
   const [activeControlTab, setActiveControlTab] = React.useState('nodes');
   const hasLouvain = networkMetrics.some(m => m.louvain !== undefined);
   const hasDegree = networkMetrics.some(m => m.degree !== undefined || m.inDegree !== undefined || m.degreeCentrality !== undefined || m.inDegreeCentrality !== undefined) || networkMetrics.length > 0;
@@ -29,7 +28,17 @@ export const CustomizationControls = ({
   const hasBetweenness = networkMetrics.some(m => m.betweenness !== undefined);
   const hasCloseness = networkMetrics.some(m => m.closeness !== undefined);
   const hasClustering = networkMetrics.some(m => m.clustering !== undefined);
-
+  const customOptions = React.useMemo(() => availableCustomNodeAttributes(rawNodes), [rawNodes]);
+  const selectedCustomMetadata = customAttributes.find((attribute) => attribute.scope === 'node' && attribute.name === filters.customNodeAttribute);
+  const selectCustomAttribute = (name: string) => {
+    setFilter('customNodeAttribute', name);
+    if (!name) return;
+    const detectedType = detectCustomAttributeType(rawNodes.map((node) => node[name]));
+    setCustomAttributes([
+      ...customAttributes.filter((attribute) => attribute.scope !== 'node' || attribute.name !== name),
+      { name, scope: 'node', detectedType, selectedType: detectedType },
+    ]);
+  };
 
   return (
     <div>
@@ -61,7 +70,7 @@ export const CustomizationControls = ({
             onChange={(e) => setFilter('nodeColorBase', e.target.value)}
             className={`w-full bg-transparent border p-2 text-xs font-mono outline-none transition-colors mb-2 ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0] [&>option]:bg-[#1a1a1a]' : 'border-[#141414] focus:border-black text-[#141414] [&>option]:bg-white'}`}
           >
-            <option value="custom">Custom Community</option>
+            <option value="custom">Custom</option>
             {hasType && <option value="type">Node Type</option>}
             {hasLouvain && <option value="louvain">Louvain</option>}
             {hasDegree && <option value="degreeCentrality">Node Degree</option>}
@@ -72,6 +81,26 @@ export const CustomizationControls = ({
             {hasClustering && <option value="clustering">Clustering Coefficient</option>}
             <option value="uniform">Uniform</option>
           </select>
+          {filters.nodeColorBase === 'custom' && (
+            <div className="grid grid-cols-2 gap-2 mb-2">
+              <select value={filters.customNodeAttribute} onChange={(event) => selectCustomAttribute(event.target.value)} className={`w-full bg-transparent border p-2 text-[10px] font-mono ${isDarkMode ? 'border-[#333]' : 'border-[#141414]'}`}>
+                <option value="">Community (legacy)</option>
+                {customOptions.map((attribute) => <option key={attribute} value={attribute}>{attribute}</option>)}
+              </select>
+              <select
+                disabled={!selectedCustomMetadata}
+                value={selectedCustomMetadata?.selectedType || 'nominal'}
+                onChange={(event) => setCustomAttributes(customAttributes.map((attribute) => attribute === selectedCustomMetadata ? { ...attribute, selectedType: event.target.value as any } : attribute))}
+                className={`w-full bg-transparent border p-2 text-[10px] font-mono disabled:opacity-40 ${isDarkMode ? 'border-[#333]' : 'border-[#141414]'}`}
+              >
+                <option value="binary">Binary</option>
+                <option value="discrete">Discrete</option>
+                <option value="continuous">Continuous</option>
+                <option value="nominal">Nominal</option>
+                <option value="ordinal">Ordinal</option>
+              </select>
+            </div>
+          )}
           {filters.nodeColorBase === 'uniform' && (
              <div className="flex items-center space-x-2 mt-2">
                 <input 
@@ -92,6 +121,7 @@ export const CustomizationControls = ({
             onChange={(e) => setFilter('nodeSizeBase', e.target.value)}
             className={`w-full bg-transparent border p-2 text-xs font-mono outline-none transition-colors ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0] [&>option]:bg-[#1a1a1a]' : 'border-[#141414] focus:border-black text-[#141414] [&>option]:bg-white'}`}
           >
+            <option value="uniform">Uniform</option>
             {hasAbundance && <option value="abundance">Abundance</option>}
             {hasDegree && <option value="degree">Node Degree</option>}
             {hasEigen && <option value="eigenvector">Eigenvector Centrality</option>}
@@ -99,6 +129,9 @@ export const CustomizationControls = ({
             {hasBetweenness && <option value="betweenness">Betweenness Centrality</option>}
             {hasCloseness && <option value="closeness">Closeness Centrality</option>}
             {hasClustering && <option value="clustering">Clustering Coefficient</option>}
+            {selectedCustomMetadata && ['discrete', 'continuous'].includes(selectedCustomMetadata.selectedType) && (
+              <option value="custom">Custom: {selectedCustomMetadata.name}</option>
+            )}
           </select>
         </div>
         
@@ -116,6 +149,44 @@ export const CustomizationControls = ({
             min="1" max="10" step="0.5"
             value={filters.nodeSize}
             onChange={(v: number) => setFilter('nodeSize', v)}
+            isDarkMode={isDarkMode}
+          />
+        </div>
+
+        {bipartite && (
+          <div className="group pt-2">
+            <label className={`flex items-center justify-between text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
+              <span>Bipartite Node Size</span>
+              <SyncInput 
+                className={`w-14 bg-transparent border-b text-right font-mono outline-none ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0]' : 'border-[#ccc] focus:border-[#141414] text-[#141414]'}`}
+                value={filters.bipartiteNodeSize ?? 2}
+                onChange={(v: number) => setFilter('bipartiteNodeSize', v)}
+                step="0.5"
+              />
+            </label>
+            <CustomSlider 
+              min="0.5" max="10" step="0.5"
+              value={filters.bipartiteNodeSize ?? 2}
+              onChange={(v: number) => setFilter('bipartiteNodeSize', v)}
+              isDarkMode={isDarkMode}
+            />
+          </div>
+        )}
+
+        <div className="group pt-2">
+          <label className={`flex items-center justify-between text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
+            <span>Node Opacity</span>
+            <SyncInput 
+              className={`w-14 bg-transparent border-b text-right font-mono outline-none ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0]' : 'border-[#ccc] focus:border-[#141414] text-[#141414]'}`}
+              value={filters.nodeOpacity ?? 1}
+              onChange={(v: number) => setFilter('nodeOpacity', v)}
+              step="0.05"
+            />
+          </label>
+          <CustomSlider 
+            min="0.0" max="1.0" step="0.05"
+            value={filters.nodeOpacity ?? 1}
+            onChange={(v: number) => setFilter('nodeOpacity', v)}
             isDarkMode={isDarkMode}
           />
         </div>
@@ -191,7 +262,7 @@ export const CustomizationControls = ({
               onChange={(e) => setFilter('edgeColorNodeMetric', e.target.value)}
               className={`w-full bg-transparent border p-2 mt-2 text-xs font-mono outline-none transition-colors ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0] [&>option]:bg-[#1a1a1a]' : 'border-[#141414] focus:border-black text-[#141414] [&>option]:bg-white'}`}
             >
-              <option value="custom">Custom Community</option>
+              <option value="custom">Custom</option>
               {hasType && <option value="type">Node Type</option>}
               {hasLouvain && <option value="louvain">Louvain</option>}
               {hasDegree && <option value="degreeCentrality">Node Degree</option>}
@@ -253,11 +324,11 @@ export const CustomizationControls = ({
               className={`w-14 bg-transparent border-b text-right font-mono outline-none ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0]' : 'border-[#ccc] focus:border-[#141414] text-[#141414]'}`}
               value={filters.edgeOpacity}
               onChange={(v: number) => setFilter('edgeOpacity', v)}
-              step="0.1"
+              step="0.05"
             />
           </label>
           <CustomSlider 
-            min="0.1" max="1.0" step="0.1"
+            min="0.0" max="1.0" step="0.05"
             value={filters.edgeOpacity}
             onChange={(v: number) => setFilter('edgeOpacity', v)}
             isDarkMode={isDarkMode}

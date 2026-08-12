@@ -20,8 +20,11 @@ export interface ColumnMappingState {
   nodeIdCol: string;
   nodeLabelCol: string;
   nodeTypeCol: string;
+  nodePartitionCol: string;
   nodeCommunityCol: string;
   nodeAbundCol: string;
+  customNodeAttribute: string;
+  customNodeAttributeType: 'binary' | 'discrete' | 'continuous' | 'nominal' | 'ordinal';
   rowHeadersCol: number | '';
   colHeadersRow: number | '';
   dataStartRow: number | '';

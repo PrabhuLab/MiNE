@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useStore } from '@/store/useStore';
 import { computeCommunityMetrics } from '@/lib/workspaceUtils';
-import { computeBipartiteLouvain, computeBipartiteMetrics } from '@/lib/bipartiteUtils';
 import Graph from 'graphology';
 import louvainPkg from 'graphology-communities-louvain';
 import pagerankPkg from 'graphology-metrics/centrality/pagerank';
@@ -24,12 +23,13 @@ const outDegreeCentrality = degreePkg.outDegreeCentrality || (degreePkg as any).
 const seedrandom = (typeof seedrandomPkg === 'function') ? seedrandomPkg : (seedrandomPkg as any).default || seedrandomPkg;
 
 export function useGraphMetrics(validNodes: any[], validEdges: any[], appliedFilters: any, rawNodes: any[]) {
-  const { directed, bipartite, communityMap, setCommunityMap, setFilter } = useStore();
+  const { directed, communityMap, setCommunityMap, setFilter, importedMetrics } = useStore();
   
   const [networkMetrics, setNetworkMetrics] = useState<any[]>([]);
   const [nodeMetrics, setNodeMetrics] = useState<any[]>([]);
   
   const [modularity, setModularity] = useState<number | null>(null);
+  const [hasRanCommunities, setHasRanCommunities] = useState(false);
   
   const [metricsToRun, setMetricsToRun] = useState({
     louvain: false,
@@ -43,31 +43,44 @@ export function useGraphMetrics(validNodes: any[], validEdges: any[], appliedFil
   const [metricsLoading, setMetricsLoading] = useState(false);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setNetworkMetrics([]);
-      setMetricsToRun({
-        louvain: false,
-        degree: false,
-        betweenness: false,
-        closeness: false,
-        clustering: false,
-        pagerank: false,
-        eigenvector: false
-      });
-      setFilter('nodeColorBase', 'custom');
-      setFilter('nodeSizeBase', 'abundance');
-      setFilter('edgeColorBase', 'uniform');
-      setFilter('edgeColorNodeMetric', 'custom');
-    }, 0);
-    return () => clearTimeout(timer);
-  }, [rawNodes, setFilter]);
+    if (importedMetrics) {
+      const restoredNodes: any[] = Object.entries(importedMetrics.nodes || {}).map(([id, metrics]) => ({ id, ...(metrics as Record<string, any>) }));
+      setNetworkMetrics(restoredNodes);
+      const restoredHasLouvain = restoredNodes.some((entry) => entry.louvain !== undefined);
+      setNodeMetrics(restoredHasLouvain ? restoredNodes.filter((entry) => entry.deltaQ !== undefined) : []);
+      const restoredModularity = Number(importedMetrics.graph?.modularity);
+      setModularity(restoredHasLouvain && Number.isFinite(restoredModularity) ? restoredModularity : null);
+      setHasRanCommunities(restoredHasLouvain);
+      if (importedMetrics.metadata?.selectedMetrics) {
+        setMetricsToRun((current) => ({ ...current, ...importedMetrics.metadata.selectedMetrics }));
+      }
+      return;
+    }
+    setNetworkMetrics([]);
+    setNodeMetrics([]);
+    setModularity(null);
+    setHasRanCommunities(false);
+    setMetricsToRun({
+      louvain: false,
+      degree: false,
+      betweenness: false,
+      closeness: false,
+      clustering: false,
+      pagerank: false,
+      eigenvector: false
+    });
+    setFilter('nodeColorBase', 'custom');
+    setFilter('nodeSizeBase', 'abundance');
+    setFilter('edgeColorBase', 'uniform');
+    setFilter('edgeColorNodeMetric', 'custom');
+  }, [rawNodes, importedMetrics, setFilter]);
 
   // Compute Communities and Metrics
   useEffect(() => {
-    if (validNodes.length === 0 || validEdges.length === 0) return;
+    if (validNodes.length === 0) return;
 
     try {
-      const graph = new Graph({ type: directed ? "directed" : "undirected", multi: false, allowSelfLoops: false });
+      const graph: any = new (Graph as any)({ type: directed ? "directed" : "undirected", multi: false, allowSelfLoops: false });
       
       validNodes.forEach(n => {
         if (!graph.hasNode(n.id)) graph.addNode(n.id, { ...n });
@@ -91,32 +104,21 @@ export function useGraphMetrics(validNodes: any[], validEdges: any[], appliedFil
 
       setCommunityMap(newCommunityMap);
 
-      const metrics = computeCommunityMetrics(graph, newCommunityMap, directed);
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setNodeMetrics(metrics);
-
       setNetworkMetrics(prev => {
-        if (prev.length === 0) {
-          return graph.nodes().map(nodeId => {
-            return {
-              id: nodeId,
-              degree: graph.degree ? graph.degree(nodeId) : 0,
-              inDegree: directed && graph.inDegree ? graph.inDegree(nodeId) : 0,
-              outDegree: directed && graph.outDegree ? graph.outDegree(nodeId) : 0
-            };
-          });
-        }
-        
-        const currentMap = new Map(prev.map(m => [m.id, m]));
-        return graph.nodes().map(nodeId => {
+        const currentMap = new Map(prev.map((m: any) => [m.id, m]));
+        return graph.nodes().map((nodeId: string) => {
           const old = currentMap.get(nodeId) || {};
-          return {
-            ...old,
-            id: nodeId,
-            degree: graph.degree ? graph.degree(nodeId) : 0,
-            inDegree: directed && graph.inDegree ? graph.inDegree(nodeId) : 0,
-            outDegree: directed && graph.outDegree ? graph.outDegree(nodeId) : 0
-          };
+          const next = { ...old, id: nodeId };
+          if (directed) {
+            delete next.degree;
+            next.inDegree = graph.inDegree ? graph.inDegree(nodeId) : 0;
+            next.outDegree = graph.outDegree ? graph.outDegree(nodeId) : 0;
+          } else {
+            delete next.inDegree;
+            delete next.outDegree;
+            next.degree = graph.degree ? graph.degree(nodeId) : 0;
+          }
+          return next;
         });
       });
     } catch (err) {
@@ -131,7 +133,7 @@ export function useGraphMetrics(validNodes: any[], validEdges: any[], appliedFil
     // We defer to let the UI update the loading state
     setTimeout(() => {
       try {
-        const graph = new Graph({ type: directed ? "directed" : "undirected", multi: false, allowSelfLoops: false });
+        const graph: any = new (Graph as any)({ type: directed ? "directed" : "undirected", multi: false, allowSelfLoops: false });
         
         validNodes.forEach(n => {
           if (!graph.hasNode(n.id)) graph.addNode(n.id, { ...n });
@@ -146,50 +148,30 @@ export function useGraphMetrics(validNodes: any[], validEdges: any[], appliedFil
         });
 
         const newMetrics: Record<string, any> = {};
-        graph.forEachNode(node => {
+        graph.forEachNode((node: string) => {
           newMetrics[node] = {};
         });
 
         const runLouvain = metricsToRun.louvain || appliedFilters?.nodeColorBase === 'louvain';
         if (runLouvain) {
           try {
-            if (bipartite) {
-              const details = computeBipartiteLouvain(graph, {
-                resolution: appliedFilters?.resolution || 1.0,
-                seed: appliedFilters?.louvainSeed || 42
-              });
-              Object.keys(details.communities).forEach(node => {
-                newMetrics[node].louvain = details.communities[node];
-              });
-              setModularity(details.modularity);
-            } else {
-              const options = { 
-                rng: seedrandom(appliedFilters?.louvainSeed || 42),
-                resolution: appliedFilters?.resolution || 1.0, 
-                getEdgeWeight: "weight",
-                fastLocalMoves: true
-              };
-              const details = louvain.detailed(graph, options);
-              const norm = normalize_communities(details.communities as Record<string, number>);
-              Object.keys(norm).forEach(node => {
-                newMetrics[node].louvain = `Cluster ${norm[node] + 1}`;
-              });
-              setModularity(details.modularity);
-            }
-          } catch (e) { console.warn("Community detection failed", e); }
-        }
-
-        if (bipartite) {
-          try {
-            const bipMetrics = computeBipartiteMetrics(graph);
-            Object.keys(bipMetrics).forEach(node => {
-              newMetrics[node].bipartitePartition = bipMetrics[node].bipartitePartition;
-              newMetrics[node].bipartiteNormDegree = bipMetrics[node].bipartiteNormDegree;
-              newMetrics[node].bipartiteClustering = bipMetrics[node].bipartiteClustering;
-              newMetrics[node].bipartiteRedundancy = bipMetrics[node].bipartiteRedundancy;
-              newMetrics[node].bipartiteProjectionDegree = bipMetrics[node].bipartiteProjectionDegree;
+            const options = { 
+              rng: seedrandom(appliedFilters?.louvainSeed || 42),
+              resolution: appliedFilters?.resolution || 1.0, 
+              getEdgeWeight: "weight",
+              fastLocalMoves: true
+            };
+            const details = louvain.detailed(graph, options);
+            const norm = normalize_communities(details.communities as Record<string, number>);
+            Object.keys(norm).forEach(node => {
+              newMetrics[node].louvain = `Cluster ${norm[node] + 1}`;
             });
-          } catch (e) { console.warn("Bipartite metrics calculation failed", e); }
+            const louvainCommunityMap = Object.fromEntries(Object.entries(norm).map(([node, community]) => [node, String(community)]));
+            const communityMetrics = computeCommunityMetrics(graph, louvainCommunityMap, directed);
+            setNodeMetrics(communityMetrics);
+            setModularity(details.modularity);
+            setHasRanCommunities(true);
+          } catch (e) { console.warn("Community detection failed", e); }
         }
 
         if (metricsToRun.degree) {
@@ -233,7 +215,7 @@ export function useGraphMetrics(validNodes: any[], validEdges: any[], appliedFil
         if (metricsToRun.clustering) {
           try {
             // Manual local clustering coefficient calculation
-            graph.forEachNode(node => {
+            graph.forEachNode((node: string) => {
               const neighbors = graph.neighbors(node);
               const k = neighbors.length;
               if (k < 2) {
@@ -273,8 +255,8 @@ export function useGraphMetrics(validNodes: any[], validEdges: any[], appliedFil
         }
 
         setNetworkMetrics(prev => {
-          const currentMap = new Map(prev.map(m => [m.id, m]));
-          return graph.nodes().map(nodeId => {
+          const currentMap = new Map(prev.map((m: any) => [m.id, m]));
+          return graph.nodes().map((nodeId: string) => {
             const old = currentMap.get(nodeId) || { id: nodeId };
             return {
               ...old,
@@ -282,6 +264,7 @@ export function useGraphMetrics(validNodes: any[], validEdges: any[], appliedFil
             };
           });
         });
+        setHasRanCommunities(true);
       } catch (err) {
         console.error("Failed to run metrics:", err);
       } finally {
@@ -289,6 +272,21 @@ export function useGraphMetrics(validNodes: any[], validEdges: any[], appliedFil
       }
     }, 100);
   };
+
+  // Auto recalculate active metrics or Louvain when validNodes, validEdges, or filter parameters change (ONLY if communities/metrics have been initially run and liveUpdate is enabled)
+  useEffect(() => {
+    if (!appliedFilters?.liveUpdate) return;
+    const isLouvainActive = metricsToRun.louvain || appliedFilters?.nodeColorBase === 'louvain';
+    const hasAnyMetricActive = Object.values(metricsToRun).some(Boolean) || isLouvainActive;
+
+    if (hasRanCommunities && hasAnyMetricActive && validNodes.length > 0 && validEdges.length > 0) {
+      const timer = setTimeout(() => {
+        runSelectedMetrics();
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [validNodes, validEdges, appliedFilters?.resolution, appliedFilters?.louvainSeed, appliedFilters?.liveUpdate, hasRanCommunities]);
 
   return {
     networkMetrics,

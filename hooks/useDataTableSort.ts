@@ -14,7 +14,7 @@ export function useDataTableSort(validNodes: any[], validEdges: any[], networkMe
     
     // Filter by legend states
     nodes = nodes.filter(d => {
-      const isBipartiteNode = bipartite && (d.type === 'B' || d.group === 1);
+      const isBipartiteNode = bipartite && (Number(d.partitionIndex) === 1 || d.partition === 'B' || d.partition === 1 || d.type === 'B' || d.group === 1);
       if (isBipartiteNode && hiddenSet.has('element:bipartite')) return false;
       if (!isBipartiteNode && hiddenSet.has('element:standard')) return false;
       

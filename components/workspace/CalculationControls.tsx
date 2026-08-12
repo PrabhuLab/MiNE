@@ -11,14 +11,19 @@ interface CalculationControlsProps {
 }
 
 export const CalculationControls = ({ metricsToRun, setMetricsToRun, runSelectedMetrics, metricsLoading }: CalculationControlsProps) => {
-  const { filters, setFilter, isDarkMode, directed, bipartite } = useStore();
+  const { filters, setFilter, isDarkMode, directed } = useStore();
   const [activeControlTab, setActiveControlTab] = useState<"communities" | "metrics">("communities");
 
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-      <h3 className={`text-[10px] font-bold uppercase tracking-widest opacity-70 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Calculations</h3>
-    </div>
+        <h3 className={`text-[10px] font-bold uppercase tracking-widest opacity-70 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Calculations</h3>
+        {!filters.liveUpdate && (
+          <span className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-amber-500/20 text-amber-500 border border-amber-500/30 rounded-sm">
+            Pending Recalculation
+          </span>
+        )}
+      </div>
       <div className="flex border-b mb-6">
       <button 
         className={`flex-1 text-[10px] font-bold uppercase tracking-widest py-2 border-b-2 transition-colors ${activeControlTab === "communities" ? (isDarkMode ? "border-[#E4E3E0] text-[#E4E3E0]" : "border-[#141414] text-[#141414]") : (isDarkMode ? "border-transparent text-[#888] hover:text-[#ccc]" : "border-transparent text-[#888] hover:text-[#444]")}`}
@@ -42,7 +47,7 @@ export const CalculationControls = ({ metricsToRun, setMetricsToRun, runSelected
             </label>
             <div className="space-y-3">
               {[
-                { key: "louvain", label: bipartite ? "Louvain (Barber Bipartite Q_B)" : "Louvain" }
+                { key: "louvain", label: "Louvain" }
               ].map(({ key, label }) => (
                 <label key={key} className="flex items-center space-x-2 cursor-pointer">
                   <input
@@ -101,10 +106,10 @@ export const CalculationControls = ({ metricsToRun, setMetricsToRun, runSelected
             </label>
             <div className="space-y-3">
               {[
-                { key: "degree", label: directed ? "In/Out Degree Centrality" : (bipartite ? "Degree & Bip. Norm Degree" : "Degree Centrality") },
+                { key: "degree", label: directed ? "In/Out Degree Centrality" : "Degree Centrality" },
                 { key: "betweenness", label: "Betweenness Centrality" },
                 { key: "closeness", label: "Closeness Centrality" },
-                { key: "clustering", label: bipartite ? "Bipartite C4 Clustering & Redundancy" : "Clustering Coefficient" },
+                { key: "clustering", label: "Clustering Coefficient" },
                 { key: "pagerank", label: "PageRank" },
                 { key: "eigenvector", label: "Eigenvector Centrality" }
               ].map(({ key, label }) => (
