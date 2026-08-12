@@ -5,241 +5,22 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import type Graph from 'graphology';
 import Sigma from 'sigma';
-import {
-  sdfCircle,
-  sdfSquare,
-  pathLine,
-  pathCurved,
-  extremityArrow,
-} from 'sigma/rendering';
-import { layerBorder } from '@sigma/node-border';
-import { DEFAULT_PRIMITIVES } from 'sigma/primitives';
-import { DEFAULT_STYLES } from 'sigma/types';
 import { useStore, RawNode, RawEdge } from '@/store/useStore';
 import GraphLegend from '@/components/graph/GraphLegend';
 import GraphControlOverlay from '@/components/graph/GraphControlOverlay';
 import NodeDetailsSidebar from '@/components/graph/NodeDetailsSidebar';
-import GraphTooltip, { TooltipData } from '@/components/graph/GraphTooltip';
+import GraphTooltip from '@/components/graph/GraphTooltip';
+import type { TooltipData } from '@/services/graphInteraction/types';
 import { useGraphStyles } from '@/hooks/useGraphStyles';
-
-// Native Sigma v4 SDF Primitives Configuration with LayerBorder and Fill
-const SIGMA_PRIMITIVES = {
-  ...DEFAULT_PRIMITIVES,
-  depthLayers: [
-    'dimmedEdges',
-    'edges',
-    'activeEdges',
-    'topEdges',
-    'dimmedNodes',
-    'nodes',
-    'activeNodes',
-    'topNodes',
-  ],
-  nodes: {
-    ...DEFAULT_PRIMITIVES.nodes,
-    shapes: [sdfCircle(), sdfSquare()],
-    variables: {
-      borderColor: {
-        type: 'color' as const,
-        default: '#ffffff',
-      },
-    },
-    layers: [
-      layerBorder({
-        borders: [
-          {
-            size: 1,
-            mode: 'pixels',
-            color: { attribute: 'borderColor' },
-          },
-          {
-            size: 0,
-            fill: true,
-            color: { attribute: 'color' },
-          },
-        ],
-      }),
-    ],
-  },
-  edges: {
-    ...DEFAULT_PRIMITIVES.edges,
-    paths: [pathLine(), pathCurved()],
-    extremities: [extremityArrow()],
-  },
-};
-
-// Explicit Sigma v4 Styles Mapping using Ordered Rule Arrays
-const SIGMA_STYLES = {
-  nodes: [
-    DEFAULT_STYLES.nodes,
-    {
-      shape: { attribute: 'shape' },
-      size: { attribute: 'size' },
-      color: { attribute: 'color' },
-      opacity: { attribute: 'opacity' },
-      borderColor: { attribute: 'borderColor' },
-      labelColor: { attribute: 'labelColor' },
-      depth: { attribute: 'depth' },
-    },
-  ],
-  edges: [
-    DEFAULT_STYLES.edges,
-    {
-      size: { attribute: 'size' },
-      color: { attribute: 'color' },
-      opacity: { attribute: 'opacity' },
-      path: { attribute: 'path' },
-      head: { attribute: 'head' },
-      depth: { attribute: 'depth' },
-    },
-  ],
-};
-
-function checkIsSecondary(node: any, isBipartite: boolean): boolean {
-  if (!isBipartite || !node) return false;
-  if (node.partitionIndex !== undefined && node.partitionIndex !== null) return Number(node.partitionIndex) === 1;
-  const t = String(node.type || '').toUpperCase();
-  const g = String(node.group || '').toUpperCase();
-  const b = String(node.bipartite || '').toUpperCase();
-  const s = String(node.set || '').toUpperCase();
-  const p = String(node.partition || '').toUpperCase();
-  return p === '1' || p === 'B' || p === 'SECONDARY' || t === 'B' || t === 'SECONDARY' || g === '1' || g === 'B' || b === '1' || b === 'B' || b === 'SECONDARY' || s === '1' || s === 'B';
-}
-
-const CAMERA_MS = 200;
-
-interface GraphFocusRequest {
-  id: string;
-  type: 'node' | 'edge';
-  requestId: number;
-  source?: string;
-  target?: string;
-}
-
-function fitSigmaNodeSet(
-  sigma: Sigma | null,
-  graph: Graph,
-  container: HTMLDivElement | null,
-  nodeIds: string[],
-  duration = CAMERA_MS
-) {
-  if (!sigma || !graph || !container) return;
-  // A renderer hidden by the Data tab can retain a 1x1 internal viewport.
-  // Resize after it becomes visible before doing any coordinate conversion.
-  sigma.resize();
-  const { width, height } = sigma.getDimensions();
-  if (width <= 0 || height <= 0) return;
-
-  const camera = sigma.getCamera();
-
-  if (!nodeIds || nodeIds.length === 0) {
-    camera.animate({ x: 0.5, y: 0.5, ratio: 1, angle: 0 }, { duration });
-    return;
-  }
-
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  let validCount = 0;
-
-  for (const id of nodeIds) {
-    if (!graph.hasNode(id)) continue;
-    const rawX = Number(graph.getNodeAttribute(id, 'x'));
-    const rawY = Number(graph.getNodeAttribute(id, 'y'));
-    if (!isFinite(rawX) || !isFinite(rawY)) continue;
-
-    const viewportPoint = sigma.graphToViewport({ x: rawX, y: rawY });
-
-    if (isFinite(viewportPoint.x) && isFinite(viewportPoint.y)) {
-      minX = Math.min(minX, viewportPoint.x);
-      maxX = Math.max(maxX, viewportPoint.x);
-      minY = Math.min(minY, viewportPoint.y);
-      maxY = Math.max(maxY, viewportPoint.y);
-      validCount++;
-    }
-  }
-
-  if (validCount === 0 || minX === Infinity || !isFinite(minX) || !isFinite(minY)) {
-    camera.animate({ x: 0.5, y: 0.5, ratio: 1, angle: 0 }, { duration });
-    return;
-  }
-
-  const viewportCenter = {
-    x: (minX + maxX) / 2,
-    y: (minY + maxY) / 2,
-  };
-  const framedCenter = sigma.viewportToFramedGraph(viewportCenter);
-
-  if (validCount === 1) {
-    camera.animate({ x: framedCenter.x, y: framedCenter.y, ratio: 0.25, angle: 0 }, { duration });
-    return;
-  }
-
-  const spanX = Math.abs(maxX - minX);
-  const spanY = Math.abs(maxY - minY);
-
-  const curRatio = camera.ratio;
-
-  if (!isFinite(curRatio) || curRatio <= 0) {
-    camera.animate({ x: framedCenter.x, y: framedCenter.y, ratio: 0.5, angle: 0 }, { duration });
-    return;
-  }
-
-  const paddingFactor = 0.75;
-  const stagePadding = Number(sigma.getSetting('stagePadding')) || 0;
-  const availableWidth = Math.max(1, (width - stagePadding * 2) * paddingFactor);
-  const availableHeight = Math.max(1, (height - stagePadding * 2) * paddingFactor);
-  const ratioX = (spanX / availableWidth) * curRatio;
-  const ratioY = (spanY / availableHeight) * curRatio;
-  let targetRatio = Math.max(ratioX, ratioY);
-
-  if (!isFinite(targetRatio) || targetRatio <= 0) targetRatio = 0.5;
-  targetRatio = camera.getBoundedRatio(targetRatio);
-
-  camera.animate(
-    { x: framedCenter.x, y: framedCenter.y, ratio: targetRatio, angle: 0 },
-    { duration }
-  );
-}
-
-interface SigmaGraphProps {
-  graph: Graph;
-  isReady?: boolean;
-  nodes: RawNode[];
-  edges: RawEdge[];
-  communityMap: Record<string, string>;
-  networkMetrics?: any[];
-  nodeSizeMult: number;
-  bipartiteNodeSizeMult?: number;
-  nodeSizeBase?: string;
-  nodeColorBase?: string;
-  uniformNodeColor?: string;
-  uniformEdgeColor?: string;
-  edgeWeightMult?: number;
-  edgeWeightBase?: string;
-  edgeColorBase?: string;
-  edgeColorNodeMetric?: string;
-  edgeColorNodeTarget?: 'source' | 'target';
-  nodeOpacity?: number;
-  edgeOpacity?: number;
-  edgeOpacityBase?: string;
-  forceStrength: number;
-  directed: boolean;
-  bipartite: boolean;
-  livePhysics?: boolean;
-  isDarkMode?: boolean;
-  refreshKey?: number;
-  onRefresh?: () => void;
-  onElementDoubleClick?: (id: string, type: 'node' | 'edge') => void;
-  onClearSelection?: () => void;
-  searchQuery?: string;
-  selectedElement?: string | null;
-  focusRequest?: GraphFocusRequest | null;
-  onSwitchRenderer?: (engine: 'd3' | 'sigma') => void;
-  isRendererSwitching?: boolean;
-  beginDrag?: (id: string, x: number, y: number) => void;
-  movePinnedNode?: (id: string, x: number, y: number) => void;
-  endDrag?: (id: string) => void;
-  onRendererReady?: (renderer: Sigma | null) => void;
-}
+import { SIGMA_PRIMITIVES } from '@/components/graph/sigma/primitives';
+import { SIGMA_STYLES } from '@/components/graph/sigma/styles';
+import { fitSigmaNodeSet } from '@/components/graph/sigma/camera';
+import { collectVisibleSigmaNodeIds, isSecondaryNode } from '@/components/graph/sigma/visibility';
+import { shouldRenderSigmaLabels } from '@/components/graph/sigma/labels';
+import type { SigmaGraphProps } from '@/components/graph/sigma/types';
+import { createSigmaEdgeReducer, createSigmaNodeReducer } from '@/components/graph/sigma/reducers';
+import { registerSigmaInteractions } from '@/components/graph/sigma/interactions';
+import { createElementLegendItems } from '@/components/graph/legend/elementItems';
 
 export default function SigmaGraph({
   graph,
@@ -336,7 +117,11 @@ export default function SigmaGraph({
     if (!q || !graph) return new Set<string>();
     const matches = new Set<string>();
     graph.forEachNode((nodeId: string, attrs: any) => {
-      if (nodeId.toLowerCase().includes(q) || (attrs.rawNode?.name && attrs.rawNode.name.toLowerCase().includes(q))) {
+      if (
+        nodeId.toLowerCase().includes(q)
+        || String(attrs.rawNode?.name || '').toLowerCase().includes(q)
+        || String(attrs.rawNode?.label || '').toLowerCase().includes(q)
+      ) {
         matches.add(nodeId);
       }
     });
@@ -348,14 +133,14 @@ export default function SigmaGraph({
     if (!graph) return new Map<string, boolean>();
     const map = new Map<string, boolean>();
     graph.forEachNode((id: string, attrs: any) => {
-      map.set(id, checkIsSecondary(attrs.rawNode, bipartite));
+      map.set(id, isSecondaryNode(attrs.rawNode, bipartite));
     });
     return map;
   }, [graph, bipartite]);
 
   // Dynamic Global Label Gating
   const shouldRenderLabels = useMemo(() => {
-    return Boolean(showNodeLabels || selectedElement || clickedNode || searchQuery.trim());
+    return shouldRenderSigmaLabels(showNodeLabels, selectedElement, clickedNode, searchQuery);
   }, [showNodeLabels, selectedElement, clickedNode, searchQuery]);
 
   useEffect(() => {
@@ -391,13 +176,12 @@ export default function SigmaGraph({
     customColorMap,
     communityDisplay,
     netMap,
-    elementLegendItems,
-    elementLegendIds,
     legendCategories,
     legendMetricScale,
     getNodeColor,
     getEdgeColor,
     getEdgeOpacity,
+    getShouldShowArrowhead,
   } = useGraphStyles({
     nodes,
     edges,
@@ -418,18 +202,34 @@ export default function SigmaGraph({
     isDarkMode,
     searchQuery,
     selectedElement,
+    selectedCommunityId,
+    isolatedCommunityId,
     showArrowheads,
     isolatedLegendItem,
     clickedNodeRef,
     clickedEdgeRef,
   });
 
+  const elementLegendItems = useMemo(
+    () => createElementLegendItems(bipartite, directed, isDarkMode),
+    [bipartite, directed, isDarkMode],
+  );
+  const elementLegendIds = useMemo(
+    () => elementLegendItems.map((item) => item.id),
+    [elementLegendItems],
+  );
+
   const displayMap = communityDisplay.displayMap;
+  const focusedEdgeNodeSet = useMemo(() => {
+    if (focusRequest?.type !== 'edge') return new Set<string>();
+    return new Set([focusRequest.source, focusRequest.target].filter((id): id is string => Boolean(id)));
+  }, [focusRequest]);
 
   const styleRefs = useRef({
     getNodeColor,
     getEdgeColor,
     getEdgeOpacity,
+    getShouldShowArrowhead,
     nodeOpacity,
     hiddenItems,
     isolatedLegendItem,
@@ -445,6 +245,7 @@ export default function SigmaGraph({
     selectedNeighborSet,
     searchMatchSet,
     isSecondaryMap,
+    focusedEdgeNodeSet,
   });
 
   useEffect(() => {
@@ -452,6 +253,7 @@ export default function SigmaGraph({
       getNodeColor,
       getEdgeColor,
       getEdgeOpacity,
+      getShouldShowArrowhead,
       nodeOpacity,
       hiddenItems,
       isolatedLegendItem,
@@ -467,17 +269,20 @@ export default function SigmaGraph({
       selectedNeighborSet,
       searchMatchSet,
       isSecondaryMap,
+      focusedEdgeNodeSet,
     };
   }, [
     getNodeColor,
     getEdgeColor,
     getEdgeOpacity,
+    getShouldShowArrowhead,
     nodeOpacity,
     hiddenItems,
     isolatedLegendItem,
     selectedCommunityId,
     isolatedCommunityId,
     hoveredCommunityId,
+    showArrowheads,
     displayMap,
     searchQuery,
     directed,
@@ -485,75 +290,25 @@ export default function SigmaGraph({
     selectedNeighborSet,
     searchMatchSet,
     isSecondaryMap,
+    focusedEdgeNodeSet,
   ]);
 
-  const checkIsNodeVisible = useCallback(
-    (nodeKey: string, attrs: any, isoCommOverride?: string | null, isoLegOverride?: string | null): boolean => {
-      const rawNode = attrs.rawNode;
-      const isSecondary = checkIsSecondary(rawNode, bipartite);
-      const activeHidden = hiddenItems;
-      const activeIsolated = isoLegOverride !== undefined ? isoLegOverride : isolatedLegendItem;
-      const activeIsoComm = isoCommOverride !== undefined ? isoCommOverride : isolatedCommunityId;
-      const dispIdx = displayMap[nodeKey] ?? -1;
-
-      if (activeHidden.has('element:standard') && !isSecondary) return false;
-      if (activeHidden.has('element:bipartite') && isSecondary) return false;
-      if (activeHidden.has(`community:${dispIdx}`)) return false;
-      if (rawNode?.type && activeHidden.has(`type:${rawNode.type}`)) return false;
-
-      if (activeIsoComm) {
-        const targetComm = activeIsoComm.replace('community:', '');
-        if (String(dispIdx) !== targetComm) return false;
-      }
-
-      if (activeIsolated) {
-        if (activeIsolated === 'element:standard' && isSecondary) return false;
-        if (activeIsolated === 'element:bipartite' && !isSecondary) return false;
-        if (activeIsolated.startsWith('type:')) {
-          const targetType = activeIsolated.replace('type:', '');
-          if (rawNode?.type !== targetType) return false;
-        }
-        if (activeIsolated.startsWith('community:')) {
-          const targetComm = activeIsolated.replace('community:', '');
-          if (String(dispIdx) !== targetComm) return false;
-        }
-      }
-
-      return true;
-    },
-    [bipartite, hiddenItems, isolatedLegendItem, isolatedCommunityId, displayMap]
-  );
-
   const getVisibleNodeIds = useCallback(
-    (targetFilter?: string | null, isoCommOverride?: string | null, isoLegOverride?: string | null) => {
-      if (!graph) return [];
-      const matchingIds: string[] = [];
-
-      graph.forEachNode((nodeId: string, attrs: any) => {
-        if (checkIsNodeVisible(nodeId, attrs, isoCommOverride, isoLegOverride)) {
-          if (targetFilter) {
-            if (targetFilter.startsWith('community:')) {
-              const commTarget = targetFilter.replace('community:', '');
-              const dispIdx = displayMap[nodeId] !== undefined ? String(displayMap[nodeId]) : null;
-              if (dispIdx !== commTarget && communityMap[nodeId] !== commTarget) return;
-            } else if (targetFilter.startsWith('type:')) {
-              const typeTarget = targetFilter.replace('type:', '');
-              if (attrs.rawNode?.type !== typeTarget) return;
-            } else if (targetFilter === 'element:bipartite') {
-              const isSecondary = checkIsSecondary(attrs.rawNode, bipartite);
-              if (!isSecondary) return;
-            } else if (targetFilter === 'element:standard') {
-              const isSecondary = checkIsSecondary(attrs.rawNode, bipartite);
-              if (isSecondary) return;
-            }
-          }
-          matchingIds.push(nodeId);
-        }
-      });
-
-      return matchingIds;
+    (
+      targetFilter?: string | null,
+      isoCommOverride?: string | null,
+      isoLegOverride?: string | null,
+      hiddenOverride?: Set<string>,
+    ) => {
+      return collectVisibleSigmaNodeIds(graph, {
+        bipartite,
+        hiddenItems: hiddenOverride ?? hiddenItems,
+        isolatedLegendItem,
+        isolatedCommunityId,
+        displayMap,
+      }, communityMap, targetFilter, isoCommOverride, isoLegOverride);
     },
-    [graph, checkIsNodeVisible, displayMap, communityMap, bipartite]
+    [graph, bipartite, hiddenItems, isolatedLegendItem, isolatedCommunityId, displayMap, communityMap]
   );
 
   const handleZoomFit = useCallback(() => {
@@ -567,16 +322,22 @@ export default function SigmaGraph({
     setIsolatedCommunityId(null);
     setSelectedCommunityId(null);
     setIsolatedLegendItem(null);
+    setHiddenLegendItems([]);
     setHoveredCommunityId(null);
+    setClickedNode(null);
+    setClickedEdge(null);
+    onClearSelection?.();
 
-    const visibleIds = getVisibleNodeIds(null, null, null);
+    const visibleIds = getVisibleNodeIds(null, null, null, new Set());
     fitSigmaNodeSet(sigmaRef.current, graph, containerRef.current, visibleIds);
   }, [
     graph,
     setIsolatedCommunityId,
     setSelectedCommunityId,
     setIsolatedLegendItem,
+    setHiddenLegendItems,
     setHoveredCommunityId,
+    onClearSelection,
     getVisibleNodeIds,
   ]);
 
@@ -589,13 +350,20 @@ export default function SigmaGraph({
         const visibleIds = getVisibleNodeIds(null, null, isolatedLegendItem);
         fitSigmaNodeSet(sigmaRef.current, graph, containerRef.current, visibleIds);
       } else {
+        const revealedItems = new Set(hiddenItems);
+        revealedItems.delete(commId);
+        setHiddenItems((previous) => {
+          const next = new Set(previous);
+          next.delete(commId);
+          return next;
+        });
         setIsolatedCommunityId(commId);
         setSelectedCommunityId(commId);
-        const targetIds = getVisibleNodeIds(commId, commId, isolatedLegendItem);
+        const targetIds = getVisibleNodeIds(commId, commId, isolatedLegendItem, revealedItems);
         fitSigmaNodeSet(sigmaRef.current, graph, containerRef.current, targetIds);
       }
     },
-    [graph, isolatedCommunityId, isolatedLegendItem, setIsolatedCommunityId, setSelectedCommunityId, getVisibleNodeIds]
+    [graph, hiddenItems, isolatedCommunityId, isolatedLegendItem, setHiddenItems, setIsolatedCommunityId, setSelectedCommunityId, getVisibleNodeIds]
   );
 
   const handleElementDoubleClick = useCallback(
@@ -606,12 +374,19 @@ export default function SigmaGraph({
         const visibleIds = getVisibleNodeIds(null, isolatedCommunityId, null);
         fitSigmaNodeSet(sigmaRef.current, graph, containerRef.current, visibleIds);
       } else {
+        const revealedItems = new Set(hiddenItems);
+        revealedItems.delete(id);
+        setHiddenItems((previous) => {
+          const next = new Set(previous);
+          next.delete(id);
+          return next;
+        });
         setIsolatedLegendItem(id);
-        const targetIds = getVisibleNodeIds(id, isolatedCommunityId, id);
+        const targetIds = getVisibleNodeIds(id, isolatedCommunityId, id, revealedItems);
         fitSigmaNodeSet(sigmaRef.current, graph, containerRef.current, targetIds);
       }
     },
-    [graph, isolatedLegendItem, isolatedCommunityId, setIsolatedLegendItem, getVisibleNodeIds]
+    [graph, hiddenItems, isolatedLegendItem, isolatedCommunityId, setHiddenItems, setIsolatedLegendItem, getVisibleNodeIds]
   );
 
   // Initialize Sigma v4 Renderer on Container & Graph change
@@ -645,282 +420,27 @@ export default function SigmaGraph({
         labelDensity: 1,
         labelGridCellSize: 100,
       },
-      nodeReducer: (nodeKey, data: any) => {
-        const {
-          hiddenItems: currentHidden,
-          isolatedLegendItem: currentIsolated,
-          selectedCommunityId: currentSelComm,
-          isolatedCommunityId: currentIsoComm,
-          hoveredCommunityId: currentHovComm,
-          displayMap: currentDispMap,
-          clickedNodeRef: currentClickedNodeRef,
-          showNodeLabels: isShowNodeLabels,
-          selectedNeighborSet: currentNeighbors,
-          searchMatchSet: currentMatches,
-          isSecondaryMap: currentSecondaryMap,
-        } = styleRefs.current;
-
-        const dispIdx = currentDispMap[nodeKey] ?? -1;
-        const isSecondary = currentSecondaryMap.get(nodeKey);
-
-        const res = { ...data };
-        res.visibility = 'visible';
-        res.labelVisibility = 'hidden';
-
-        if (currentHidden.has('element:standard') && !isSecondary) {
-          res.visibility = 'hidden';
-          return res;
-        }
-        if (currentHidden.has('element:bipartite') && isSecondary) {
-          res.visibility = 'hidden';
-          return res;
-        }
-
-        if (currentHidden.has(`community:${dispIdx}`)) {
-          res.visibility = 'hidden';
-          return res;
-        }
-        
-        const type = data.rawNode?.type;
-        if (type && currentHidden.has(`type:${type}`)) {
-          res.visibility = 'hidden';
-          return res;
-        }
-
-        if (currentIsolated) {
-          if (currentIsolated === 'element:standard' && isSecondary) {
-            res.visibility = 'hidden';
-            return res;
-          }
-          if (currentIsolated === 'element:bipartite' && !isSecondary) {
-            res.visibility = 'hidden';
-            return res;
-          }
-          if (currentIsolated.startsWith('type:')) {
-            const targetType = currentIsolated.replace('type:', '');
-            if (type !== targetType) {
-              res.visibility = 'hidden';
-              return res;
-            }
-          }
-          if (currentIsolated.startsWith('community:')) {
-            const targetComm = currentIsolated.replace('community:', '');
-            if (String(dispIdx) !== targetComm) {
-              res.visibility = 'hidden';
-              return res;
-            }
-          }
-        }
-
-        let isDimmed = false;
-        let isFocused = false;
-        let isNeighbor = false;
-        let isCommMember = false;
-
-        const activeCommFilter = currentHovComm || currentSelComm || currentIsoComm || (currentIsolated && currentIsolated.startsWith('community:') ? currentIsolated : null);
-        if (activeCommFilter) {
-          const targetComm = activeCommFilter.replace('community:', '');
-          if (String(dispIdx) === targetComm) {
-            isCommMember = true;
-          } else {
-            isDimmed = true;
-          }
-        }
-
-        const selNode = currentClickedNodeRef.current;
-        if (selNode) {
-          const selId = selNode.id;
-          if (nodeKey === selId) {
-            isFocused = true;
-            res.highlighted = true;
-          } else if (currentNeighbors.has(nodeKey)) {
-            isNeighbor = true;
-          } else {
-            isDimmed = true;
-          }
-        }
-
-        if (currentMatches.size > 0) {
-          if (!currentMatches.has(nodeKey)) {
-            isDimmed = true;
-          } else {
-            isFocused = true;
-            res.highlighted = true;
-          }
-        }
-
-        if (isFocused) {
-          res.depth = 'topNodes';
-        } else if (isNeighbor || isCommMember) {
-          res.depth = 'activeNodes';
-        } else if (isDimmed) {
-          res.depth = 'dimmedNodes';
-        } else {
-          res.depth = 'nodes';
-        }
-
-        const dimFactor = 0.1;
-        res.opacity = isDimmed ? (data.opacity ?? 1) * dimFactor : (data.opacity ?? 1);
-        
-        res.label = data.rawNode?.name || data.rawNode?.label || nodeKey;
-
-        if (res.visibility === 'hidden') {
-          res.labelVisibility = 'hidden';
-        } else if (isFocused || isNeighbor) {
-          res.labelVisibility = 'visible';
-        } else if (activeCommFilter) {
-          res.labelVisibility = isCommMember
-            ? (isShowNodeLabels ? 'auto' : 'visible')
-            : 'hidden';
-        } else if (isShowNodeLabels) {
-          res.labelVisibility = 'auto';
-        } else {
-          res.labelVisibility = 'hidden';
-        }
-
-        return res;
-      },
-      edgeReducer: (edgeKey, data: any) => {
-        const {
-          hiddenItems: currentHidden,
-          clickedNodeRef: currentClickedNodeRef,
-          clickedEdgeRef: currentClickedEdgeRef,
-          directed: currentDirected,
-          selectedCommunityId: currentSelComm,
-          isolatedCommunityId: currentIsoComm,
-          hoveredCommunityId: currentHovComm,
-          isolatedLegendItem: currentIsolated,
-          displayMap: currentDispMap,
-        } = styleRefs.current;
-
-        const res = { ...data };
-        res.visibility = 'visible';
-
-        if (currentHidden.has('element:edges')) {
-          res.visibility = 'hidden';
-          return res;
-        }
-
-        const [s, t] = graph.extremities(edgeKey);
-        let isDimmed = false;
-        let isFocusedEdge = false;
-
-        const selNode = currentClickedNodeRef.current;
-        if (selNode) {
-          const selId = selNode.id;
-          if (s === selId || t === selId) {
-            isFocusedEdge = true;
-          } else {
-            isDimmed = true;
-          }
-        } else if (currentClickedEdgeRef.current) {
-          const cSrc = currentClickedEdgeRef.current.source;
-          const cTgt = currentClickedEdgeRef.current.target;
-          if ((s === cSrc && t === cTgt) || (!currentDirected && s === cTgt && t === cSrc)) {
-            isFocusedEdge = true;
-          } else {
-            isDimmed = true;
-          }
-        } else {
-          const activeCommFilter = currentHovComm || currentSelComm || currentIsoComm || (currentIsolated && currentIsolated.startsWith('community:') ? currentIsolated : null);
-          if (activeCommFilter) {
-            const targetComm = activeCommFilter.replace('community:', '');
-            const sComm = String(currentDispMap[s] ?? -1);
-            const tComm = String(currentDispMap[t] ?? -1);
-            if (sComm === targetComm && tComm === targetComm) {
-              isFocusedEdge = true;
-            } else if (sComm !== targetComm && tComm !== targetComm) {
-              isDimmed = true;
-            }
-          }
-        }
-
-        const edgeDimFactor = 0.1;
-        if (isFocusedEdge) {
-          res.depth = 'topEdges';
-          res.opacity = Math.min(1, (data.opacity ?? 1) * 1.5);
-        } else if (isDimmed) {
-          res.depth = 'dimmedEdges';
-          res.opacity = (data.opacity ?? 1) * edgeDimFactor;
-        } else {
-          res.depth = 'edges';
-          res.opacity = data.opacity;
-        }
-
-        return res;
-      }
+      nodeReducer: createSigmaNodeReducer(styleRefs),
+      edgeReducer: createSigmaEdgeReducer(graph, styleRefs),
     });
 
     sigmaRef.current = sigmaInstance;
     onRendererReady?.(sigmaInstance);
 
-    // Streamlined Drag Lifecycle: beginDrag (reheat ONCE on start), movePinnedNode (move only), endDrag
-    sigmaInstance.on('nodeDragStart', (e) => {
-      if (beginDrag && graph.hasNode(e.node)) {
-        beginDrag(e.node, graph.getNodeAttribute(e.node, 'x'), graph.getNodeAttribute(e.node, 'y'));
-      }
-    });
-
-    sigmaInstance.on('nodeDrag', (e) => {
-      if (movePinnedNode && graph.hasNode(e.node)) {
-        movePinnedNode(e.node, graph.getNodeAttribute(e.node, 'x'), graph.getNodeAttribute(e.node, 'y'));
-      }
-    });
-
-    sigmaInstance.on('nodeDragEnd', (e) => {
-      if (endDrag) {
-        endDrag(e.node);
-      }
-    });
-
-    sigmaInstance.on('enterNode', (e) => {
-      const nodeKey = e.node;
-      const attrs = graph.getNodeAttributes(nodeKey);
-      const rawNode = attrs.rawNode;
-      const degree = graph.degree(nodeKey);
-      const dispIdx = displayMap[nodeKey] ?? -1;
-
-      const items: { label: string; value: string | number }[] = [];
-      if (rawNode?.type) items.push({ label: 'Type', value: rawNode.type });
-      items.push({ label: 'Community', value: dispIdx >= 0 ? dispIdx : 'N/A' });
-      items.push({ label: 'Abundance', value: rawNode?.abundance ?? 'N/A' });
-      items.push({ label: 'Degree', value: degree });
-
-      setTooltip({
-        x: e.event.x,
-        y: e.event.y,
-        title: rawNode?.name || rawNode?.label || nodeKey,
-        items
-      });
-    });
-
-    sigmaInstance.on('leaveNode', () => {
-      setTooltip(null);
-    });
-
-    sigmaInstance.on('clickNode', (e) => {
-      const nodeKey = e.node;
-      if (clickedNodeRef.current && clickedNodeRef.current.id === nodeKey) {
-        setClickedNode(null);
-        setClickedEdge(null);
-      } else {
-        const rawNode = graph.getNodeAttribute(nodeKey, 'rawNode');
-        setClickedNode(rawNode || { id: nodeKey, name: nodeKey, abundance: 0 });
-        setClickedDegree(graph.degree(nodeKey));
-        setClickedEdge(null);
-      }
-    });
-
-    sigmaInstance.on('doubleClickNode', (e) => {
-      e.preventSigmaDefault();
-      const nodeKey = e.node;
-      onElementDoubleClick && onElementDoubleClick(nodeKey, 'node');
-    });
-
-    sigmaInstance.on('clickStage', () => {
-      setClickedNode(null);
-      setClickedEdge(null);
-      onClearSelection && onClearSelection();
+    registerSigmaInteractions({
+      sigma: sigmaInstance,
+      graph,
+      displayMap,
+      clickedNodeRef,
+      beginDrag,
+      movePinnedNode,
+      endDrag,
+      onElementDoubleClick,
+      onClearSelection,
+      setClickedNode,
+      setClickedDegree,
+      setClickedEdge,
+      setTooltip,
     });
 
     return () => {
@@ -983,24 +503,32 @@ export default function SigmaGraph({
           nodes: graph.nodes(),
           edges: graph.edges(),
         },
+        // Arrowheads and straight/curved paths select different v4 primitive
+        // programs. They must be re-indexed rather than repainted in-place.
+        // Hidden nodes remain valid transparent slots in the node reducer, so
+        // element isolation does not reintroduce the old zero-index ghost.
+        skipIndexation: false,
       });
     }
   }, [
     clickedNode,
     clickedEdge,
     selectedElement,
+    focusRequest,
     searchQuery,
     hiddenLegendItems,
     isolatedLegendItem,
     selectedCommunityId,
     isolatedCommunityId,
     hoveredCommunityId,
+    showArrowheads,
     showNodeLabels,
     nodeOpacity,
     edgeOpacity,
     isDarkMode,
     displayMap,
     shouldRenderLabels,
+    graph,
   ]);
 
   const handleLegendClick = useCallback((e: React.MouseEvent, id: string, categoryIds: string[]) => {

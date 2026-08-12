@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useCallback, useState, useMemo } from 'react';
+import { useEffect, useCallback, useState, useMemo, useRef } from 'react';
 import Graph from 'graphology';
 import { RawNode, RawEdge } from '@/store/useStore';
 import { computeForceDirectedLayout } from '@/lib/layoutUtils';
@@ -22,6 +22,7 @@ interface UseSharedGraphProps {
   directed: boolean;
   bipartite: boolean;
   forceStrength?: number;
+  livePhysics?: boolean;
   isDarkMode?: boolean;
   getNodeColor: (node: any) => string;
   getNodeSize: (node: any) => number;
@@ -38,6 +39,7 @@ export function useSharedGraph({
   directed,
   bipartite,
   forceStrength = -100,
+  livePhysics = false,
   isDarkMode,
   getNodeColor,
   getNodeSize,
@@ -60,19 +62,22 @@ export function useSharedGraph({
     [directed, nodes, edges]
   );
   const [readyTopologyKey, setReadyTopologyKey] = useState<string | null>(null);
+  const [layoutRevision, setLayoutRevision] = useState(0);
+  const lastStaticForceStrengthRef = useRef<number | null>(null);
   const isReady = readyTopologyKey === topologyKey;
 
   // Apply offline D3 force-directed static layout to Graphology graph
   const applyD3StaticLayout = useCallback((graphInst: Graph) => {
     if (!graphInst) return;
     const posMap = computeForceDirectedLayout(nodes, edges, directed, forceStrength);
-    graphInst.forEachNode((nodeId: string) => {
+    graphInst.updateEachNodeAttributes((nodeId: string, attrs: any) => {
       const pos = posMap.get(nodeId);
-      if (pos) {
-        graphInst.setNodeAttribute(nodeId, 'x', pos.x);
-        graphInst.setNodeAttribute(nodeId, 'y', pos.y);
-      }
-    });
+      return pos ? { ...attrs, x: pos.x, y: pos.y } : attrs;
+    }, { attributes: ['x', 'y'] });
+    // Notify renderers after Graphology has received the complete position
+    // batch; deferring also avoids a cascading React update inside the graph
+    // synchronization effect that performs an initial static layout.
+    setTimeout(() => setLayoutRevision((revision) => revision + 1), 0);
   }, [nodes, edges, directed, forceStrength]);
 
   // Initialize or update Graphology graph structure & static D3 layout
@@ -140,6 +145,7 @@ export function useSharedGraph({
         const size = getEdgeSize(e);
         const isArrow = getShouldShowArrowhead(e);
         const path = directed ? 'curved' : 'straight';
+        const curvature = directed ? 0.3 : 0;
 
         if (!edgeKey) {
           try {
@@ -148,6 +154,7 @@ export function useSharedGraph({
               color,
               opacity,
               path,
+              curvature,
               head: isArrow ? 'arrow' : 'none',
               rawEdge: e,
             });
@@ -162,6 +169,7 @@ export function useSharedGraph({
             color,
             opacity,
             path,
+            curvature,
             head: isArrow ? 'arrow' : 'none',
             rawEdge: e,
           });
@@ -202,6 +210,31 @@ export function useSharedGraph({
     topologyKey,
   ]);
 
+  // Static graphs still respond to repulsion changes. Debouncing avoids
+  // repeatedly running the offline force solver while a live slider is being
+  // dragged. When Live Update is off, `forceStrength` does not change here
+  // until Apply Changes copies the pending filters into appliedFilters.
+  useEffect(() => {
+    if (!graph || !isReady) return;
+
+    const repulsion = typeof forceStrength === 'number' ? forceStrength : -100;
+    if (livePhysics) {
+      lastStaticForceStrengthRef.current = repulsion;
+      return;
+    }
+    if (lastStaticForceStrengthRef.current === null) {
+      lastStaticForceStrengthRef.current = repulsion;
+      return;
+    }
+    if (lastStaticForceStrengthRef.current === repulsion) return;
+
+    const timer = setTimeout(() => {
+      applyD3StaticLayout(graph);
+      lastStaticForceStrengthRef.current = repulsion;
+    }, 180);
+    return () => clearTimeout(timer);
+  }, [graph, isReady, livePhysics, forceStrength, applyD3StaticLayout]);
+
   const runRefreshLayout = useCallback(() => {
     if (graph) {
       applyD3StaticLayout(graph);
@@ -211,6 +244,7 @@ export function useSharedGraph({
   return {
     graph,
     isReady,
+    layoutRevision,
     runRefreshLayout,
   };
 }

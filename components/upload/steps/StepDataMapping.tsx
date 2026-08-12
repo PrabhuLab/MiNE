@@ -1,6 +1,5 @@
 import React from 'react';
 import { BaseStepProps, ColumnMappingState, ParsedDataState, TopologyType } from '../types';
-import { detectCustomAttributeType } from '@/lib/graphIO';
 
 interface StepDataMappingProps extends BaseStepProps {
   format: string;
@@ -31,55 +30,10 @@ export const StepDataMapping: React.FC<StepDataMappingProps> = ({
   const isFormatEdgeList = ['Edge List', 'Weighted Edge List', 'Directed Edge List', 'Directed Weighted Edge List', 'Bipartite Edge List', 'Directed Bipartite Edge List'].includes(format);
   const isFormatDualMatrix = format === 'Dual Adjacency Matrix';
   const isFormatAdjList = format === 'Adjacency List';
-  const nodeDataset = parsedData.jsonNodes || parsedData.nodes;
-  const nodeHeaders = nodeDataset?.[0] || [];
-  const consumedNodeFields = new Set([
-    mapping.nodeIdCol,
-    mapping.nodeLabelCol,
-    mapping.nodeTypeCol,
-    mapping.nodePartitionCol,
-    mapping.nodeCommunityCol,
-    mapping.nodeAbundCol,
-  ].filter(Boolean));
-  const customNodeOptions = nodeHeaders.filter((header: string) => !consumedNodeFields.has(header));
 
   const updateMappingField = (key: keyof ColumnMappingState, value: any) => {
     setMapping((prev) => ({ ...prev, [key]: value }));
   };
-
-  const selectCustomAttribute = (attribute: string) => {
-    const columnIndex = nodeHeaders.indexOf(attribute);
-    const detected = attribute && columnIndex >= 0
-      ? detectCustomAttributeType((nodeDataset || []).slice(1).map((row) => row[columnIndex]))
-      : 'nominal';
-    setMapping((previous) => ({
-      ...previous,
-      customNodeAttribute: attribute,
-      customNodeAttributeType: detected,
-    }));
-  };
-
-  const renderCustomMapping = () => !nodeDataset ? null : (
-    <div className={`grid grid-cols-2 gap-4 p-4 border mb-6 ${isDarkMode ? 'border-[#333] bg-[#222]/30' : 'border-[#141414] bg-[#E4E3E0]/30'}`}>
-      <div>
-        <label className="block text-[10px] font-bold uppercase tracking-widest mb-2">Custom</label>
-        <select value={mapping.customNodeAttribute} onChange={(event) => selectCustomAttribute(event.target.value)} className={`w-full border px-3 py-2 text-[10px] font-mono ${isDarkMode ? 'border-[#333] bg-[#1a1a1a]' : 'border-[#141414] bg-white'}`}>
-          <option value="">-- Select an unused node attribute --</option>
-          {customNodeOptions.map((attribute: string) => <option key={attribute} value={attribute}>{attribute}</option>)}
-        </select>
-      </div>
-      <div>
-        <label className="block text-[10px] font-bold uppercase tracking-widest mb-2">Variable Type</label>
-        <select disabled={!mapping.customNodeAttribute} value={mapping.customNodeAttributeType} onChange={(event) => updateMappingField('customNodeAttributeType', event.target.value)} className={`w-full border px-3 py-2 text-[10px] font-mono disabled:opacity-40 ${isDarkMode ? 'border-[#333] bg-[#1a1a1a]' : 'border-[#141414] bg-white'}`}>
-          <option value="binary">Binary / Dichotomous</option>
-          <option value="discrete">Discrete Numeric</option>
-          <option value="continuous">Continuous Numeric</option>
-          <option value="nominal">Nominal</option>
-          <option value="ordinal">Ordinal (manually confirmed)</option>
-        </select>
-      </div>
-    </div>
-  );
 
   const renderDropdown = (label: string, value: string, key: keyof ColumnMappingState, options: any[]) => (
     <div>
@@ -234,7 +188,7 @@ export const StepDataMapping: React.FC<StepDataMappingProps> = ({
               {renderDropdown('Community Col', mapping.nodeCommunityCol, 'nodeCommunityCol', parsedData.nodes[0] || [])}
               {renderDropdown('Size/Abundance Col', mapping.nodeAbundCol, 'nodeAbundCol', parsedData.nodes[0] || [])}
             </div>
-            {renderCustomMapping()}
+            <p className="text-[10px] font-mono opacity-60">All unused node columns will be preserved automatically as custom attributes.</p>
           </div>
         )}
 
@@ -299,7 +253,7 @@ export const StepDataMapping: React.FC<StepDataMappingProps> = ({
               {renderDropdown('Community Property', mapping.nodeCommunityCol, 'nodeCommunityCol', parsedData.jsonNodes[0] || [])}
               {renderDropdown('Size/Abundance Property', mapping.nodeAbundCol, 'nodeAbundCol', parsedData.jsonNodes[0] || [])}
             </div>
-            {renderCustomMapping()}
+            <p className="text-[10px] font-mono opacity-60">All undeclared JSON properties are preserved automatically as custom attributes.</p>
           </div>
         )}
 

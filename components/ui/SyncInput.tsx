@@ -33,7 +33,7 @@ export const SyncInput = ({ value, onChange, step, className }: any) => {
   );
 };
 
-export const SyncTextInput = ({ value, onChange, className, placeholder, list, options }: any) => {
+export const SyncTextInput = ({ value, onChange, className, placeholder, list, options, live = false }: any) => {
   const [localVal, setLocalVal] = useState(value);
 
   useEffect(() => {
@@ -57,7 +57,10 @@ export const SyncTextInput = ({ value, onChange, className, placeholder, list, o
         type="text"
         className={`text-inherit ${className}`}
         value={localVal ?? ''}
-        onChange={e => setLocalVal(e.target.value)}
+        onChange={e => {
+          setLocalVal(e.target.value);
+          if (live) onChange(e.target.value);
+        }}
         onBlur={commit}
         onKeyDown={e => {
           if (e.key === 'Enter') {

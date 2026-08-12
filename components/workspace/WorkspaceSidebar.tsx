@@ -16,8 +16,6 @@ interface WorkspaceSidebarProps {
   setMetricsToRun: React.Dispatch<React.SetStateAction<any>>;
   runSelectedMetrics: () => void;
   metricsLoading: boolean;
-  maxRelWeight: number;
-  maxRawWeight: number;
   hasType: boolean;
   hasAbundance: boolean;
   hasSecondaryWeight: boolean;
@@ -39,8 +37,6 @@ export const WorkspaceSidebar = ({
   setMetricsToRun,
   runSelectedMetrics,
   metricsLoading,
-  maxRelWeight,
-  maxRawWeight,
   hasType,
   hasAbundance,
   hasSecondaryWeight,
@@ -115,8 +111,6 @@ export const WorkspaceSidebar = ({
         hasType={hasType}
         hasAbundance={hasAbundance}
         hasSecondaryWeight={hasSecondaryWeight}
-        maxRelWeight={maxRelWeight}
-        maxRawWeight={maxRawWeight}
       />
          
       <div className={`h-px w-full my-4 ${isDarkMode ? 'bg-[#333]' : 'bg-[#ccc]'}`}></div>
@@ -131,8 +125,6 @@ export const WorkspaceSidebar = ({
       <div className={`h-px w-full my-4 ${isDarkMode ? 'bg-[#333]' : 'bg-[#ccc]'}`}></div>
 
       <FilterControls 
-        maxRelWeight={maxRelWeight}
-        maxRawWeight={maxRawWeight}
         hasSecondaryWeight={hasSecondaryWeight}
         validNodes={validNodes}
         rawNodes={rawNodes}

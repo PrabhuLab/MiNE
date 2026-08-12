@@ -333,6 +333,11 @@ export function constructGraph(
             if (existingEdge) {
               if (wrIdx !== -1 && !isNaN(parseFloat(row[wrIdx]))) existingEdge.weight_raw = parseFloat(row[wrIdx]);
               if (wsIdx !== -1 && !isNaN(parseFloat(row[wsIdx]))) existingEdge.weight_secondary = parseFloat(row[wsIdx]);
+              for (let j = 0; j < eHeaders.length; j++) {
+                if (j !== sIdx && j !== tIdx && j !== wrIdx && j !== wsIdx && row[j] !== undefined && row[j] !== '') {
+                  existingEdge[eHeaders[j]] = row[j];
+                }
+              }
             }
           } else {
             const wRaw = wrIdx !== -1 ? parseFloat(row[wrIdx]) : 1;
@@ -340,7 +345,13 @@ export function constructGraph(
             const finalWR = !isNaN(wRaw) ? wRaw : 1;
             const finalWS = !isNaN(wSec) ? wSec : finalWR;
             edgeSet.add(edgeId);
-            edges.push({ source: sId, target: tId, weight_raw: finalWR, weight_secondary: finalWS });
+            const extraEdgeProps: Record<string, any> = {};
+            for (let j = 0; j < eHeaders.length; j++) {
+              if (j !== sIdx && j !== tIdx && j !== wrIdx && j !== wsIdx && row[j] !== undefined && row[j] !== '') {
+                extraEdgeProps[eHeaders[j]] = row[j];
+              }
+            }
+            edges.push({ source: sId, target: tId, weight_raw: finalWR, weight_secondary: finalWS, ...extraEdgeProps });
             if (!nodesMap.has(sId)) nodesMap.set(sId, { id: sId, name: sId, abundance: 10 });
             if (!nodesMap.has(tId)) nodesMap.set(tId, { id: tId, name: tId, abundance: 10 });
           }

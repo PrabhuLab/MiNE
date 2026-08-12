@@ -1,100 +1,43 @@
-import Graph, { UndirectedGraph } from 'graphology';
-import type { SerializedGraph } from 'graphology-types';
+import Graph from 'graphology';
 import { parse as parseGraphML } from 'graphology-graphml';
-import { parse as parseGEXF, write as writeGEXF } from 'graphology-gexf';
-import clusters from 'graphology-generators/random/clusters';
+import { parse as parseGEXF } from 'graphology-gexf';
 import { isBipartiteBy } from 'graphology-bipartite';
 import JSZip from 'jszip';
 import Papa from 'papaparse';
 import type {
-  CustomAttributeType,
-  CustomAttributeMetadata,
   ImportedMetricsBundle,
   RawEdge,
   RawNode,
-  WorkspaceFilters,
 } from '@/store/useStore';
+import { cleanAttributes, meaningful, numeric } from '@/services/graphIO/attributes';
+import {
+  EMPTY_METRICS,
+  GRAPH_IO_VERSION,
+  NETWORK_WORKSPACE_FORMAT,
+  WORKSPACE_SETTINGS_FORMAT,
+  type ParsedNetwork,
+} from '@/services/graphIO/types';
 
-export const NETWORK_WORKSPACE_FORMAT = 'network-workspace' as const;
-export const WORKSPACE_SETTINGS_FORMAT = 'workspace-settings' as const;
-export const GRAPH_IO_VERSION = 1 as const;
-
-export interface WorkspaceSettingsDocument {
-  format: typeof WORKSPACE_SETTINGS_FORMAT;
-  version: typeof GRAPH_IO_VERSION;
-  projectName: string;
-  rendererEngine: 'auto' | 'd3' | 'sigma';
-  graphMode: { directed: boolean; bipartite: boolean; weighted: boolean };
-  filters: WorkspaceFilters;
-  appearance: {
-    isDarkMode: boolean;
-    showNodeLabels: boolean;
-    showArrowheads: boolean;
-    communityMap: Record<string, string>;
-    customAttributes?: CustomAttributeMetadata[];
-  };
-  visibility: {
-    hiddenLegendItems: string[];
-    isolatedLegendItem: string | null;
-    isolatedCommunityId: string | null;
-  };
-  calculations: { selected: Record<string, boolean> };
-  layout: { livePhysics: boolean; forceStrength: number };
-}
-
-export interface AllInOneDocument {
-  format: typeof NETWORK_WORKSPACE_FORMAT;
-  version: typeof GRAPH_IO_VERSION;
-  graph: SerializedGraph;
-  metrics: ImportedMetricsBundle;
-  workspace: WorkspaceSettingsDocument;
-}
-
-export interface ParsedNetwork {
-  graph: Graph;
-  directed: boolean;
-  bipartite: boolean;
-  weighted: boolean;
-  metrics: ImportedMetricsBundle | null;
-  workspace: WorkspaceSettingsDocument | null;
-  projectName?: string;
-}
-
-const EMPTY_METRICS: ImportedMetricsBundle = {
-  graph: {},
-  nodes: {},
-  edges: {},
-  metadata: {},
-};
-
-function meaningful(value: unknown): boolean {
-  return value !== undefined && value !== null && String(value).trim() !== '';
-}
-
-function numeric(value: unknown, fallback: number): number {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function serializableValue(value: any): any {
-  if (value === undefined || typeof value === 'function') return undefined;
-  if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) return value;
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
-}
-
-function cleanAttributes(attributes: Record<string, any>): Record<string, any> {
-  const result: Record<string, any> = {};
-  Object.entries(attributes || {}).forEach(([key, value]) => {
-    if (key === 'rawNode' || key === 'rawEdge') return;
-    const cleaned = serializableValue(value);
-    if (cleaned !== undefined) result[key] = cleaned;
-  });
-  return result;
-}
+export {
+  GRAPH_IO_VERSION,
+  NETWORK_WORKSPACE_FORMAT,
+  WORKSPACE_SETTINGS_FORMAT,
+} from '@/services/graphIO/types';
+export type {
+  AllInOneDocument,
+  ParsedNetwork,
+  WorkspaceSettingsDocument,
+} from '@/services/graphIO/types';
+export { writeGraphML } from '@/services/graphIO/graphml';
+export { writeGexf } from '@/services/graphIO/gexf';
+export { createMetricsBundle } from '@/services/graphIO/metrics';
+export {
+  availableCustomNodeAttributes,
+  availableNumericCustomEdgeAttributes,
+  detectCustomAttributeType,
+  inferCustomNodeAttributes,
+} from '@/services/graphIO/customAttributes';
+export { buildAllInOne, createRandomClusterAllInOne } from '@/services/graphIO/allInOne';
 
 export function graphFromRaw(
   nodes: RawNode[],
@@ -144,8 +87,16 @@ export function graphFromRaw(
     const attributes = cleanAttributes({ ...edge });
     delete attributes.source;
     delete attributes.target;
-    attributes.weight_raw = numeric(edge.weight_raw, 1);
-    attributes.weight_secondary = numeric(edge.weight_secondary, attributes.weight_raw);
+    const rawWeight = edge.weight_raw ?? edge.weight ?? edge.raw_weight ?? edge.absolute ?? edge.count;
+    const secondaryWeight = edge.weight_secondary
+      ?? edge.secondary_weight
+      ?? edge.conditional
+      ?? edge.percentage
+      ?? edge.percent
+      ?? edge.pct
+      ?? edge.log1p;
+    attributes.weight_raw = numeric(rawWeight, 1);
+    attributes.weight_secondary = numeric(secondaryWeight, attributes.weight_raw);
     attributes.weight = attributes.weight_raw;
     graph.addEdgeWithKey(String(edge.key ?? `e${index}`), source, target, attributes);
   });
@@ -348,100 +299,6 @@ export async function parseNetworkFiles(files: File[]): Promise<ParsedNetwork> {
   return parseJSONDocument(JSON.parse(text));
 }
 
-export function createMetricsBundle(
-  networkMetrics: any[],
-  nodeMetrics: any[],
-  edgeMetrics: any[],
-  graphMetrics: Record<string, any>,
-  metadata: Record<string, any>,
-): ImportedMetricsBundle {
-  const nodes: Record<string, Record<string, any>> = {};
-  networkMetrics.forEach((entry) => { if (entry?.id !== undefined) nodes[String(entry.id)] = { ...entry }; });
-  nodeMetrics.forEach((entry) => {
-    if (entry?.id === undefined) return;
-    nodes[String(entry.id)] = { ...(nodes[String(entry.id)] || {}), ...entry };
-  });
-  const edges: Record<string, Record<string, any>> = {};
-  edgeMetrics.forEach((entry, index) => {
-    const key = String(entry.key ?? (entry.source !== undefined ? `${entry.source}->${entry.target}` : index));
-    edges[key] = { ...entry };
-  });
-  const calculatedGraphMetrics = Object.fromEntries(
-    Object.entries(graphMetrics).filter(([, value]) => value !== null && value !== undefined && !(typeof value === 'number' && !Number.isFinite(value))),
-  );
-  return { graph: calculatedGraphMetrics, nodes, edges, metadata: { ...metadata } };
-}
-
-export function buildAllInOne(graph: Graph, metrics: ImportedMetricsBundle, workspace: WorkspaceSettingsDocument): AllInOneDocument {
-  return { format: NETWORK_WORKSPACE_FORMAT, version: GRAPH_IO_VERSION, graph: graph.export(), metrics, workspace };
-}
-
-function xmlEscape(value: unknown): string {
-  return String(value ?? '').replace(/[<>&'"]/g, (char) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[char]!));
-}
-
-function graphMlType(values: any[]): string {
-  const meaningfulValues = values.filter(meaningful);
-  if (meaningfulValues.length && meaningfulValues.every((value) => typeof value === 'boolean')) return 'boolean';
-  if (meaningfulValues.length && meaningfulValues.every((value) => Number.isInteger(Number(value)))) return 'long';
-  if (meaningfulValues.length && meaningfulValues.every((value) => Number.isFinite(Number(value)))) return 'double';
-  return 'string';
-}
-
-export function writeGraphML(graph: Graph): string {
-  const nodeKeys = new Set<string>();
-  const edgeKeys = new Set<string>();
-  const graphKeys = new Set<string>(Object.keys(graph.getAttributes()));
-  graph.forEachNode((_node, attrs) => Object.keys(attrs).forEach((key) => nodeKeys.add(key)));
-  graph.forEachEdge((_edge, attrs) => Object.keys(attrs).forEach((key) => edgeKeys.add(key)));
-  const definitions: string[] = [];
-  const nodeIds = new Map<string, string>();
-  const edgeIds = new Map<string, string>();
-  const graphIds = new Map<string, string>();
-  Array.from(nodeKeys).sort().forEach((key, index) => {
-    const id = `n${index}`; nodeIds.set(key, id);
-    definitions.push(`<key id="${id}" for="node" attr.name="${xmlEscape(key)}" attr.type="${graphMlType(graph.mapNodes((_n, attrs) => attrs[key]))}"/>`);
-  });
-  Array.from(edgeKeys).sort().forEach((key, index) => {
-    const id = `e${index}`; edgeIds.set(key, id);
-    definitions.push(`<key id="${id}" for="edge" attr.name="${xmlEscape(key)}" attr.type="${graphMlType(graph.mapEdges((_e, attrs) => attrs[key]))}"/>`);
-  });
-  Array.from(graphKeys).sort().forEach((key, index) => {
-    const id = `g${index}`; graphIds.set(key, id);
-    definitions.push(`<key id="${id}" for="graph" attr.name="${xmlEscape(key)}" attr.type="${graphMlType([graph.getAttribute(key)])}"/>`);
-  });
-  const dataXml = (attrs: Record<string, any>, ids: Map<string, string>) => Object.entries(attrs)
-    .filter(([key, value]) => ids.has(key) && meaningful(value))
-    .map(([key, value]) => `<data key="${ids.get(key)}">${xmlEscape(serializableValue(value))}</data>`).join('');
-  const nodes = graph.mapNodes((node, attrs) => `<node id="${xmlEscape(node)}">${dataXml(attrs, nodeIds)}</node>`).join('');
-  const edges = graph.mapEdges((edge, attrs, source, target) => `<edge id="${xmlEscape(edge)}" source="${xmlEscape(source)}" target="${xmlEscape(target)}">${dataXml(attrs, edgeIds)}</edge>`).join('');
-  return `<?xml version="1.0" encoding="UTF-8"?><graphml xmlns="http://graphml.graphdrawing.org/xmlns">${definitions.join('')}<graph id="G" edgedefault="${graph.type === 'directed' ? 'directed' : 'undirected'}">${dataXml(graph.getAttributes(), graphIds)}${nodes}${edges}</graph></graphml>`;
-}
-
-export function writeGexf(graph: Graph): string {
-  return writeGEXF(graph, {
-    pretty: true,
-    version: '1.3',
-    formatNode: (_key: string, attrs: Record<string, any>) => ({
-      label: String(attrs.label ?? attrs.name ?? ''),
-      attributes: cleanAttributes(attrs),
-      viz: {
-        color: attrs.color,
-        x: Number.isFinite(Number(attrs.x)) ? Number(attrs.x) : undefined,
-        y: Number.isFinite(Number(attrs.y)) ? Number(attrs.y) : undefined,
-        size: Number.isFinite(Number(attrs.size)) ? Number(attrs.size) : undefined,
-        shape: attrs.shape,
-      },
-    }),
-    formatEdge: (_key: string, attrs: Record<string, any>) => ({
-      label: attrs.label,
-      attributes: cleanAttributes(attrs),
-      weight: numeric(attrs.weight_raw ?? attrs.weight, 1),
-      viz: { color: attrs.color, thickness: attrs.size },
-    }),
-  } as any);
-}
-
 export async function buildCsvZip(graph: Graph, metrics: ImportedMetricsBundle): Promise<Blob> {
   const raw = graphToRaw(graph);
   const zip = new JSZip();
@@ -461,44 +318,4 @@ export async function buildCsvZip(graph: Graph, metrics: ImportedMetricsBundle):
     metrics: { graph: metrics.graph, metadata: metrics.metadata },
   }, null, 2));
   return zip.generateAsync({ type: 'blob' });
-}
-
-export function detectCustomAttributeType(values: unknown[]): CustomAttributeType {
-  const distinct = Array.from(new Set(values.filter(meaningful).map((value) => typeof value === 'string' ? value.trim() : value)));
-  if (distinct.length === 2) return 'binary';
-  if (distinct.length && distinct.every((value) => Number.isFinite(Number(value)))) {
-    return distinct.every((value) => Number.isInteger(Number(value))) ? 'discrete' : 'continuous';
-  }
-  return 'nominal';
-}
-
-export function availableCustomNodeAttributes(nodes: RawNode[]): string[] {
-  const consumed = new Set([
-    'id', 'name', 'label', 'source', 'target', 'weight', 'weight_raw', 'weight_secondary',
-    'partition', 'partitionIndex', 'type', 'group', 'bipartite', 'set', 'community', 'abundance', 'x', 'y',
-    'louvain', 'deltaQ', 'k_i_in', 'nodeDegree', 'communityDegree', 'degree', 'inDegree', 'outDegree',
-    'degreeCentrality', 'inDegreeCentrality', 'outDegreeCentrality', 'betweenness', 'closeness', 'clustering',
-    'pagerank', 'eigenvector', 'eccentricity', 'weightedDegree',
-  ]);
-  const keys = new Set<string>();
-  nodes.forEach((node) => Object.keys(node).forEach((key) => { if (!consumed.has(key)) keys.add(key); }));
-  return Array.from(keys).sort();
-}
-
-export function createRandomClusterAllInOne(
-  options: { order: number; size: number; clusters: number; clusterDensity: number },
-  workspace: WorkspaceSettingsDocument,
-): AllInOneDocument {
-  const graph = clusters(UndirectedGraph as any, options) as Graph;
-  graph.forEachNode((node, attrs) => graph.mergeNodeAttributes(node, {
-    label: `Node ${node}`,
-    name: `Node ${node}`,
-    abundance: 10,
-    community: attrs.cluster,
-  }));
-  graph.forEachEdge((edge) => graph.mergeEdgeAttributes(edge, { weight: 1, weight_raw: 1, weight_secondary: 1 }));
-  graph.setAttribute('directed', false);
-  graph.setAttribute('bipartite', false);
-  graph.setAttribute('weighted', false);
-  return buildAllInOne(graph, { ...EMPTY_METRICS }, { ...workspace, graphMode: { directed: false, bipartite: false, weighted: false } });
 }

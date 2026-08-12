@@ -29,23 +29,60 @@ export function computeActiveNetwork(rawNodes: any[], rawEdges: any[], appliedFi
       .filter(Boolean)
   );
 
+  const degreeByNode = new Map<string, { degree: number; inDegree: number; outDegree: number }>();
+  const ensureDegree = (id: unknown) => {
+    const key = String(id);
+    if (!degreeByNode.has(key)) degreeByNode.set(key, { degree: 0, inDegree: 0, outDegree: 0 });
+    return degreeByNode.get(key)!;
+  };
+  (rawNodes || []).forEach((node) => ensureDegree(node.id));
+  (rawEdges || []).forEach((edge) => {
+    const source = ensureDegree(edge.source);
+    const target = ensureDegree(edge.target);
+    source.degree += 1;
+    source.outDegree += 1;
+    target.degree += 1;
+    target.inDegree += 1;
+  });
+
+  const nodeFilters = (appliedFilters.weightFilters || []).filter((filter: any) => String(filter.type).startsWith('node:'));
+  const edgeFilters = (appliedFilters.weightFilters || []).filter((filter: any) => !String(filter.type).startsWith('node:'));
+  const customNodeAttribute = appliedFilters.customNodeAttribute;
+  const nodeFilterValue = (node: any, type: string) => {
+    const metric = type.slice('node:'.length);
+    const degrees = degreeByNode.get(String(node.id));
+    if (metric === 'custom') return customNodeAttribute ? node[customNodeAttribute] : undefined;
+    if (metric === 'degree') return degrees?.degree;
+    if (metric === 'inDegree') return degrees?.inDegree;
+    if (metric === 'outDegree') return degrees?.outDegree;
+    return node[metric];
+  };
+
+  const eligibleNodes = (rawNodes || []).filter(n => {
+    const nodeIdStr = String(n.id);
+    if (removedSet.has(nodeIdStr)) return false;
+    return nodeFilters.every((filter: any) => {
+      const value = Number(nodeFilterValue(n, String(filter.type)));
+      return !Number.isFinite(value) || value >= Number(filter.cutoff);
+    });
+  });
+  const eligibleNodeIds = new Set(eligibleNodes.map(n => String(n.id)));
+
   const filteredEdges = (rawEdges || []).filter(e => {
-    const passesWeightFilters = (appliedFilters.weightFilters || []).every((filter: any) => {
-      const val = e[filter.type];
-      if (val === undefined || val === null) return true;
-      return val >= filter.cutoff;
+    const passesWeightFilters = edgeFilters.every((filter: any) => {
+      const type = String(filter.type);
+      const attribute = type.startsWith('edge:') ? type.slice('edge:'.length) : type;
+      const value = Number(e[attribute]);
+      if (!Number.isFinite(value)) return true;
+      return value >= Number(filter.cutoff);
     });
 
     return passesWeightFilters &&
       !removedSet.has(String(e.source)) &&
-      !removedSet.has(String(e.target));
+      !removedSet.has(String(e.target)) &&
+      eligibleNodeIds.has(String(e.source)) &&
+      eligibleNodeIds.has(String(e.target));
   });
-
-  const eligibleNodes = (rawNodes || []).filter(n => {
-    const nodeIdStr = String(n.id);
-    return !removedSet.has(nodeIdStr);
-  });
-  const eligibleNodeIds = new Set(eligibleNodes.map(n => String(n.id)));
   const strictlyValidEdges = filteredEdges.filter(e =>
     eligibleNodeIds.has(String(e.source)) && eligibleNodeIds.has(String(e.target))
   );

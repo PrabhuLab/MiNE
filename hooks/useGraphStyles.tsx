@@ -4,16 +4,9 @@ import React, { useMemo, useCallback } from 'react';
 import * as d3 from 'd3';
 import { RawNode, RawEdge } from '@/store/useStore';
 import { getCommunityDisplayMap, getCommunityColor } from '@/lib/communityUtils';
-import { ElementLegendItem } from '@/components/graph/GraphLegend';
 import { useStore } from '@/store/useStore';
-
-export interface LegendMetricScale {
-  title: string;
-  min: number;
-  max: number;
-  ticks: number[];
-  scale: (val: number) => string;
-}
+import { useGraphColorScales } from '@/hooks/graphStyles/useGraphColorScales';
+export type { LegendMetricScale } from '@/services/graphStyles/types';
 
 interface UseGraphStylesProps {
   nodes: RawNode[];
@@ -72,18 +65,23 @@ export function useGraphStyles({
   const customAttributes = useStore((state) => state.customAttributes);
   const selectedCustomMetadata = customAttributes.find((attribute) => attribute.scope === 'node' && attribute.name === customNodeAttribute);
   const customIsNumeric = Boolean(selectedCustomMetadata && ['discrete', 'continuous'].includes(selectedCustomMetadata.selectedType));
-  const customNumericDomain = useMemo(() => {
-    if (!customIsNumeric || !customNodeAttribute) return [0, 1] as [number, number];
-    const values = nodes.map((node) => Number(node[customNodeAttribute])).filter(Number.isFinite);
-    if (!values.length) return [0, 1] as [number, number];
-    const min = Math.min(...values);
-    const max = Math.max(...values);
-    return [min, max === min ? min + 1 : max] as [number, number];
-  }, [customIsNumeric, customNodeAttribute, nodes]);
-  const customNumericColorScale = useMemo(
-    () => d3.scaleSequential(d3.interpolateViridis).domain(customNumericDomain),
-    [customNumericDomain],
-  );
+  const {
+    customNumericColorScale,
+    eigenColorScale,
+    prColorScale,
+    betweennessColorScale,
+    closenessColorScale,
+    clusteringColorScale,
+    degreeCentColorScale,
+    abundanceColorScale,
+    legendMetricScale,
+  } = useGraphColorScales({
+    nodes,
+    networkMetrics,
+    nodeColorBase,
+    customNodeAttribute,
+    customIsNumeric,
+  });
   const netMap = useMemo(
     () => new Map((networkMetrics || []).map((m: any) => [m.id, m])),
     [networkMetrics]
@@ -109,6 +107,7 @@ export function useGraphStyles({
   }, [communityDisplay.rawToDisplayMap, communityDisplay.displayToRawMap]);
 
   const customColorMap = communityColorMap;
+  const nodeById = useMemo(() => new Map(nodes.map((node) => [String(node.id), node])), [nodes]);
 
   const typeLabels = useMemo(() => {
     return Array.from(new Set(nodes.map((n) => n.type).filter(Boolean))) as string[];
@@ -191,252 +190,6 @@ export function useGraphStyles({
       clickedEdgeRef,
     ]
   );
-
-  const elementLegendItems: ElementLegendItem[] = useMemo(
-    () => [
-      {
-        id: 'element:standard',
-        label: 'Standard Nodes',
-        Icon: () => (
-          <div
-            className={`w-3 h-3 rounded-full border ${
-              isDarkMode ? 'border-[#E4E3E0] bg-transparent' : 'border-[#141414] bg-transparent'
-            }`}
-          />
-        ),
-      },
-      ...(bipartite
-        ? [
-            {
-              id: 'element:bipartite',
-              label: 'Bipartite Nodes',
-              Icon: () => (
-                <div
-                  className={`w-3 h-3 border ${
-                    isDarkMode
-                      ? 'border-[#E4E3E0] bg-transparent'
-                      : 'border-[#141414] bg-transparent'
-                  }`}
-                />
-              ),
-            },
-          ]
-        : []),
-      {
-        id: 'element:edges',
-        label: directed ? 'Directed Edges' : 'Undirected Edges',
-        Icon: () => (
-          <div className="w-3 relative flex items-center justify-center">
-            <div className={`w-full h-[1px] ${isDarkMode ? 'bg-[#bbb]' : 'bg-[#141414]'}`} />
-            {directed && (
-              <div
-                className={`absolute right-0 translate-x-[2px] w-0 h-0 border-y-[3px] border-y-transparent border-l-[4px] ${
-                  isDarkMode ? 'border-l-[#bbb]' : 'border-l-[#141414]'
-                } opacity-80`}
-              />
-            )}
-          </div>
-        ),
-      },
-    ],
-    [bipartite, directed, isDarkMode]
-  );
-
-  const elementLegendIds = useMemo(() => elementLegendItems.map((item) => item.id), [
-    elementLegendItems,
-  ]);
-
-  // Continuous Color Metric Domains and Scales
-  const maxEigen = useMemo(
-    () => d3.max(networkMetrics, (d: any) => parseFloat(d.eigenvector)) || 1,
-    [networkMetrics]
-  );
-  const minEigen = useMemo(
-    () => d3.min(networkMetrics, (d: any) => parseFloat(d.eigenvector)) || 0,
-    [networkMetrics]
-  );
-  const maxPageRank = useMemo(
-    () => d3.max(networkMetrics, (d: any) => parseFloat(d.pagerank)) || 1,
-    [networkMetrics]
-  );
-  const minPageRank = useMemo(
-    () => d3.min(networkMetrics, (d: any) => parseFloat(d.pagerank)) || 0,
-    [networkMetrics]
-  );
-  const maxBetweenness = useMemo(
-    () => d3.max(networkMetrics, (d: any) => parseFloat(d.betweenness)) || 1,
-    [networkMetrics]
-  );
-  const maxCloseness = useMemo(
-    () => d3.max(networkMetrics, (d: any) => parseFloat(d.closeness)) || 1,
-    [networkMetrics]
-  );
-  const maxClustering = useMemo(
-    () => d3.max(networkMetrics, (d: any) => parseFloat(d.clustering)) || 1,
-    [networkMetrics]
-  );
-  const maxDegreeCent = useMemo(
-    () =>
-      d3.max(networkMetrics, (d: any) =>
-        parseFloat(d.degreeCentrality || d.inDegreeCentrality || d.degree || 0)
-      ) || 1,
-    [networkMetrics]
-  );
-  const maxAbundance = useMemo(
-    () => d3.max(nodes, (d: any) => parseFloat(d.abundance || 0)) || 1,
-    [nodes]
-  );
-  const minAbundance = useMemo(
-    () => d3.min(nodes, (d: any) => parseFloat(d.abundance || 0)) || 0,
-    [nodes]
-  );
-
-  const eigenColorScale = useMemo(
-    () => d3.scaleSequential(d3.interpolatePurples).domain([minEigen, maxEigen]),
-    [minEigen, maxEigen]
-  );
-  const prColorScale = useMemo(
-    () => d3.scaleSequential(d3.interpolateGreens).domain([minPageRank, maxPageRank]),
-    [minPageRank, maxPageRank]
-  );
-  const betweennessColorScale = useMemo(
-    () => d3.scaleSequential(d3.interpolateOranges).domain([0, maxBetweenness]),
-    [maxBetweenness]
-  );
-  const closenessColorScale = useMemo(
-    () => d3.scaleSequential(d3.interpolateBlues).domain([0, maxCloseness]),
-    [maxCloseness]
-  );
-  const clusteringColorScale = useMemo(
-    () => d3.scaleSequential(d3.interpolateReds).domain([0, maxClustering]),
-    [maxClustering]
-  );
-  const degreeCentColorScale = useMemo(
-    () => d3.scaleSequential(d3.interpolateYlOrBr).domain([0, maxDegreeCent]),
-    [maxDegreeCent]
-  );
-  const abundanceColorScale = useMemo(
-    () => d3.scaleSequential(d3.interpolateViridis).domain([minAbundance, maxAbundance]),
-    [minAbundance, maxAbundance]
-  );
-
-  const legendMetricScale: LegendMetricScale | null = useMemo(() => {
-    if (nodeColorBase === 'custom' && customNodeAttribute && customIsNumeric) {
-      const [min, max] = customNumericDomain;
-      return {
-        title: customNodeAttribute,
-        min,
-        max,
-        ticks: [min, (min + max) / 2, max],
-        scale: customNumericColorScale,
-      };
-    }
-    if (nodeColorBase === 'abundance') {
-      return {
-        title: 'Abundance',
-        min: minAbundance,
-        max: maxAbundance,
-        ticks: [minAbundance, (minAbundance + maxAbundance) / 2, maxAbundance],
-        scale: abundanceColorScale,
-      };
-    }
-    if (nodeColorBase === 'eigenvector') {
-      return {
-        title: 'Eigenvector Centrality',
-        min: minEigen,
-        max: maxEigen,
-        ticks: [minEigen, (minEigen + maxEigen) / 2, maxEigen],
-        scale: eigenColorScale,
-      };
-    }
-    if (nodeColorBase === 'pagerank') {
-      return {
-        title: 'PageRank',
-        min: minPageRank,
-        max: maxPageRank,
-        ticks: [minPageRank, (minPageRank + maxPageRank) / 2, maxPageRank],
-        scale: prColorScale,
-      };
-    }
-    if (nodeColorBase === 'betweenness') {
-      return {
-        title: 'Betweenness Centrality',
-        min: 0,
-        max: maxBetweenness,
-        ticks: [0, maxBetweenness / 2, maxBetweenness],
-        scale: betweennessColorScale,
-      };
-    }
-    if (nodeColorBase === 'closeness') {
-      return {
-        title: 'Closeness Centrality',
-        min: 0,
-        max: maxCloseness,
-        ticks: [0, maxCloseness / 2, maxCloseness],
-        scale: closenessColorScale,
-      };
-    }
-    if (nodeColorBase === 'clustering') {
-      return {
-        title: 'Clustering Coefficient',
-        min: 0,
-        max: maxClustering,
-        ticks: [0, maxClustering / 2, maxClustering],
-        scale: clusteringColorScale,
-      };
-    }
-    if (nodeColorBase === 'degreeCentrality' || nodeColorBase === 'degree') {
-      return {
-        title: 'Degree Centrality',
-        min: 0,
-        max: maxDegreeCent,
-        ticks: [0, maxDegreeCent / 2, maxDegreeCent],
-        scale: degreeCentColorScale,
-      };
-    }
-    if (nodeColorBase === 'inDegreeCentrality') {
-      return {
-        title: 'In-Degree Centrality',
-        min: 0,
-        max: maxDegreeCent,
-        ticks: [0, maxDegreeCent / 2, maxDegreeCent],
-        scale: degreeCentColorScale,
-      };
-    }
-    if (nodeColorBase === 'outDegreeCentrality') {
-      return {
-        title: 'Out-Degree Centrality',
-        min: 0,
-        max: maxDegreeCent,
-        ticks: [0, maxDegreeCent / 2, maxDegreeCent],
-        scale: degreeCentColorScale,
-      };
-    }
-    return null;
-  }, [
-    nodeColorBase,
-    customNodeAttribute,
-    customIsNumeric,
-    customNumericDomain,
-    customNumericColorScale,
-    minAbundance,
-    maxAbundance,
-    abundanceColorScale,
-    minEigen,
-    maxEigen,
-    eigenColorScale,
-    minPageRank,
-    maxPageRank,
-    prColorScale,
-    maxBetweenness,
-    betweennessColorScale,
-    maxCloseness,
-    closenessColorScale,
-    maxClustering,
-    clusteringColorScale,
-    maxDegreeCent,
-    degreeCentColorScale,
-  ]);
 
   const legendCategories = useMemo(() => {
     if (
@@ -599,6 +352,49 @@ export function useGraphStyles({
         .domain([0, maxSec]),
     [isDarkMode, maxSec]
   );
+  const customEdgeColorScales = useMemo(() => {
+    const attributes = new Set<string>();
+    if (edgeColorBase.startsWith('edge:')) attributes.add(edgeColorBase.slice('edge:'.length));
+    if (edgeOpacityBase.startsWith('edge:')) attributes.add(edgeOpacityBase.slice('edge:'.length));
+    const result = new Map<string, (value: number) => string>();
+    attributes.forEach((attribute) => {
+      const values = edges.map((edge: any) => Number(edge[attribute])).filter(Number.isFinite);
+      const min = values.length ? Math.min(...values) : 0;
+      const max = values.length ? Math.max(...values) : 1;
+      result.set(attribute, d3.scaleSequential(d3.interpolateTurbo).domain([min, max === min ? min + 1 : max]));
+    });
+    return result;
+  }, [edgeColorBase, edgeOpacityBase, edges]);
+  const getNodeMetricValue = useCallback((nodeId: string, metric: string): number | null => {
+    const node = nodeById.get(String(nodeId));
+    const net = netMap.get(String(nodeId));
+    if (metric === 'custom') {
+      const value = customNodeAttribute ? Number(node?.[customNodeAttribute]) : Number.NaN;
+      return Number.isFinite(value) ? value : null;
+    }
+    if (metric.startsWith('custom:')) {
+      const value = Number(node?.[metric.slice('custom:'.length)]);
+      return Number.isFinite(value) ? value : null;
+    }
+    if (metric === 'degreeCentrality') {
+      const value = Number(net?.degreeCentrality ?? net?.degree ?? net?.inDegree ?? node?.degree);
+      return Number.isFinite(value) ? value : null;
+    }
+    const value = Number(net?.[metric] ?? node?.[metric]);
+    return Number.isFinite(value) ? value : null;
+  }, [customNodeAttribute, netMap, nodeById]);
+  const nodeMetricExtent = useMemo(() => {
+    const values = nodes
+      .map((node) => getNodeMetricValue(node.id, edgeColorNodeMetric))
+      .filter((value): value is number => value !== null);
+    const min = values.length ? Math.min(...values) : 0;
+    const max = values.length ? Math.max(...values) : 1;
+    return { min, max: max === min ? min + 1 : max };
+  }, [edgeColorNodeMetric, getNodeMetricValue, nodes]);
+  const nodeMetricColorScale = useMemo(
+    () => d3.scaleSequential(d3.interpolateViridis).domain([nodeMetricExtent.min, nodeMetricExtent.max]),
+    [nodeMetricExtent],
+  );
 
   const getEdgeColor = useCallback(
     (d: any) => {
@@ -608,6 +404,15 @@ export function useGraphStyles({
         const net = netMap.get(targetId);
         const mBase = edgeColorNodeMetric;
         const defaultColor = isDarkMode ? '#eeeeee' : '#141414';
+        if (mBase.startsWith('custom:')) {
+          const attribute = mBase.slice('custom:'.length);
+          const value = getNodeMetricValue(targetId, mBase);
+          if (value !== null) return nodeMetricColorScale(value);
+          const rawValue = nodeById.get(String(targetId))?.[attribute];
+          return rawValue === null || rawValue === undefined || String(rawValue).trim() === ''
+            ? defaultColor
+            : getCommunityColor(`${attribute}:${String(rawValue)}`);
+        }
         if (
           mBase === 'custom' ||
           mBase === 'community' ||
@@ -617,7 +422,7 @@ export function useGraphStyles({
           return getCommunityColor(communityDisplay.displayToRawMap[dispIdx]);
         }
         if (mBase === 'type') {
-          const t = nodes.find((n) => n.id === targetId)?.type;
+          const t = nodeById.get(String(targetId))?.type;
           if (t) return typeColorScale(t);
         }
         if (mBase === 'eigenvector' && net?.eigenvector !== undefined)
@@ -638,6 +443,12 @@ export function useGraphStyles({
         return rawColorScale(Number(d.weight_raw));
       if (edgeColorBase === 'weight_secondary' && d.weight_secondary !== undefined)
         return secColorScale(Number(d.weight_secondary));
+      if (edgeColorBase.startsWith('edge:')) {
+        const attribute = edgeColorBase.slice('edge:'.length);
+        const value = Number(d[attribute]);
+        const scale = customEdgeColorScales.get(attribute);
+        if (Number.isFinite(value) && scale) return scale(value);
+      }
       if (edgeColorBase === 'uniform') {
         if (isDarkMode) {
           if (
@@ -668,7 +479,7 @@ export function useGraphStyles({
       uniformEdgeColor,
       edgeColorNodeMetric,
       edgeColorNodeTarget,
-      nodes,
+      nodeById,
       netMap,
       displayMap,
       typeColorScale,
@@ -680,6 +491,9 @@ export function useGraphStyles({
       degreeCentColorScale,
       rawColorScale,
       secColorScale,
+      customEdgeColorScales,
+      getNodeMetricValue,
+      nodeMetricColorScale,
       isDarkMode,
       communityDisplay.displayToRawMap,
     ]
@@ -694,10 +508,26 @@ export function useGraphStyles({
       } else if (edgeOpacityBase === 'weight_secondary' && d.weight_secondary !== undefined) {
         const ratio = maxSec > 0 ? Number(d.weight_secondary) / maxSec : 1;
         alpha = edgeOpacity * ratio;
+      } else if (edgeOpacityBase.startsWith('edge:')) {
+        const attribute = edgeOpacityBase.slice('edge:'.length);
+        const values = edges.map((edge: any) => Number(edge[attribute])).filter(Number.isFinite);
+        const max = values.length ? Math.max(...values) : 1;
+        const value = Number(d[attribute]);
+        if (Number.isFinite(value)) alpha = edgeOpacity * (max > 0 ? value / max : 1);
+      } else if (edgeOpacityBase === 'nodeMetric' && edgeColorNodeMetric) {
+        const sourceId = typeof d.source === 'object' ? d.source.id : d.source;
+        const targetId = typeof d.target === 'object' ? d.target.id : d.target;
+        const source = getNodeMetricValue(String(sourceId), edgeColorNodeMetric);
+        const target = getNodeMetricValue(String(targetId), edgeColorNodeMetric);
+        const value = source === null ? target : target === null ? source : (source + target) / 2;
+        if (value !== null) {
+          const ratio = (value - nodeMetricExtent.min) / (nodeMetricExtent.max - nodeMetricExtent.min);
+          alpha = edgeOpacity * Math.max(0.08, ratio);
+        }
       }
       return Math.max(0, Math.min(1, alpha));
     },
-    [edgeOpacityBase, maxRaw, maxSec, edgeOpacity]
+    [edgeOpacityBase, edgeColorNodeMetric, edgeOpacity, edges, getNodeMetricValue, maxRaw, maxSec, nodeMetricExtent]
   );
 
   return {
@@ -708,8 +538,6 @@ export function useGraphStyles({
     maxRaw,
     maxSec,
     getShouldShowArrowhead,
-    elementLegendItems,
-    elementLegendIds,
     legendCategories,
     legendMetricScale,
     getNodeColor,

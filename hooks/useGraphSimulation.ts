@@ -4,7 +4,12 @@ import { useEffect, useRef, useCallback } from 'react';
 import * as d3 from 'd3';
 import type Graph from 'graphology';
 import { useStore, RawNode, RawEdge } from '@/store/useStore';
-import { TooltipData } from '@/components/graph/GraphTooltip';
+import type { TooltipData } from '@/services/graphInteraction/types';
+import {
+  getD3EdgePresentation,
+  getD3NodePresentation,
+  type D3PresentationContext,
+} from '@/components/graph/d3/presentation';
 
 interface UseGraphSimulationProps {
   graph: Graph | null;
@@ -34,6 +39,7 @@ interface UseGraphSimulationProps {
   livePhysics?: boolean;
   isDarkMode?: boolean;
   refreshKey?: number;
+  layoutRevision?: number;
   onRefresh?: () => void;
   onElementDoubleClick?: (id: string, type: 'node' | 'edge') => void;
   onClearSelection?: () => void;
@@ -41,6 +47,9 @@ interface UseGraphSimulationProps {
   selectedElement?: string | null;
   hiddenItems: Set<string>;
   isolatedLegendItem: string | null;
+  selectedCommunityId: string | null;
+  isolatedCommunityId: string | null;
+  hoveredCommunityId: string | null;
   showArrowheads: boolean;
   showNodeLabels: boolean;
   getShouldShowArrowhead: (edge: any) => boolean;
@@ -54,6 +63,10 @@ interface UseGraphSimulationProps {
   clickedNode: RawNode | null;
   setClickedNode: React.Dispatch<React.SetStateAction<RawNode | null>>;
   clickedEdge: RawEdge | null;
+  focusedEdgeNodeSet: Set<string>;
+  fitNodeIds: string[];
+  getNodeSize: (node: RawNode) => number;
+  getEdgeSize: (edge: RawEdge) => number;
   setClickedEdge: React.Dispatch<React.SetStateAction<RawEdge | null>>;
   setClickedDegree: (deg: number) => void;
   setTooltip: React.Dispatch<React.SetStateAction<TooltipData | null>>;
@@ -75,25 +88,37 @@ export function useGraphSimulation({
   nodes,
   edges,
   communityMap,
-  nodeSizeMult,
-  bipartiteNodeSizeMult = 2,
-  nodeSizeBase = 'abundance',
-  edgeWeightMult = 1,
   nodeOpacity = 1,
   directed,
   bipartite,
   livePhysics,
   isDarkMode,
   refreshKey,
+  layoutRevision,
   onElementDoubleClick,
   onClearSelection,
+  searchQuery = '',
+  hiddenItems,
+  isolatedLegendItem,
+  selectedCommunityId,
+  isolatedCommunityId,
+  hoveredCommunityId,
+  showArrowheads,
   showNodeLabels,
+  getShouldShowArrowhead,
   getNodeColor,
   getEdgeColor,
   getEdgeOpacity,
   netMap,
+  displayMap,
+  clickedNode,
   setClickedNode,
+  clickedEdge,
   setClickedEdge,
+  focusedEdgeNodeSet,
+  fitNodeIds,
+  getNodeSize,
+  getEdgeSize,
   setClickedDegree,
   setTooltip,
   setIsCalculatingLayout,
@@ -110,6 +135,7 @@ export function useGraphSimulation({
   const nodeGroupRef = useRef<d3.Selection<SVGGElement, any, SVGGElement, unknown> | null>(null);
   const edgeGroupRef = useRef<d3.Selection<SVGPathElement, any, SVGGElement, unknown> | null>(null);
   const tickDrawRef = useRef<(() => void) | null>(null);
+  const lastTopologyKeyRef = useRef<string | null>(null);
   const onDoubleClickRef = useRef(onElementDoubleClick);
   useEffect(() => { onDoubleClickRef.current = onElementDoubleClick; }, [onElementDoubleClick]);
 
@@ -184,9 +210,8 @@ export function useGraphSimulation({
   }, [graph, nodes, svgRef, containerRef, livePhysics, d3NodesMapRef]);
 
   const handleZoomFit = useCallback(() => {
-    const allIds = nodes.map((n) => n.id);
-    fitD3NodeSet(allIds);
-  }, [nodes, fitD3NodeSet]);
+    fitD3NodeSet(fitNodeIds);
+  }, [fitNodeIds, fitD3NodeSet]);
 
   // Main D3 SVG Rendering Pipeline
   useEffect(() => {
@@ -194,6 +219,12 @@ export function useGraphSimulation({
     const svg = d3.select(svgRef.current);
     const width = containerRef.current.clientWidth || 800;
     const height = containerRef.current.clientHeight || 600;
+    const previousTransform = d3.zoomTransform(svgRef.current);
+    const topologyKey = JSON.stringify([
+      nodes.map((node) => node.id),
+      edges.map((edge) => [edge.source, edge.target]),
+    ]);
+    const shouldFitTopology = lastTopologyKeyRef.current !== topologyKey;
 
     svg.selectAll('*').remove();
 
@@ -202,10 +233,11 @@ export function useGraphSimulation({
       .append('marker')
       .attr('id', 'arrowhead')
       .attr('viewBox', '0 -5 10 10')
-      .attr('refX', 18)
+      .attr('refX', 10)
       .attr('refY', 0)
-      .attr('markerWidth', 6)
-      .attr('markerHeight', 6)
+      .attr('markerWidth', 8)
+      .attr('markerHeight', 8)
+      .attr('markerUnits', 'userSpaceOnUse')
       .attr('orient', 'auto')
       .append('path')
       .attr('d', 'M0,-5L10,0L0,5')
@@ -237,22 +269,12 @@ export function useGraphSimulation({
         setClickedEdge(null);
         if (onClearSelection) onClearSelection();
       });
-
-    const degreeMap: Record<string, number> = {};
-    if (nodeSizeBase === 'degree') {
-      nodes.forEach((n) => (degreeMap[n.id] = 0));
-      edges.forEach((e) => {
-        if (degreeMap[e.source] !== undefined) degreeMap[e.source]++;
-        if (degreeMap[e.target] !== undefined) degreeMap[e.target]++;
-      });
-    }
-
     // O(1) Map lookup for shared simulation node objects
     const sharedD3NodesMap = d3NodesMapRef?.current;
     const graphNodes = nodes.map((d) => {
       let x = 0, y = 0;
       let sharedNode = sharedD3NodesMap?.get(d.id);
-      if (sharedNode) {
+      if (livePhysics && sharedNode) {
         x = sharedNode.x;
         y = sharedNode.y;
       } else if (graph && graph.hasNode(d.id)) {
@@ -263,15 +285,7 @@ export function useGraphSimulation({
         y = d.y ?? (Math.random() - 0.5) * 600;
       }
 
-      let baseVal = 10;
-      if (nodeSizeBase === 'uniform') baseVal = 10;
-      else if (nodeSizeBase === 'abundance') baseVal = d.abundance ?? 10;
-      else if (nodeSizeBase === 'degree') baseVal = (degreeMap[d.id] || 0) * 5;
-
-      const isSecondary = bipartite && (Number(d.partitionIndex) === 1 || d.partition === 'B' || d.partition === 1 || d.type === 'B' || d.type === 'secondary' || d.group === 1 || (d as any).bipartite === 1);
-      const mult = isSecondary ? bipartiteNodeSizeMult : nodeSizeMult;
-      const logVal = Math.log(Math.max(0, baseVal) + 2);
-      const currentRadius = Math.max(2, Math.min(45, mult * logVal + 1));
+      const currentRadius = Math.max(2, Number(getNodeSize(d)) || 2);
 
       if (!sharedNode) {
         sharedNode = {
@@ -282,6 +296,14 @@ export function useGraphSimulation({
           vy: 0,
         };
         sharedD3NodesMap?.set(d.id, sharedNode);
+      } else if (!livePhysics) {
+        // Static-layout recomputations write through Graphology. Keep the
+        // shared node cache aligned so an old/paused physics position cannot
+        // mask the newly applied offline layout.
+        sharedNode.x = x;
+        sharedNode.y = y;
+        sharedNode.vx = 0;
+        sharedNode.vy = 0;
       }
 
       const {
@@ -300,8 +322,28 @@ export function useGraphSimulation({
 
     const sharedD3Links = d3LinksRef?.current;
     const renderNodeMap = new Map(graphNodes.map((node: any) => [node.id, node]));
+    const endpointId = (endpoint: any) => String(typeof endpoint === 'object' ? endpoint?.id : endpoint);
+    const edgeKey = (source: string, target: string) => directed || source <= target
+      ? `${source}\u0000${target}`
+      : `${target}\u0000${source}`;
+    const renderedEdgeKeys = new Set(edges.map((edge) => edgeKey(String(edge.source), String(edge.target))));
     const graphEdges = livePhysics && sharedD3Links?.length
-      ? sharedD3Links
+      ? sharedD3Links.flatMap((link: any) => {
+          const sourceId = endpointId(link.source);
+          const targetId = endpointId(link.target);
+          const source = renderNodeMap.get(sourceId);
+          const target = renderNodeMap.get(targetId);
+          if (!source || !target || !renderedEdgeKeys.has(edgeKey(sourceId, targetId))) return [];
+          const rawEdge = link.rawEdge || edges.find((edge) => (
+            edgeKey(String(edge.source), String(edge.target)) === edgeKey(sourceId, targetId)
+          )) || {
+            source: sourceId,
+            target: targetId,
+            weight_raw: Number(link.weight ?? link.weight_raw ?? 1),
+            weight_secondary: Number(link.weight_secondary ?? 0),
+          };
+          return [{ ...link, source, target, rawEdge }];
+        })
       : edges
           .map((edge) => ({
             source: renderNodeMap.get(edge.source),
@@ -311,8 +353,54 @@ export function useGraphSimulation({
           }))
           .filter((edge) => edge.source && edge.target);
 
-    const maxWeight = d3.max(edges, (d) => Number(d.weight_raw || 1)) || 1;
-    const strokeWidthScale = d3.scaleLinear().domain([0, maxWeight]).range([0.5, 4]);
+    const selectedNeighborSet = new Set<string>();
+    if (clickedNode && graph?.hasNode(clickedNode.id)) {
+      graph.neighbors(clickedNode.id).forEach((id) => selectedNeighborSet.add(String(id)));
+    }
+    const normalizedSearch = searchQuery.trim().toLowerCase();
+    const searchMatchSet = new Set<string>();
+    if (normalizedSearch) {
+      graphNodes.forEach((node: any) => {
+        if (String(node.id).toLowerCase().includes(normalizedSearch)
+          || String(node.label || node.name || '').toLowerCase().includes(normalizedSearch)) {
+          searchMatchSet.add(String(node.id));
+        }
+      });
+    }
+    const presentationContext: D3PresentationContext = {
+      bipartite,
+      directed,
+      hiddenItems,
+      isolatedLegendItem,
+      selectedCommunityId,
+      isolatedCommunityId,
+      hoveredCommunityId,
+      displayMap,
+      clickedNodeId: clickedNode?.id || null,
+      clickedEdge,
+      selectedNeighborSet,
+      searchMatchSet,
+      focusedEdgeNodeSet,
+      showNodeLabels,
+      nodeOpacity,
+    };
+    const nodePresentation = new Map(graphNodes.map((node: any) => [
+      String(node.id),
+      getD3NodePresentation(node as RawNode, presentationContext),
+    ]));
+    const edgePresentation = (edge: any) => {
+      const source = endpointId(edge.source);
+      const target = endpointId(edge.target);
+      const rawEdge = (edge.rawEdge || edge) as RawEdge;
+      return getD3EdgePresentation(
+        source,
+        target,
+        rawEdge,
+        getEdgeOpacity(rawEdge),
+        presentationContext,
+        nodePresentation,
+      );
+    };
 
     const link = zoomGroup
       .append('g')
@@ -322,14 +410,15 @@ export function useGraphSimulation({
       .join('path')
       .attr('class', 'graph-link')
       .style('cursor', 'pointer')
+      .style('display', (d: any) => edgePresentation(d).hidden ? 'none' : null)
       .attr('stroke', (d: any) => getEdgeColor(d.rawEdge || d))
-      .attr('stroke-opacity', (d: any) => getEdgeOpacity(d.rawEdge || d))
-      .attr('stroke-width', (d: any) => {
-        const w = Number(d.weight_raw || d.rawEdge?.weight_raw || 1);
-        const defaultWidth = Math.min(strokeWidthScale(w), 4) * edgeWeightMult;
-        return `${Math.max(defaultWidth, 2)}px`;
-      })
-      .attr('marker-end', directed ? 'url(#arrowhead)' : null)
+      .attr('stroke-opacity', (d: any) => edgePresentation(d).opacity)
+      .attr('stroke-width', (d: any) => `${Math.max(0.25, Number(getEdgeSize(d.rawEdge || d)) || 0.25)}px`)
+      .attr('marker-end', (d: any) => (
+        directed && getShouldShowArrowhead(d.rawEdge || d)
+          ? 'url(#arrowhead)'
+          : null
+      ))
       .on('click', (e: any, d: any) => {
         e.stopPropagation();
         const raw = d.rawEdge || d;
@@ -376,6 +465,7 @@ export function useGraphSimulation({
       .data(graphNodes)
       .join('g')
       .attr('class', 'node-group')
+      .style('display', (d: any) => nodePresentation.get(String(d.id))?.hidden ? 'none' : null)
       .attr('transform', (d: any) => `translate(${d.x},${d.y})`);
 
     nodeGroupRef.current = nodeGroup as any;
@@ -385,6 +475,8 @@ export function useGraphSimulation({
     nodeGroup.each(function (d: any) {
       const g = d3.select(this);
       const isSquare = bipartite && (Number(d.partitionIndex) === 1 || d.partition === 'B' || d.partition === 1 || d.type === 'B' || d.type === 'secondary' || d.group === 1 || (d as any).bipartite === 1);
+      const presentation = nodePresentation.get(String(d.id));
+      const strokeWidth = presentation?.focused ? 2.5 : presentation?.neighbor || presentation?.communityMember ? 2 : 1.5;
 
       if (isSquare) {
         g.append('rect')
@@ -396,18 +488,18 @@ export function useGraphSimulation({
           .attr('rx', Math.min(3, d.currentRadius * 0.2))
           .attr('ry', Math.min(3, d.currentRadius * 0.2))
           .attr('fill', getNodeColor(d))
-          .attr('opacity', nodeOpacity)
+          .attr('opacity', presentation?.opacity ?? nodeOpacity)
           .attr('stroke', strokeColor)
-          .attr('stroke-width', 1.5)
+          .attr('stroke-width', strokeWidth)
           .style('cursor', 'pointer');
       } else {
         g.append('circle')
           .attr('class', 'node-shape')
           .attr('r', d.currentRadius)
           .attr('fill', getNodeColor(d))
-          .attr('opacity', nodeOpacity)
+          .attr('opacity', presentation?.opacity ?? nodeOpacity)
           .attr('stroke', strokeColor)
-          .attr('stroke-width', 1.5)
+          .attr('stroke-width', strokeWidth)
           .style('cursor', 'pointer');
       }
     });
@@ -463,7 +555,7 @@ export function useGraphSimulation({
       .attr('font-weight', 'bold')
       .attr('fill', isDarkMode ? '#ffffff' : '#141414')
       .style('pointer-events', 'none')
-      .style('display', showNodeLabels ? 'block' : 'none');
+      .style('display', (d: any) => nodePresentation.get(String(d.id))?.labelVisible ? 'block' : 'none');
 
     // Streamlined D3 Drag Lifecycle: beginDrag (reheat ONCE on start), movePinnedNode (move only), endDrag
     nodeGroup.call(
@@ -493,10 +585,47 @@ export function useGraphSimulation({
         if (directed) {
           const dx = tx - sx;
           const dy = ty - sy;
-          const dist = Math.sqrt(dx * dx + dy * dy);
+          const dist = Math.hypot(dx, dy);
           if (dist > 0) {
-            const dr = dist * 1.5;
-            return `M${sx},${sy}A${dr},${dr} 0 0,1 ${tx},${ty}`;
+            // A quadratic curve gives a stable tangent at each endpoint. Trim
+            // both ends along those tangents so the arrow tip terminates at
+            // the target node boundary instead of its center.
+            const normalX = -dy / dist;
+            const normalY = dx / dist;
+            const bend = Math.min(80, Math.max(12, dist * 0.2));
+            const controlX = (sx + tx) / 2 + normalX * bend;
+            const controlY = (sy + ty) / 2 + normalY * bend;
+
+            const sourceTangentX = controlX - sx;
+            const sourceTangentY = controlY - sy;
+            const sourceTangentLength = Math.hypot(sourceTangentX, sourceTangentY) || 1;
+            const targetTangentX = tx - controlX;
+            const targetTangentY = ty - controlY;
+            const targetTangentLength = Math.hypot(targetTangentX, targetTangentY) || 1;
+            const boundaryDistance = (node: any, tangentX: number, tangentY: number, tangentLength: number) => {
+              const radius = Math.max(0, Number(node.currentRadius) || 0) + 1;
+              const isSquare = bipartite && (
+                Number(node.partitionIndex) === 1
+                || node.partition === 'B'
+                || node.partition === 1
+                || node.type === 'B'
+                || node.type === 'secondary'
+                || node.group === 1
+                || node.bipartite === 1
+              );
+              if (!isSquare) return radius;
+              const unitX = Math.abs(tangentX / tangentLength);
+              const unitY = Math.abs(tangentY / tangentLength);
+              return radius / Math.max(unitX, unitY, 0.0001);
+            };
+            const sourceRadius = boundaryDistance(d.source, sourceTangentX, sourceTangentY, sourceTangentLength);
+            const targetRadius = boundaryDistance(d.target, targetTangentX, targetTangentY, targetTangentLength);
+            const startX = sx + (sourceTangentX / sourceTangentLength) * sourceRadius;
+            const startY = sy + (sourceTangentY / sourceTangentLength) * sourceRadius;
+            const endX = tx - (targetTangentX / targetTangentLength) * targetRadius;
+            const endY = ty - (targetTangentY / targetTangentLength) * targetRadius;
+
+            return `M${startX},${startY}Q${controlX},${controlY} ${endX},${endY}`;
           }
         }
         return `M${sx},${sy}L${tx},${ty}`;
@@ -505,7 +634,12 @@ export function useGraphSimulation({
 
     tickDrawRef.current = tickDraw;
     tickDraw();
-    fitD3NodeSet(graphNodes.map((node: any) => node.id), 0);
+    if (shouldFitTopology) {
+      fitD3NodeSet(fitNodeIds.length > 0 ? fitNodeIds : graphNodes.map((node: any) => node.id), 0);
+    } else {
+      svg.call(zoomBehavior.transform, previousTransform);
+    }
+    lastTopologyKeyRef.current = topologyKey;
     setIsCalculatingLayout(false);
 
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
@@ -518,19 +652,31 @@ export function useGraphSimulation({
     bipartite,
     livePhysics,
     refreshKey,
+    layoutRevision,
     containerRef,
     svgRef,
     fitD3NodeSet,
-    nodeSizeMult,
-    bipartiteNodeSizeMult,
-    nodeSizeBase,
-    edgeWeightMult,
     nodeOpacity,
     isDarkMode,
+    searchQuery,
+    hiddenItems,
+    isolatedLegendItem,
+    selectedCommunityId,
+    isolatedCommunityId,
+    hoveredCommunityId,
+    showArrowheads,
     showNodeLabels,
+    getShouldShowArrowhead,
     getNodeColor,
     getEdgeColor,
     getEdgeOpacity,
+    displayMap,
+    clickedNode,
+    clickedEdge,
+    focusedEdgeNodeSet,
+    fitNodeIds,
+    getNodeSize,
+    getEdgeSize,
   ]);
 
   // Subscribe to direct D3 physics ticks for fast SVG DOM updates
@@ -546,5 +692,6 @@ export function useGraphSimulation({
 
   return {
     handleZoomFit,
+    fitD3NodeSet,
   };
 }

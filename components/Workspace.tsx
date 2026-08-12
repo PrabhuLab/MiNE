@@ -6,29 +6,16 @@ import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import dynamic from 'next/dynamic';
 import { useStore, RawNode, RawEdge } from '@/store/useStore';
 import * as d3 from 'd3';
-import { resetCommunityColorCache } from '@/lib/communityUtils';
 import { Download } from 'lucide-react';
-import { exportSvg, exportImage, downloadBlobAsFile, downloadStringAsFile } from '@/lib/exportUtils';
 import type Sigma from 'sigma';
-import {
-  buildAllInOne,
-  buildCsvZip,
-  canonicalExportGraph,
-  createMetricsBundle,
-  writeGexf,
-  writeGraphML,
-  type WorkspaceSettingsDocument,
-} from '@/lib/graphIO';
-import { 
-  computeMaxRelWeight, 
-  computeMaxRawWeight,
-} from '@/lib/workspaceUtils';
 import { useGraphFilters } from '@/hooks/useGraphFilters';
 import { useGraphMetrics } from '@/hooks/useGraphMetrics';
 import { useDataTableSort } from '@/hooks/useDataTableSort';
 import { useGraphStyles } from '@/hooks/useGraphStyles';
 import { useSharedGraph } from '@/hooks/useSharedGraph';
 import { useSharedPhysics } from '@/hooks/useSharedPhysics';
+import { useWorkspaceSelection } from '@/hooks/useWorkspaceSelection';
+import { useWorkspaceIO } from '@/hooks/useWorkspaceIO';
 
 // Dynamically import D3Graph & SigmaGraph so they only run on the client due to canvas/SVG dependencies
 const D3Graph = dynamic(() => import('./D3Graph'), { ssr: false });
@@ -36,14 +23,6 @@ const SigmaGraph = dynamic(() => import('./graph/SigmaGraph'), { ssr: false });
 
 import { WorkspaceSidebar } from "@/components/workspace/WorkspaceSidebar";
 import { WorkspaceDataTable } from "@/components/workspace/WorkspaceDataTable";
-
-interface GraphFocusRequest {
-  id: string;
-  type: 'node' | 'edge';
-  requestId: number;
-  source?: string;
-  target?: string;
-}
 
 export default function Workspace() {
   const { rawNodes, rawEdges, filters, communityMap, customAttributes, directed, bipartite, isDarkMode, selectedElement, setSelectedElement, projectName, rendererEngine, setRendererEngine } = useStore();
@@ -95,11 +74,16 @@ export default function Workspace() {
   } = useDataTableSort(validNodes, validEdges, networkMetrics, nodeMetrics);
 
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const [activeTab, setActiveTab] = useState<"graph" | "data">("graph");
-  const [dataTab, setDataTab] = useState<"nodes" | "edges">("nodes");
+  const {
+    activeTab,
+    setActiveTab,
+    dataTab,
+    setDataTab,
+    graphFocusRequest,
+    handleElementDoubleClick,
+    clearSelection,
+  } = useWorkspaceSelection();
   const [showExportMenu, setShowExportMenu] = useState(false);
-  const [graphFocusRequest, setGraphFocusRequest] = useState<GraphFocusRequest | null>(null);
-  const graphFocusRequestIdRef = useRef(0);
   const sigmaRendererRef = useRef<Sigma | null>(null);
 
   const clickedNodeRef = useRef<RawNode | null>(null);
@@ -144,9 +128,9 @@ export default function Workspace() {
     });
     return map;
   }, [validEdges]);
+  const metricMap = useMemo(() => new Map(networkMetrics.map((metric: any) => [String(metric.id), metric])), [networkMetrics]);
+  const visibleNodeMap = useMemo(() => new Map(validNodes.map((node) => [String(node.id), node])), [validNodes]);
 
-  const maxRelWeight = useMemo(() => computeMaxRelWeight(rawEdges), [rawEdges]);
-  const maxRawWeight = useMemo(() => computeMaxRawWeight(rawEdges), [rawEdges]);
   const selectedCustomAttribute = customAttributes.find((attribute) => attribute.scope === 'node' && attribute.name === appliedFilters.customNodeAttribute);
   const customSizeDomain = useMemo(() => {
     if (!selectedCustomAttribute || !['discrete', 'continuous'].includes(selectedCustomAttribute.selectedType)) return null;
@@ -175,29 +159,54 @@ export default function Workspace() {
     [appliedFilters.nodeSizeBase, appliedFilters.bipartiteNodeSize, appliedFilters.nodeSize, bipartite, degreeMap, selectedCustomAttribute, customSizeDomain]
   );
 
-  const getEdgeSize = useCallback(
-    (edge: RawEdge) => {
-      let baseWidth = 2;
-      const base = appliedFilters.edgeWeightBase || 'weight_raw';
-      if (base === 'weight_raw') {
-        const scale = d3.scaleLinear().domain([0, maxRawWeight]).range([1, 6]);
-        baseWidth = scale(Number(edge.weight_raw) || 0);
-      } else if (base === 'weight_secondary') {
-        const scale = d3.scaleLinear().domain([0, maxRelWeight]).range([1, 6]);
-        baseWidth = scale(Number(edge.weight_secondary) || 0);
-      }
-      return Math.max(0.5, baseWidth * (appliedFilters.edgeWeight || 1));
-    },
-    [appliedFilters.edgeWeightBase, appliedFilters.edgeWeight, maxRawWeight, maxRelWeight]
-  );
+  const edgeSizeValue = useCallback((candidate: RawEdge): number | null => {
+    const base = appliedFilters.edgeWeightBase || 'weight_raw';
+    if (base === 'uniform') return null;
+    if (base === 'weight_raw') return Number(candidate.weight_raw);
+    if (base === 'weight_secondary') return Number(candidate.weight_secondary);
+    if (base.startsWith('edge:')) return Number(candidate[base.slice('edge:'.length)]);
+
+    const prefix = base.startsWith('metric:') ? 'metric:' : base.startsWith('node:') ? 'node:' : '';
+    if (!prefix) return Number.NaN;
+    const source = base.slice(prefix.length);
+    const nodeValue = (nodeId: string) => {
+      const node = visibleNodeMap.get(nodeId);
+      const metric = metricMap.get(nodeId);
+      if (source === 'abundance') return Number(node?.abundance);
+      if (source === 'degree') return Number(degreeMap[nodeId] || 0);
+      if (source === 'inDegree' || source === 'outDegree') return Number(metric?.[source] || 0);
+      return Number(metric?.[source] ?? node?.[source]);
+    };
+    const sourceValue = nodeValue(String(candidate.source));
+    const targetValue = nodeValue(String(candidate.target));
+    if (Number.isFinite(sourceValue) && Number.isFinite(targetValue)) return (sourceValue + targetValue) / 2;
+    return Number.isFinite(sourceValue) ? sourceValue : targetValue;
+  }, [appliedFilters.edgeWeightBase, degreeMap, metricMap, visibleNodeMap]);
+
+  const edgeSizeDomain = useMemo(() => {
+    const values = validEdges.map(edgeSizeValue).filter((value): value is number => value !== null && Number.isFinite(value));
+    if (!values.length) return null;
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    return [min, max === min ? min + 1 : max] as const;
+  }, [edgeSizeValue, validEdges]);
+
+  const getEdgeSize = useCallback((edge: RawEdge) => {
+    const value = edgeSizeValue(edge);
+    const baseWidth = value !== null && Number.isFinite(value) && edgeSizeDomain
+      ? d3.scaleLinear().domain(edgeSizeDomain).range([1, 6])(value)
+      : 2;
+    return Math.max(0.5, baseWidth * (appliedFilters.edgeWeight || 1));
+  }, [appliedFilters.edgeWeight, edgeSizeDomain, edgeSizeValue]);
 
   // Unified persistent Graphology instance (using D3 static layout pre-rendering)
-  const { graph, isReady, runRefreshLayout } = useSharedGraph({
+  const { graph, isReady, layoutRevision, runRefreshLayout } = useSharedGraph({
     nodes: validNodes,
     edges: validEdges,
     directed,
     bipartite,
     forceStrength: appliedFilters.forceStrength || -100,
+    livePhysics: appliedFilters.livePhysics,
     isDarkMode,
     getNodeColor,
     getNodeSize,
@@ -235,60 +244,6 @@ export default function Workspace() {
     }, 250);
   }, [runRefreshLayout, runSelectedMetrics]);
 
-  const handleImportWorkspace = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const json = JSON.parse(event.target?.result as string);
-        const isCurrentSettings = json.format === 'workspace-settings' && json.version === 1;
-        const isLegacySettings = json.type === 'workspace_state';
-        if (!isCurrentSettings && !isLegacySettings) throw new Error('Invalid Workspace Settings JSON.');
-
-        resetCommunityColorCache();
-        const settings: any = isCurrentSettings ? json as WorkspaceSettingsDocument : {
-          projectName: json.projectName,
-          rendererEngine: json.rendererEngine || json.renderer,
-          graphMode: { directed: json.directed, bipartite: json.bipartite },
-          filters: json.filters,
-          appearance: {
-            isDarkMode: json.isDarkMode,
-            showNodeLabels: json.showNodeLabels,
-            showArrowheads: json.showArrowheads,
-            communityMap: json.communityMap,
-            customAttributes: json.customAttributes,
-          },
-          visibility: {},
-          calculations: { selected: {} },
-        };
-        const nextFilters = settings.filters || useStore.getState().filters;
-        useStore.setState({
-          projectName: settings.projectName || projectName,
-          directed: settings.graphMode?.directed ?? directed,
-          bipartite: settings.graphMode?.bipartite ?? bipartite,
-          isDarkMode: settings.appearance?.isDarkMode ?? useStore.getState().isDarkMode,
-          rendererEngine: settings.rendererEngine || 'auto',
-          filters: nextFilters,
-          communityMap: settings.appearance?.communityMap || {},
-          customAttributes: settings.appearance?.customAttributes || useStore.getState().customAttributes,
-          showNodeLabels: settings.appearance?.showNodeLabels ?? useStore.getState().showNodeLabels,
-          showArrowheads: settings.appearance?.showArrowheads ?? useStore.getState().showArrowheads,
-          hiddenLegendItems: settings.visibility?.hiddenLegendItems || [],
-          isolatedLegendItem: settings.visibility?.isolatedLegendItem || null,
-          isolatedCommunityId: settings.visibility?.isolatedCommunityId || null,
-        });
-        setAppliedFilters(nextFilters);
-        setMetricsToRun((current: any) => ({ ...current, ...(settings.calculations?.selected || {}) }));
-        setRefreshKey((key) => key + 1);
-      } catch (err: any) {
-        alert('Failed to import workspace: ' + err.message);
-      }
-    };
-    reader.readAsText(file);
-  };
-
   useEffect(() => {
     setIsSwitchingRenderer(true);
     const timer = setTimeout(() => {
@@ -296,28 +251,6 @@ export default function Workspace() {
     }, 200);
     return () => clearTimeout(timer);
   }, [rendererEngine]);
-
-  const handleElementDoubleClick = (
-    id: string,
-    type: "node" | "edge",
-    endpoints?: { source: string; target: string }
-  ) => {
-    setSelectedElement(id);
-    if (activeTab === "data") {
-      graphFocusRequestIdRef.current += 1;
-      setGraphFocusRequest({
-        id,
-        type,
-        requestId: graphFocusRequestIdRef.current,
-        source: endpoints?.source,
-        target: endpoints?.target,
-      });
-      setActiveTab("graph");
-    } else {
-      setActiveTab("data");
-      setDataTab(type + "s" as any);
-    }
-  };
 
   const { removedNodesString, removedNodesCount } = useMemo(() => {
     const visibleNodeIds = new Set(validNodes.map(n => n.id));
@@ -330,78 +263,28 @@ export default function Workspace() {
     };
   }, [rawNodes, validNodes]);
 
-  const createWorkspaceSettings = (): WorkspaceSettingsDocument => {
-    const state = useStore.getState();
-    return {
-      format: 'workspace-settings',
-      version: 1,
-      projectName,
-      rendererEngine,
-      graphMode: {
-        directed,
-        bipartite,
-        weighted: rawEdges.some((edge) => Number(edge.weight_raw) !== 1 || Number(edge.weight_secondary) !== 1),
-      },
-      filters: state.filters,
-      appearance: {
-        isDarkMode,
-        showNodeLabels: state.showNodeLabels,
-        showArrowheads: state.showArrowheads,
-        communityMap,
-        customAttributes: state.customAttributes,
-      },
-      visibility: {
-        hiddenLegendItems: state.hiddenLegendItems,
-        isolatedLegendItem: state.isolatedLegendItem,
-        isolatedCommunityId: state.isolatedCommunityId,
-      },
-      calculations: { selected: metricsToRun },
-      layout: { livePhysics: state.filters.livePhysics, forceStrength: state.filters.forceStrength },
-    };
-  };
-
-  const handleExport = async (format: string) => {
-    setShowExportMenu(false);
-    if (format === 'svg') {
-      exportSvg(document.getElementById('network-graph-svg') as SVGSVGElement | null, `${projectName}.svg`);
-      return;
-    }
-    if (format === 'png' || format === 'jpeg') {
-      if (useSigma && sigmaRendererRef.current) {
-        try {
-          const { toBlob: exportSigmaImageBlob } = await import('@sigma/export-image');
-          const blob = await exportSigmaImageBlob(sigmaRendererRef.current, {
-            format,
-            fileName: projectName,
-            backgroundColor: isDarkMode ? '#141414' : '#ffffff',
-          });
-          downloadBlobAsFile(blob, `${projectName}.${format === 'jpeg' ? 'jpg' : 'png'}`);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          console.error('Sigma image export failed:', error);
-          window.alert(`Sigma image export failed: ${message}`);
-        }
-      } else {
-        exportImage(document.getElementById('network-graph-svg') as SVGSVGElement | null, format, `${projectName}.${format === 'jpeg' ? 'jpg' : 'png'}`, isDarkMode);
-      }
-      return;
-    }
-
-    const metrics = createMetricsBundle(
-      networkMetrics,
-      nodeMetrics,
-      tableDataEdges,
-      { modularity },
-      { selectedMetrics: metricsToRun },
-    );
-    const exportGraph = canonicalExportGraph(graph, rawNodes, rawEdges, metrics, directed, bipartite);
-    if (format === 'json') downloadStringAsFile(JSON.stringify(exportGraph.export(), null, 2), `${projectName}.json`, 'application/json');
-    else if (format === 'graphml') downloadStringAsFile(writeGraphML(exportGraph), `${projectName}.graphml`, 'application/graphml+xml');
-    else if (format === 'gexf') downloadStringAsFile(writeGexf(exportGraph), `${projectName}.gexf`, 'application/gexf+xml');
-    else if (format === 'csvzip') downloadBlobAsFile(await buildCsvZip(exportGraph, metrics), `${projectName}_network.zip`);
-    else if (format === 'settings') downloadStringAsFile(JSON.stringify(createWorkspaceSettings(), null, 2), `${projectName}_workspace_settings.json`, 'application/json');
-    else if (format === 'allinone') downloadStringAsFile(JSON.stringify(buildAllInOne(exportGraph, metrics, createWorkspaceSettings()), null, 2), `${projectName}_all_in_one.json`, 'application/json');
-  };
+  const { handleImportWorkspace, handleExport } = useWorkspaceIO({
+    graph,
+    rawNodes,
+    rawEdges,
+    directed,
+    bipartite,
+    isDarkMode,
+    projectName,
+    rendererEngine,
+    useSigma,
+    sigmaRendererRef,
+    communityMap,
+    networkMetrics,
+    nodeMetrics,
+    edgeMetrics: tableDataEdges,
+    modularity,
+    metricsToRun,
+    setMetricsToRun,
+    setAppliedFilters,
+    setRefreshKey,
+    closeExportMenu: () => setShowExportMenu(false),
+  });
 
   const handleSort = (key: string) => {
     let direction: "asc" | "desc" = "asc";
@@ -424,8 +307,6 @@ export default function Workspace() {
         setMetricsToRun={setMetricsToRun}
         runSelectedMetrics={runSelectedMetrics}
         metricsLoading={metricsLoading}
-        maxRelWeight={maxRelWeight}
-        maxRawWeight={maxRawWeight}
         hasType={hasType}
         hasAbundance={hasAbundance}
         hasSecondaryWeight={hasSecondaryWeight}
@@ -554,7 +435,7 @@ export default function Workspace() {
                   refreshKey={refreshKey}
                   onRefresh={handleRefresh}
                   onElementDoubleClick={handleElementDoubleClick}
-                  onClearSelection={() => setSelectedElement(null)}
+                  onClearSelection={clearSelection}
                   searchQuery={searchQuery}
                   selectedElement={selectedElement}
                   focusRequest={graphFocusRequest}
@@ -592,11 +473,13 @@ export default function Workspace() {
                   livePhysics={appliedFilters.livePhysics}
                   isDarkMode={isDarkMode}
                   refreshKey={refreshKey}
+                  layoutRevision={layoutRevision}
                   onRefresh={handleRefresh}
                   onElementDoubleClick={handleElementDoubleClick}
-                  onClearSelection={() => setSelectedElement(null)}
+                  onClearSelection={clearSelection}
                   searchQuery={searchQuery}
                   selectedElement={selectedElement}
+                  focusRequest={graphFocusRequest}
                   onSwitchRenderer={handleSwitchRenderer}
                   isRendererSwitching={isSwitchingRenderer}
                   registerD3TickListener={registerD3TickListener}
@@ -606,6 +489,8 @@ export default function Workspace() {
                   d3NodesRef={d3NodesRef}
                   d3LinksRef={d3LinksRef}
                   d3NodesMapRef={d3NodesMapRef}
+                  getNodeSize={getNodeSize}
+                  getEdgeSize={getEdgeSize}
                 />
               )}
             </div>

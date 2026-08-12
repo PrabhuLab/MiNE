@@ -15,6 +15,7 @@ export const SimulationControls = ({ setAppliedFilters }: { setAppliedFilters: (
               checked={filters.liveUpdate}
               onChange={(v: boolean) => setFilter('liveUpdate', v)}
               isDarkMode={isDarkMode}
+              ariaLabel="Live Update Controls"
             />
           </div>
 
@@ -39,6 +40,7 @@ export const SimulationControls = ({ setAppliedFilters }: { setAppliedFilters: (
               checked={filters.livePhysics}
               onChange={(v: boolean) => setFilter('livePhysics', v)}
               isDarkMode={isDarkMode}
+              ariaLabel="Enable Live Physics"
             />
           </div>
             

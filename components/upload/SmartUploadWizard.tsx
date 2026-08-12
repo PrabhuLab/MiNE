@@ -7,12 +7,13 @@ import { useRouter } from 'next/navigation';
 import { useStore } from '@/store/useStore';
 import { resetCommunityColorCache } from '@/lib/communityUtils';
 import { TopologyType, WizardFilesState, ColumnMappingState, ParsedDataState } from './types';
-import { parseCSVFile, parseJSONFile } from './utils/parseHelpers';
+import { parseCSVFile } from './utils/parseHelpers';
 import { constructGraph } from './utils/graphConstructors';
 import {
   createRandomClusterAllInOne,
   graphFromRaw,
   graphToRaw,
+  inferCustomNodeAttributes,
   parseNetworkFiles,
   type ParsedNetwork,
   type WorkspaceSettingsDocument,
@@ -123,31 +124,7 @@ export default function SmartUploadWizard() {
     if (format === 'Standard JSON') {
       try {
         if (!filesState.jsonFile) throw new Error('No JSON file selected');
-        const { rawNodes, rawEdges, jsonNodesData, jsonEdgesData } = await parseJSONFile(filesState.jsonFile);
-
-        setMapping((prev) => {
-          const next = { ...prev };
-          if (jsonEdgesData.length > 0) {
-            const headers = jsonEdgesData[0];
-            next.sourceCol = headers.find((h: string) => /source/i.test(h)) || headers[0] || '';
-            next.targetCol = headers.find((h: string) => /target/i.test(h)) || headers[1] || '';
-            next.weightRawCol = headers.find((h: string) => /weight/i.test(h)) || headers[2] || '';
-            next.weightSecCol = headers.find((h: string) => /secondary/i.test(h)) || headers[3] || '';
-          }
-          if (jsonNodesData.length > 0) {
-            const headers = jsonNodesData[0];
-            next.nodeIdCol = headers.find((h: string) => /id/i.test(h)) || headers[0] || '';
-            next.nodeLabelCol = headers.find((h: string) => /name|label/i.test(h)) || headers[1] || '';
-            next.nodeAbundCol = headers.find((h: string) => /size|abund|weight/i.test(h)) || headers[2] || '';
-            next.nodeTypeCol = headers.find((h: string) => /^type$/i.test(h)) || '';
-            next.nodePartitionCol = headers.find((h: string) => /partition|bipartite|^set$/i.test(h)) || '';
-            next.nodeCommunityCol = headers.find((h: string) => /group|community/i.test(h)) || headers[4] || '';
-          }
-          return next;
-        });
-
-        setParsedData({ jsonNodes: jsonNodesData, jsonEdges: jsonEdgesData, rawNodes, rawEdges });
-        setStep(5);
+        applyParsedNetwork(await parseNetworkFiles([filesState.jsonFile]));
       } catch (err: any) {
         setError(err.message || 'Invalid JSON file.');
       }
@@ -157,81 +134,88 @@ export default function SmartUploadWizard() {
     setIsProcessing(true);
     setError(null);
     try {
-      const data: ParsedDataState = {};
+      const dataParts: ParsedDataState[] = [];
 
       if (isFormatMatrix) {
-        data.matrix = await parseCSVFile(filesState.singleMatrixFile!);
+        dataParts.push({ matrix: await parseCSVFile(filesState.singleMatrixFile!) });
       } else if (isFormatDualMatrix) {
-        data.counts = await parseCSVFile(filesState.countsFile!);
-        data.percentages = await parseCSVFile(filesState.percentagesFile!);
+        dataParts.push({
+          counts: await parseCSVFile(filesState.countsFile!),
+          percentages: await parseCSVFile(filesState.percentagesFile!),
+        });
       } else if (isFormatEdgeList) {
         const edgeData = await parseCSVFile(filesState.edgesFile!);
-        data.edges = edgeData;
+        dataParts.push({ edges: edgeData });
         setMapping((prev) => {
           const next = { ...prev };
           if (edgeData[0]) {
-            next.sourceCol = edgeData[0][0] || '';
-            next.targetCol = edgeData[0][1] || '';
-            next.weightRawCol = edgeData[0][2] || '';
-            next.weightSecCol = edgeData[0][3] || '';
+            const headers = edgeData[0];
+            next.sourceCol = headers.find((header: string) => /^(source|from|src|origin)$/i.test(header)) || headers[0] || '';
+            next.targetCol = headers.find((header: string) => /^(target|to|dst|destination)$/i.test(header)) || headers[1] || '';
+            next.weightRawCol = headers.find((header: string) => /^(weight_raw|raw_weight|absolute|count|weight)$/i.test(header)) || headers[2] || '';
+            next.weightSecCol = headers.find((header: string) => /^(weight_secondary|secondary_weight|conditional|percentage|percent|pct|log1p)$/i.test(header)) || '';
           }
           return next;
         });
         if (filesState.nodesFile) {
           const nodeData = await parseCSVFile(filesState.nodesFile);
-          data.nodes = nodeData;
+          dataParts.push({ nodes: nodeData });
           setMapping((prev) => {
             const next = { ...prev };
             if (nodeData[0]) {
-              next.nodeIdCol = nodeData[0][0] || '';
-              next.nodeLabelCol = nodeData[0][1] || '';
-              next.nodeAbundCol = nodeData[0][2] || '';
-              next.nodeTypeCol = '';
-              next.nodePartitionCol = topology === 'Bipartite' ? nodeData[0][3] || '' : '';
-              next.nodeCommunityCol = nodeData[0][4] || '';
+              const headers = nodeData[0];
+              next.nodeIdCol = headers.find((header: string) => /^(id|node_id|key)$/i.test(header)) || headers[0] || '';
+              next.nodeLabelCol = headers.find((header: string) => /^(label|name)$/i.test(header)) || '';
+              next.nodeAbundCol = headers.find((header: string) => /^(abundance|size)$/i.test(header)) || '';
+              next.nodeTypeCol = headers.find((header: string) => /^type$/i.test(header)) || '';
+              next.nodePartitionCol = topology === 'Bipartite' ? headers.find((header: string) => /^(partition|bipartite|set)$/i.test(header)) || '' : '';
+              next.nodeCommunityCol = headers.find((header: string) => /^(community|group|cluster)$/i.test(header)) || '';
             }
             return next;
           });
         }
       } else if (isFormatAdjList) {
-        data.adjList = await parseCSVFile(filesState.adjListFile!);
-        if (data.adjList.length > 0 && data.adjList[0]) {
-          setMapping((prev) => ({ ...prev, adjSourceCol: data.adjList![0][0] || '' }));
+        const adjList = await parseCSVFile(filesState.adjListFile!);
+        dataParts.push({ adjList });
+        if (adjList.length > 0 && adjList[0]) {
+          setMapping((prev) => ({ ...prev, adjSourceCol: adjList[0][0] || '' }));
         }
       }
 
       if (filesState.hasAdditionalAttributes) {
         if (!isFormatEdgeList && filesState.edgesFile) {
           const edgeData = await parseCSVFile(filesState.edgesFile);
-          data.additionalEdges = edgeData;
+          dataParts.push({ additionalEdges: edgeData });
           if (edgeData[0]) {
+            const headers = edgeData[0];
             setMapping((prev) => ({
               ...prev,
-              sourceCol: edgeData[0][0] || '',
-              targetCol: edgeData[0][1] || '',
-              weightRawCol: edgeData[0][2] || '',
-              weightSecCol: edgeData[0][3] || '',
+              sourceCol: headers.find((header: string) => /^(source|from|src|origin)$/i.test(header)) || headers[0] || '',
+              targetCol: headers.find((header: string) => /^(target|to|dst|destination)$/i.test(header)) || headers[1] || '',
+              weightRawCol: headers.find((header: string) => /^(weight_raw|raw_weight|absolute|count|weight)$/i.test(header)) || headers[2] || '',
+              weightSecCol: headers.find((header: string) => /^(weight_secondary|secondary_weight|conditional|percentage|percent|pct|log1p)$/i.test(header)) || '',
             }));
           }
         }
         if (filesState.nodesFile) {
           const nodeData = await parseCSVFile(filesState.nodesFile);
-          data.nodes = nodeData;
+          dataParts.push({ nodes: nodeData });
           if (nodeData[0]) {
+            const headers = nodeData[0];
             setMapping((prev) => ({
               ...prev,
-              nodeIdCol: nodeData[0][0] || '',
-              nodeLabelCol: nodeData[0][1] || '',
-              nodeAbundCol: nodeData[0][2] || '',
-              nodeTypeCol: '',
-              nodePartitionCol: topology === 'Bipartite' ? nodeData[0][3] || '' : '',
-              nodeCommunityCol: nodeData[0][4] || '',
+              nodeIdCol: headers.find((header: string) => /^(id|node_id|key)$/i.test(header)) || headers[0] || '',
+              nodeLabelCol: headers.find((header: string) => /^(label|name)$/i.test(header)) || '',
+              nodeAbundCol: headers.find((header: string) => /^(abundance|size)$/i.test(header)) || '',
+              nodeTypeCol: headers.find((header: string) => /^type$/i.test(header)) || '',
+              nodePartitionCol: topology === 'Bipartite' ? headers.find((header: string) => /^(partition|bipartite|set)$/i.test(header)) || '' : '',
+              nodeCommunityCol: headers.find((header: string) => /(?:^|_)community$|^(group|cluster)$/i.test(header)) || '',
             }));
           }
         }
       }
 
-      setParsedData(data);
+      setParsedData(Object.assign({}, ...dataParts));
       setStep(5);
     } catch (e: any) {
       setError(e.message || 'Failed to parse files');
@@ -251,15 +235,11 @@ export default function SmartUploadWizard() {
     clearStore();
     const canonical = graphToRaw(graphFromRaw(previewGraph.nodes, previewGraph.edges, isDirected, topology === 'Bipartite'));
     setRawData(canonical.nodes, canonical.edges, isDirected, topology === 'Bipartite');
-    if (mapping.customNodeAttribute) {
+    const inferredCustomAttributes = inferCustomNodeAttributes(canonical.nodes);
+    if (inferredCustomAttributes.length) {
       useStore.setState((state) => ({
-        filters: { ...state.filters, customNodeAttribute: mapping.customNodeAttribute },
-        customAttributes: [{
-          name: mapping.customNodeAttribute,
-          scope: 'node',
-          detectedType: mapping.customNodeAttributeType,
-          selectedType: mapping.customNodeAttributeType,
-        }],
+        filters: { ...state.filters, customNodeAttribute: state.filters.customNodeAttribute || inferredCustomAttributes[0].name },
+        customAttributes: inferredCustomAttributes,
       }));
     }
     router.push('/workspace');
@@ -268,6 +248,7 @@ export default function SmartUploadWizard() {
   const applyParsedNetwork = (parsed: ParsedNetwork) => {
     const { nodes, edges } = graphToRaw(parsed.graph);
     const workspace = parsed.workspace;
+    const inferredCustomAttributes = inferCustomNodeAttributes(nodes);
     resetCommunityColorCache();
     clearStore();
     useStore.setState({
@@ -283,7 +264,9 @@ export default function SmartUploadWizard() {
       showNodeLabels: workspace?.appearance.showNodeLabels ?? false,
       showArrowheads: workspace?.appearance.showArrowheads ?? false,
       communityMap: workspace?.appearance.communityMap || {},
-      customAttributes: workspace?.appearance.customAttributes || [],
+      customAttributes: workspace?.appearance.customAttributes?.length
+        ? workspace.appearance.customAttributes
+        : inferredCustomAttributes,
       hiddenLegendItems: workspace?.visibility.hiddenLegendItems || [],
       isolatedLegendItem: workspace?.visibility.isolatedLegendItem || null,
       isolatedCommunityId: workspace?.visibility.isolatedCommunityId || null,

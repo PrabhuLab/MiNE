@@ -2,26 +2,10 @@
 
 import React, { useRef } from 'react';
 import { ChevronUp, ChevronDown } from 'lucide-react';
-import { LegendMetricScale } from '@/hooks/useGraphStyles';
+import type { LegendMetricScale } from '@/services/graphStyles/types';
+import type { ElementLegendItem, LegendCategories, LegendCategoryItem } from './legend/types';
 
-export interface ElementLegendItem {
-  id: string;
-  label: string;
-  Icon: React.ComponentType;
-}
-
-export interface LegendCategoryItem {
-  label: string;
-  id: string;
-  color: string;
-  nodes?: string[];
-  allIds: string[];
-}
-
-export interface LegendCategories {
-  title: string;
-  items: LegendCategoryItem[];
-}
+export type { ElementLegendItem, LegendCategories, LegendCategoryItem } from './legend/types';
 
 export interface GraphLegendProps {
   isDarkMode?: boolean;

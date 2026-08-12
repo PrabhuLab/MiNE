@@ -2,15 +2,19 @@
 
 /* eslint-disable react-hooks/set-state-in-effect */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type Graph from 'graphology';
 import { useStore, RawNode, RawEdge } from '@/store/useStore';
 import GraphLegend from '@/components/graph/GraphLegend';
 import GraphControlOverlay from '@/components/graph/GraphControlOverlay';
 import NodeDetailsSidebar from '@/components/graph/NodeDetailsSidebar';
-import GraphTooltip, { TooltipData } from '@/components/graph/GraphTooltip';
+import GraphTooltip from '@/components/graph/GraphTooltip';
+import type { TooltipData } from '@/services/graphInteraction/types';
 import { useGraphStyles } from '@/hooks/useGraphStyles';
 import { useGraphSimulation } from '@/hooks/useGraphSimulation';
+import type { GraphFocusRequest } from '@/services/workspace/types';
+import { createElementLegendItems } from '@/components/graph/legend/elementItems';
+import { collectVisibleD3NodeIds } from '@/components/graph/d3/presentation';
 
 interface D3GraphProps {
   graph: Graph;
@@ -38,11 +42,13 @@ interface D3GraphProps {
   livePhysics?: boolean;
   isDarkMode?: boolean;
   refreshKey?: number;
+  layoutRevision?: number;
   onRefresh?: () => void;
   onElementDoubleClick?: (id: string, type: 'node' | 'edge') => void;
   onClearSelection?: () => void;
   searchQuery?: string;
   selectedElement?: string | null;
+  focusRequest?: GraphFocusRequest | null;
   onSwitchRenderer?: (engine: 'd3' | 'sigma') => void;
   isRendererSwitching?: boolean;
   registerD3TickListener?: (cb: () => void) => () => void;
@@ -52,6 +58,8 @@ interface D3GraphProps {
   d3NodesRef?: React.RefObject<any[]>;
   d3LinksRef?: React.RefObject<any[]>;
   d3NodesMapRef?: React.RefObject<Map<string, any>>;
+  getNodeSize: (node: RawNode) => number;
+  getEdgeSize: (edge: RawEdge) => number;
 }
 
 export default function D3Graph({
@@ -80,11 +88,13 @@ export default function D3Graph({
   livePhysics,
   isDarkMode,
   refreshKey,
+  layoutRevision = 0,
   onRefresh,
   onElementDoubleClick,
   onClearSelection,
   searchQuery = '',
   selectedElement = null,
+  focusRequest = null,
   onSwitchRenderer,
   isRendererSwitching = false,
   registerD3TickListener,
@@ -94,6 +104,8 @@ export default function D3Graph({
   d3NodesRef,
   d3LinksRef,
   d3NodesMapRef,
+  getNodeSize,
+  getEdgeSize,
 }: D3GraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -122,7 +134,7 @@ export default function D3Graph({
     setShowNodeLabels,
   } = useStore();
 
-  const hiddenItems = new Set(hiddenLegendItems);
+  const hiddenItems = useMemo(() => new Set(hiddenLegendItems), [hiddenLegendItems]);
   const setHiddenItems = (updater: (prev: Set<string>) => Set<string>) => {
     setHiddenLegendItems(Array.from(updater(new Set(hiddenLegendItems))));
   };
@@ -131,6 +143,21 @@ export default function D3Graph({
   const clickedEdgeRef = useRef<RawEdge | null>(null);
   useEffect(() => { clickedNodeRef.current = clickedNode; }, [clickedNode]);
   useEffect(() => { clickedEdgeRef.current = clickedEdge; }, [clickedEdge]);
+
+  const focusedEdgeNodeIds = useMemo(() => {
+    if (focusRequest?.type !== 'edge') return new Set<string>();
+    return new Set([focusRequest.source, focusRequest.target].filter((id): id is string => Boolean(id)));
+  }, [focusRequest]);
+  const renderNodes = useMemo(
+    () => focusedEdgeNodeIds.size > 0 ? nodes.filter((node) => focusedEdgeNodeIds.has(node.id)) : nodes,
+    [nodes, focusedEdgeNodeIds],
+  );
+  const renderEdges = useMemo(
+    () => focusedEdgeNodeIds.size > 0
+      ? edges.filter((edge) => focusedEdgeNodeIds.has(edge.source) && focusedEdgeNodeIds.has(edge.target))
+      : edges,
+    [edges, focusedEdgeNodeIds],
+  );
 
   useEffect(() => {
     if (selectedElement) {
@@ -168,8 +195,6 @@ export default function D3Graph({
     maxRaw,
     maxSec,
     getShouldShowArrowhead,
-    elementLegendItems,
-    elementLegendIds,
     legendCategories,
     legendMetricScale,
     getNodeColor,
@@ -195,18 +220,54 @@ export default function D3Graph({
     isDarkMode,
     searchQuery,
     selectedElement,
+    selectedCommunityId,
+    isolatedCommunityId,
     showArrowheads,
     isolatedLegendItem,
     clickedNodeRef,
     clickedEdgeRef,
   });
+  const elementLegendItems = useMemo(
+    () => createElementLegendItems(bipartite, directed, isDarkMode),
+    [bipartite, directed, isDarkMode],
+  );
+  const elementLegendIds = useMemo(
+    () => elementLegendItems.map((item) => item.id),
+    [elementLegendItems],
+  );
 
-  const { handleZoomFit } = useGraphSimulation({
+  const getVisibleNodeIds = React.useCallback(
+    (
+      targetFilter?: string | null,
+      isolatedCommunityOverride?: string | null,
+      isolatedLegendOverride?: string | null,
+      hiddenOverride?: Set<string>,
+    ) => collectVisibleD3NodeIds(
+      nodes,
+      {
+        bipartite,
+        hiddenItems: hiddenOverride ?? hiddenItems,
+        isolatedLegendItem,
+        isolatedCommunityId,
+        displayMap: communityDisplay.displayMap,
+      },
+      targetFilter,
+      isolatedCommunityOverride,
+      isolatedLegendOverride,
+    ),
+    [nodes, bipartite, hiddenItems, isolatedLegendItem, isolatedCommunityId, communityDisplay.displayMap],
+  );
+  const fittedNodeIds = useMemo(
+    () => focusedEdgeNodeIds.size > 0 ? Array.from(focusedEdgeNodeIds) : getVisibleNodeIds(),
+    [focusedEdgeNodeIds, getVisibleNodeIds],
+  );
+
+  const { fitD3NodeSet } = useGraphSimulation({
     graph,
     containerRef,
     svgRef,
-    nodes,
-    edges,
+    nodes: renderNodes,
+    edges: renderEdges,
     communityMap,
     networkMetrics,
     nodeSizeMult,
@@ -229,6 +290,7 @@ export default function D3Graph({
     livePhysics,
     isDarkMode,
     refreshKey,
+    layoutRevision,
     onRefresh,
     onElementDoubleClick,
     onClearSelection,
@@ -236,6 +298,9 @@ export default function D3Graph({
     selectedElement,
     hiddenItems,
     isolatedLegendItem,
+    selectedCommunityId,
+    isolatedCommunityId,
+    hoveredCommunityId,
     showArrowheads,
     showNodeLabels,
     getShouldShowArrowhead,
@@ -261,7 +326,29 @@ export default function D3Graph({
     d3NodesRef,
     d3LinksRef,
     d3NodesMapRef,
+    focusedEdgeNodeSet: focusedEdgeNodeIds,
+    fitNodeIds: fittedNodeIds,
+    getNodeSize,
+    getEdgeSize,
   });
+
+  useEffect(() => {
+    if (!focusRequest) return;
+    let frameId = 0;
+    const focusWhenVisible = () => {
+      const container = containerRef.current;
+      if (!container || container.clientWidth <= 0 || container.clientHeight <= 0) {
+        frameId = requestAnimationFrame(focusWhenVisible);
+        return;
+      }
+      const nodeIds = focusRequest.type === 'node'
+        ? [focusRequest.id]
+        : [focusRequest.source, focusRequest.target].filter((id): id is string => Boolean(id));
+      fitD3NodeSet(nodeIds);
+    };
+    frameId = requestAnimationFrame(focusWhenVisible);
+    return () => cancelAnimationFrame(frameId);
+  }, [focusRequest, fitD3NodeSet]);
 
   const handleLegendClick = (e: React.MouseEvent, id: string, categoryIds: string[]) => {
     e.stopPropagation();
@@ -296,9 +383,18 @@ export default function D3Graph({
     if (isCurrentlyIsolated) {
       setIsolatedCommunityId(null);
       setSelectedCommunityId(null);
+      fitD3NodeSet(getVisibleNodeIds(null, null, isolatedLegendItem));
     } else {
+      const revealedItems = new Set(hiddenItems);
+      revealedItems.delete(id);
+      setHiddenItems((previous) => {
+        const next = new Set(previous);
+        next.delete(id);
+        return next;
+      });
       setIsolatedCommunityId(id);
       setSelectedCommunityId(id);
+      fitD3NodeSet(getVisibleNodeIds(id, id, isolatedLegendItem, revealedItems));
     }
   };
 
@@ -306,10 +402,21 @@ export default function D3Graph({
     const isCurrentlyIsolated = isolatedLegendItem === id;
     if (isCurrentlyIsolated) {
       setIsolatedLegendItem(null);
+      fitD3NodeSet(getVisibleNodeIds(null, isolatedCommunityId, null));
     } else {
+      const revealedItems = new Set(hiddenItems);
+      revealedItems.delete(id);
+      setHiddenItems((previous) => {
+        const next = new Set(previous);
+        next.delete(id);
+        return next;
+      });
       setIsolatedLegendItem(id);
+      fitD3NodeSet(getVisibleNodeIds(id, isolatedCommunityId, id, revealedItems));
     }
   };
+
+  const handleZoomFit = () => fitD3NodeSet(fittedNodeIds);
 
   const handleResetView = () => {
     setIsolatedCommunityId(null);
@@ -320,7 +427,7 @@ export default function D3Graph({
     setClickedNode(null);
     setClickedEdge(null);
     if (onClearSelection) onClearSelection();
-    handleZoomFit();
+    fitD3NodeSet(getVisibleNodeIds(null, null, null, new Set()));
   };
 
   return (

@@ -42,7 +42,7 @@ export interface ImportedMetricsBundle {
 
 export interface WeightFilter {
   id: string;
-  type: 'weight_raw' | 'weight_secondary';
+  type: string;
   cutoff: number;
 }
 

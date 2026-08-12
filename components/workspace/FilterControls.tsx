@@ -2,10 +2,9 @@ import React from 'react';
 import { useStore } from '@/store/useStore';
 import { SyncTextInput } from '@/components/ui/SyncInput';
 import { CustomSlider } from '@/components/ui/CustomSlider';
+import { availableNumericCustomEdgeAttributes, detectCustomAttributeType } from '@/lib/graphIO';
 
 interface FilterControlsProps {
-  maxRelWeight: number;
-  maxRawWeight: number;
   hasSecondaryWeight: boolean;
   validNodes: any[];
   rawNodes: any[];
@@ -16,8 +15,6 @@ interface FilterControlsProps {
 }
 
 export const FilterControls = ({
-  maxRelWeight,
-  maxRawWeight,
   hasSecondaryWeight,
   validNodes,
   rawNodes,
@@ -26,7 +23,79 @@ export const FilterControls = ({
   removedNodesString,
   removedNodesCount
 }: FilterControlsProps) => {
-  const { filters, setFilter, isDarkMode } = useStore();
+  const { filters, setFilter, isDarkMode, directed, customAttributes } = useStore();
+  const selectedCustomMetadata = customAttributes.find((attribute) => (
+    attribute.scope === 'node' && attribute.name === filters.customNodeAttribute
+  ));
+  const customNodeType = selectedCustomMetadata?.selectedType
+    || (filters.customNodeAttribute
+      ? detectCustomAttributeType(rawNodes.map((node) => node[filters.customNodeAttribute]))
+      : null);
+  const numericCustomNode = Boolean(
+    filters.customNodeAttribute && customNodeType && ['discrete', 'continuous'].includes(customNodeType),
+  );
+  const customEdgeAttributes = React.useMemo(
+    () => availableNumericCustomEdgeAttributes(rawEdges),
+    [rawEdges],
+  );
+  const degreeValues = React.useMemo(() => {
+    const values = new Map<string, { degree: number; inDegree: number; outDegree: number }>();
+    rawNodes.forEach((node) => values.set(String(node.id), { degree: 0, inDegree: 0, outDegree: 0 }));
+    rawEdges.forEach((edge) => {
+      const source = values.get(String(edge.source)) || { degree: 0, inDegree: 0, outDegree: 0 };
+      const target = values.get(String(edge.target)) || { degree: 0, inDegree: 0, outDegree: 0 };
+      source.degree += 1;
+      source.outDegree += 1;
+      target.degree += 1;
+      target.inDegree += 1;
+      values.set(String(edge.source), source);
+      values.set(String(edge.target), target);
+    });
+    return values;
+  }, [rawEdges, rawNodes]);
+  const sourceOptions = React.useMemo(() => [
+    { value: 'weight_raw', label: 'Raw / Absolute Edge Weight' },
+    ...(hasSecondaryWeight ? [{
+      value: 'weight_secondary',
+      label: directed ? 'Directed / Conditional Edge Weight' : 'Secondary / Transformed Edge Weight',
+    }] : []),
+    ...customEdgeAttributes.map((attribute) => ({ value: `edge:${attribute}`, label: `Custom Edge: ${attribute}` })),
+    ...(numericCustomNode ? [{ value: 'node:custom', label: `Custom Node: ${filters.customNodeAttribute}` }] : []),
+    { value: 'node:abundance', label: 'Node Abundance' },
+    ...(!directed ? [{ value: 'node:degree', label: 'Node Degree' }] : [
+      { value: 'node:inDegree', label: 'Node In-Degree' },
+      { value: 'node:outDegree', label: 'Node Out-Degree' },
+      { value: 'node:degree', label: 'Node Total Degree' },
+    ]),
+  ], [customEdgeAttributes, directed, filters.customNodeAttribute, hasSecondaryWeight, numericCustomNode]);
+  const sourceValues = (type: string): number[] => {
+    if (type === 'weight_raw') return rawEdges.map((edge) => Number(edge.weight_raw)).filter(Number.isFinite);
+    if (type === 'weight_secondary') return rawEdges.map((edge) => Number(edge.weight_secondary)).filter(Number.isFinite);
+    if (type.startsWith('edge:')) {
+      const attribute = type.slice('edge:'.length);
+      return rawEdges.map((edge) => Number(edge[attribute])).filter(Number.isFinite);
+    }
+    if (type === 'node:custom') {
+      return rawNodes.map((node) => Number(node[filters.customNodeAttribute])).filter(Number.isFinite);
+    }
+    if (type === 'node:abundance') return rawNodes.map((node) => Number(node.abundance)).filter(Number.isFinite);
+    if (type.startsWith('node:')) {
+      const metric = type.slice('node:'.length) as 'degree' | 'inDegree' | 'outDegree';
+      return Array.from(degreeValues.values()).map((value) => value[metric]).filter(Number.isFinite);
+    }
+    return [];
+  };
+  const sourceRange = (type: string) => {
+    const values = sourceValues(type);
+    if (!values.length) return { min: 0, max: 1, step: 1 };
+    const minValue = Math.min(...values);
+    const maxValue = Math.max(...values);
+    const min = Math.min(0, minValue);
+    const max = maxValue === min ? min + 1 : maxValue;
+    const integers = values.every(Number.isInteger);
+    const step = integers ? 1 : max - min <= 1 ? 0.01 : 0.1;
+    return { min, max, step };
+  };
 
   return (
     <div>
@@ -43,7 +112,9 @@ export const FilterControls = ({
       </div>
       
       <div className="space-y-6">
-        {filters.weightFilters.map((wf: any, idx: number) => (
+        {filters.weightFilters.map((wf: any, idx: number) => {
+          const range = sourceRange(wf.type);
+          return (
           <div key={wf.id} className="group relative border p-3 rounded-sm border-[#e0e0e0] dark:border-[#333]">
             <button 
               onClick={() => {
@@ -53,23 +124,41 @@ export const FilterControls = ({
             >
               ×
             </button>
-            <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Weight Source</label>
+            <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Filter Source</label>
             <select 
               value={wf.type}
               onChange={(e) => {
                 const newFilters = [...filters.weightFilters];
-                newFilters[idx] = { ...wf, type: e.target.value as any, cutoff: 0 };
+                const nextRange = sourceRange(e.target.value);
+                newFilters[idx] = { ...wf, type: e.target.value, cutoff: nextRange.min };
                 setFilter('weightFilters', newFilters);
               }}
               className={`w-full bg-transparent border p-2 text-xs font-mono outline-none transition-colors mb-4 ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0] [&>option]:bg-[#1a1a1a]' : 'border-[#141414] focus:border-black text-[#141414] [&>option]:bg-white'}`}
             >
-              <option value="weight_raw">Primary Weight (Raw)</option>
-              {hasSecondaryWeight && <option value="weight_secondary">Secondary Weight (Relative)</option>}
+              {sourceOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
             
-            <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Minimum Cutoff</label>
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <label className={`text-[10px] font-bold uppercase tracking-widest ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Minimum Cutoff</label>
+              <input
+                type="number"
+                aria-label={`Minimum Cutoff ${idx + 1}`}
+                min={range.min}
+                max={range.max}
+                step={range.step}
+                value={wf.cutoff}
+                onChange={(event) => {
+                  const value = Number(event.target.value);
+                  if (!Number.isFinite(value)) return;
+                  const newFilters = [...filters.weightFilters];
+                  newFilters[idx] = { ...wf, cutoff: Math.min(range.max, Math.max(range.min, value)) };
+                  setFilter('weightFilters', newFilters);
+                }}
+                className={`w-16 border bg-transparent px-1 py-0.5 text-right text-xs font-mono outline-none ${isDarkMode ? 'border-[#333] text-[#E4E3E0]' : 'border-[#141414] text-[#141414]'}`}
+              />
+            </div>
             <CustomSlider 
-              min="0" max={wf.type === 'weight_secondary' ? maxRelWeight : maxRawWeight} step={wf.type === 'weight_secondary' ? (maxRelWeight <= 1.0 ? 0.01 : 0.1) : 1}
+              min={range.min} max={range.max} step={range.step}
               value={wf.cutoff}
               onChange={(v: number) => {
                 const newFilters = [...filters.weightFilters];
@@ -79,12 +168,12 @@ export const FilterControls = ({
               isDarkMode={isDarkMode}
             />
             <div className={`mt-2 flex justify-between text-xs font-mono opacity-50 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
-              <span>0</span>
-              <span>{wf.cutoff.toFixed(wf.type === 'weight_secondary' ? 2 : 0)}</span>
-              <span>{wf.type === 'weight_secondary' ? maxRelWeight : maxRawWeight}</span>
+              <span>{range.min.toFixed(range.step < 1 ? 2 : 0)}</span>
+              <span>{wf.cutoff.toFixed(range.step < 1 ? 2 : 0)}</span>
+              <span>{range.max.toFixed(range.step < 1 ? 2 : 0)}</span>
             </div>
           </div>
-        ))}
+        );})}
       </div>
       
       
@@ -98,6 +187,7 @@ export const FilterControls = ({
           className={`w-full bg-transparent border p-2 text-xs font-mono outline-none transition-colors ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0]' : 'border-[#141414] focus:border-black text-[#141414]'}`}
           list="removed-nodes-autocomplete"
           options={rawNodes.map(n => ({ value: n.id, label: n.label || n.name || n.id }))}
+          live={filters.liveUpdate}
         />
         <div className={`mt-3 mb-10 text-[10px] uppercase font-bold tracking-widest opacity-50 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
           Comma-separated IDs
