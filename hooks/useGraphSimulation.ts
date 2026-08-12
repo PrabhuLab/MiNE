@@ -139,8 +139,12 @@ export function useGraphSimulation({
   const lastTopologyKeyRef = useRef<string | null>(null);
   const onDoubleClickRef = useRef(onElementDoubleClick);
   useEffect(() => { onDoubleClickRef.current = onElementDoubleClick; }, [onElementDoubleClick]);
+  const pendingFitRef = useRef<{ nodeIds: string[]; duration: number } | null>(null);
 
-  const fitD3NodeSet = useCallback((nodeIds: string[], duration = 450) => {
+  const fitD3NodeSet = useCallback((nodeIds: string[], duration = 450, isAutoReapply = false) => {
+    if (!isAutoReapply) {
+      pendingFitRef.current = { nodeIds, duration };
+    }
     if (!svgRef.current || !containerRef.current || !zoomBehaviorRef.current || !zoomGroupRef.current) return;
     const width = containerRef.current.clientWidth;
     const height = containerRef.current.clientHeight;
@@ -651,8 +655,12 @@ export function useGraphSimulation({
 
     tickDrawRef.current = tickDraw;
     tickDraw();
-    if (shouldFitTopology) {
-      fitD3NodeSet(fitNodeIds.length > 0 ? fitNodeIds : graphNodes.map((node: any) => node.id), 0);
+    if (pendingFitRef.current) {
+      const pending = pendingFitRef.current;
+      pendingFitRef.current = null;
+      fitD3NodeSet(pending.nodeIds, pending.duration, true);
+    } else if (shouldFitTopology) {
+      fitD3NodeSet(fitNodeIds.length > 0 ? fitNodeIds : graphNodes.map((node: any) => node.id), 0, true);
     } else {
       svg.call(zoomBehavior.transform, previousTransform);
     }
