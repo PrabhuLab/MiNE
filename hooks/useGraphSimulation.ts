@@ -140,6 +140,7 @@ export function useGraphSimulation({
   const onDoubleClickRef = useRef(onElementDoubleClick);
   useEffect(() => { onDoubleClickRef.current = onElementDoubleClick; }, [onElementDoubleClick]);
   const pendingFitRef = useRef<{ nodeIds: string[]; duration: number } | null>(null);
+  const referenceScaleRef = useRef<number | null>(null);
 
   const fitD3NodeSet = useCallback((nodeIds: string[], duration = 450, isAutoReapply = false) => {
     if (!isAutoReapply) {
@@ -227,7 +228,8 @@ export function useGraphSimulation({
     const previousTransform = d3.zoomTransform(svgRef.current);
     const topologyKey = JSON.stringify([
       nodes.map((node) => node.id),
-      edges.map((edge) => [edge.source, edge.target]),
+      layoutRevision,
+      refreshKey,
     ]);
     const shouldFitTopology = lastTopologyKeyRef.current !== topologyKey;
 
@@ -332,17 +334,22 @@ export function useGraphSimulation({
     // subsequent user zooming can still enlarge/shrink nodes naturally.
     const fitIdSet = new Set(fitNodeIds.length > 0 ? fitNodeIds : graphNodes.map((node: any) => String(node.id)));
     const fittedGraphNodes = graphNodes.filter((node: any) => fitIdSet.has(String(node.id)));
-    let referenceScale = Math.max(0.05, Number(previousTransform.k) || 1);
-    if (shouldFitTopology && fittedGraphNodes.length === 1) {
-      referenceScale = 1.5;
-    } else if (shouldFitTopology && fittedGraphNodes.length > 1) {
-      const minX = d3.min(fittedGraphNodes, (node: any) => Number(node.x)) ?? 0;
-      const maxX = d3.max(fittedGraphNodes, (node: any) => Number(node.x)) ?? 0;
-      const minY = d3.min(fittedGraphNodes, (node: any) => Number(node.y)) ?? 0;
-      const maxY = d3.max(fittedGraphNodes, (node: any) => Number(node.y)) ?? 0;
-      const dx = Math.max(20, maxX - minX);
-      const dy = Math.max(20, maxY - minY);
-      referenceScale = Math.max(0.1, Math.min(4, 0.75 / Math.max(dx / width, dy / height)));
+    let referenceScale = referenceScaleRef.current;
+    if (shouldFitTopology || !referenceScale) {
+      if (fittedGraphNodes.length === 1) {
+        referenceScale = 1.5;
+      } else if (fittedGraphNodes.length > 1) {
+        const minX = d3.min(fittedGraphNodes, (node: any) => Number(node.x)) ?? 0;
+        const maxX = d3.max(fittedGraphNodes, (node: any) => Number(node.x)) ?? 0;
+        const minY = d3.min(fittedGraphNodes, (node: any) => Number(node.y)) ?? 0;
+        const maxY = d3.max(fittedGraphNodes, (node: any) => Number(node.y)) ?? 0;
+        const dx = Math.max(20, maxX - minX);
+        const dy = Math.max(20, maxY - minY);
+        referenceScale = Math.max(0.000001, Math.min(1000, 0.75 / Math.max(dx / width, dy / height)));
+      } else {
+        referenceScale = 1;
+      }
+      referenceScaleRef.current = referenceScale;
     }
     graphNodes.forEach((node: any) => {
       node.currentRadius = node.baseRadius / referenceScale;
