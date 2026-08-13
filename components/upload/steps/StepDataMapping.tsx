@@ -180,15 +180,13 @@ export const StepDataMapping: React.FC<StepDataMappingProps> = ({
         {parsedData.nodes && (
           <div className="space-y-6">
             {renderTablePreview(parsedData.nodes, 'Nodes Dataset')}
-            <div className={`grid grid-cols-2 lg:grid-cols-6 gap-4 p-4 border mb-6 ${isDarkMode ? 'border-[#333] bg-[#222]/30' : 'border-[#141414] bg-[#E4E3E0]/30'}`}>
+            <div className={`grid grid-cols-2 lg:grid-cols-5 gap-4 p-4 border mb-6 ${isDarkMode ? 'border-[#333] bg-[#222]/30' : 'border-[#141414] bg-[#E4E3E0]/30'}`}>
               {renderDropdown('Node ID Col', mapping.nodeIdCol, 'nodeIdCol', parsedData.nodes[0] || [])}
               {renderDropdown('Label Col', mapping.nodeLabelCol, 'nodeLabelCol', parsedData.nodes[0] || [])}
-              {renderDropdown('Type Col (Domain Data)', mapping.nodeTypeCol, 'nodeTypeCol', parsedData.nodes[0] || [])}
-              {renderDropdown('Partition Col', mapping.nodePartitionCol, 'nodePartitionCol', parsedData.nodes[0] || [])}
+              {renderDropdown('Type Col', mapping.nodeTypeCol, 'nodeTypeCol', parsedData.nodes[0] || [])}
               {renderDropdown('Community Col', mapping.nodeCommunityCol, 'nodeCommunityCol', parsedData.nodes[0] || [])}
               {renderDropdown('Size/Abundance Col', mapping.nodeAbundCol, 'nodeAbundCol', parsedData.nodes[0] || [])}
             </div>
-            <p className="text-[10px] font-mono opacity-60">All unused node columns will be preserved automatically as custom attributes.</p>
           </div>
         )}
 
@@ -245,15 +243,13 @@ export const StepDataMapping: React.FC<StepDataMappingProps> = ({
         {format === 'Standard JSON' && parsedData.jsonNodes && (
           <div className="space-y-6 mt-6">
             {renderTablePreview(parsedData.jsonNodes, 'JSON Nodes Dataset')}
-            <div className={`grid grid-cols-2 lg:grid-cols-6 gap-4 p-4 border mb-6 ${isDarkMode ? 'border-[#333] bg-[#222]/30' : 'border-[#141414] bg-[#E4E3E0]/30'}`}>
+            <div className={`grid grid-cols-2 lg:grid-cols-5 gap-4 p-4 border mb-6 ${isDarkMode ? 'border-[#333] bg-[#222]/30' : 'border-[#141414] bg-[#E4E3E0]/30'}`}>
               {renderDropdown('Node ID Property', mapping.nodeIdCol, 'nodeIdCol', parsedData.jsonNodes[0] || [])}
               {renderDropdown('Label Property', mapping.nodeLabelCol, 'nodeLabelCol', parsedData.jsonNodes[0] || [])}
-              {renderDropdown('Type Property (Domain Data)', mapping.nodeTypeCol, 'nodeTypeCol', parsedData.jsonNodes[0] || [])}
-              {renderDropdown('Partition Property', mapping.nodePartitionCol, 'nodePartitionCol', parsedData.jsonNodes[0] || [])}
+              {renderDropdown('Type Property', mapping.nodeTypeCol, 'nodeTypeCol', parsedData.jsonNodes[0] || [])}
               {renderDropdown('Community Property', mapping.nodeCommunityCol, 'nodeCommunityCol', parsedData.jsonNodes[0] || [])}
               {renderDropdown('Size/Abundance Property', mapping.nodeAbundCol, 'nodeAbundCol', parsedData.jsonNodes[0] || [])}
             </div>
-            <p className="text-[10px] font-mono opacity-60">All undeclared JSON properties are preserved automatically as custom attributes.</p>
           </div>
         )}
 

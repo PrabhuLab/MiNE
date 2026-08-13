@@ -2,7 +2,7 @@ import React from 'react';
 import { BaseStepProps, TopologyType } from '../types';
 
 interface StepTopologyProps extends BaseStepProps {
-  topology: TopologyType | null;
+  topology: TopologyType;
   setTopology: (topology: TopologyType) => void;
 }
 
@@ -47,10 +47,9 @@ export const StepTopology: React.FC<StepTopologyProps> = ({
         <div className="col-span-2 mt-6 flex justify-end">
           <button
             onClick={onNext}
-            disabled={!topology}
             className={`px-6 py-3 text-[10px] font-bold uppercase tracking-widest hover:invert transition-all border ${
               isDarkMode ? 'bg-[#E4E3E0] text-[#141414] border-[#E4E3E0]' : 'bg-[#141414] text-[#E4E3E0] border-[#141414]'
-            } disabled:opacity-40 disabled:hover:invert-0`}
+            }`}
           >
             Next
           </button>

@@ -2,14 +2,14 @@ import React from 'react';
 import { useStore } from '@/store/useStore';
 import { SyncInput } from '@/components/ui/SyncInput';
 import { CustomSlider } from '@/components/ui/CustomSlider';
-import { availableCustomEdgeAttributes, availableCustomNodeAttributes, availableNumericCustomEdgeAttributes, detectCustomAttributeType } from '@/lib/graphIO';
-import type { CustomAttributeType } from '@/store/useStore';
 
 interface CustomizationControlsProps {
   networkMetrics: any[];
   hasType: boolean;
   hasAbundance: boolean;
   hasSecondaryWeight: boolean;
+  maxRelWeight: number;
+  maxRawWeight: number;
 }
 
 export const CustomizationControls = ({
@@ -17,8 +17,10 @@ export const CustomizationControls = ({
   hasType,
   hasAbundance,
   hasSecondaryWeight,
+  maxRelWeight,
+  maxRawWeight
 }: CustomizationControlsProps) => {
-  const { filters, setFilter, isDarkMode, directed, bipartite, rawNodes, rawEdges, customAttributes, setCustomAttributes } = useStore();
+  const { filters, setFilter, isDarkMode } = useStore();
   const [activeControlTab, setActiveControlTab] = React.useState('nodes');
   const hasLouvain = networkMetrics.some(m => m.louvain !== undefined);
   const hasDegree = networkMetrics.some(m => m.degree !== undefined || m.inDegree !== undefined || m.degreeCentrality !== undefined || m.inDegreeCentrality !== undefined) || networkMetrics.length > 0;
@@ -27,62 +29,12 @@ export const CustomizationControls = ({
   const hasBetweenness = networkMetrics.some(m => m.betweenness !== undefined);
   const hasCloseness = networkMetrics.some(m => m.closeness !== undefined);
   const hasClustering = networkMetrics.some(m => m.clustering !== undefined);
-  const customNodeOptions = React.useMemo(() => availableCustomNodeAttributes(rawNodes), [rawNodes]);
-  const customEdgeOptions = React.useMemo(() => availableCustomEdgeAttributes(rawEdges), [rawEdges]);
-  const numericCustomOptions = React.useMemo(() => customNodeOptions.filter((attribute) => {
-    const values = rawNodes
-      .map((node) => node[attribute])
-      .filter((value) => value !== null && value !== undefined && String(value).trim() !== '');
-    return values.length > 0 && values.every((value) => Number.isFinite(Number(value)));
-  }), [customNodeOptions, rawNodes]);
-  const numericCustomEdgeOptions = React.useMemo(() => availableNumericCustomEdgeAttributes(rawEdges), [rawEdges]);
-  const customScope = filters.customAttributeScope || 'node';
-  const selectedCustomName = customScope === 'node' ? filters.customNodeAttribute : filters.customEdgeAttribute;
-  const selectedCustomMetadata = customAttributes.find((attribute) => attribute.scope === customScope && attribute.name === selectedCustomName);
-  const selectedNodeCustomMetadata = customAttributes.find((attribute) => attribute.scope === 'node' && attribute.name === filters.customNodeAttribute);
-  const selectCustomAttribute = (scope: 'node' | 'edge', name: string) => {
-    setFilter('customAttributeScope', scope);
-    setFilter(scope === 'node' ? 'customNodeAttribute' : 'customEdgeAttribute', name);
-    if (!name) return;
-    const values = scope === 'node' ? rawNodes.map((node) => node[name]) : rawEdges.map((edge) => edge[name]);
-    const detectedType = detectCustomAttributeType(values);
-    setCustomAttributes([
-      ...customAttributes.filter((attribute) => attribute.scope !== scope || attribute.name !== name),
-      { name, scope, detectedType, selectedType: detectedType },
-    ]);
-  };
-  const changeCustomScope = (scope: 'node' | 'edge') => {
-    const current = scope === 'node' ? filters.customNodeAttribute : filters.customEdgeAttribute;
-    const options = scope === 'node' ? customNodeOptions : customEdgeOptions;
-    selectCustomAttribute(scope, current || options[0] || '');
-  };
+
 
   return (
     <div>
     <div className="flex items-center justify-between mb-4">
       <h3 className={`text-[10px] font-bold uppercase tracking-widest opacity-70 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Visual Customization</h3>
-    </div>
-
-    <div className={`mb-5 border p-3 ${isDarkMode ? 'border-[#333]' : 'border-[#bbb]'}`}>
-      <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Workspace Custom Attribute</label>
-      <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-2 mb-2">
-        <select value={customScope} onChange={(event) => changeCustomScope(event.target.value as 'node' | 'edge')} className={`w-full min-w-0 bg-transparent border p-2 text-[10px] font-mono ${isDarkMode ? 'border-[#444]' : 'border-[#141414]'}`}>
-          <option value="node">Node</option>
-          <option value="edge">Edge</option>
-        </select>
-        <select value={selectedCustomName || ''} onChange={(event) => selectCustomAttribute(customScope, event.target.value)} className={`w-full min-w-0 bg-transparent border p-2 text-[10px] font-mono ${isDarkMode ? 'border-[#444]' : 'border-[#141414]'}`}>
-          <option value="">{customScope === 'node' ? 'Community (legacy)' : 'Choose edge attribute'}</option>
-          {(customScope === 'node' ? customNodeOptions : customEdgeOptions).map((attribute) => <option key={attribute} value={attribute}>{attribute}</option>)}
-        </select>
-      </div>
-      <select disabled={!selectedCustomMetadata} value={selectedCustomMetadata?.selectedType || 'nominal'} onChange={(event) => setCustomAttributes(customAttributes.map((attribute) => attribute === selectedCustomMetadata ? { ...attribute, selectedType: event.target.value as CustomAttributeType } : attribute))} className={`w-full min-w-0 bg-transparent border p-2 text-[10px] font-mono disabled:opacity-40 ${isDarkMode ? 'border-[#444]' : 'border-[#141414]'}`}>
-        <option value="binary">Binary</option>
-        <option value="discrete">Discrete</option>
-        <option value="continuous">Continuous</option>
-        <option value="nominal">Nominal</option>
-        <option value="ordinal">Ordinal</option>
-      </select>
-      <p className="mt-2 text-[9px] font-mono opacity-55">Select and reinterpret a custom node or edge field independently of the customization tabs.</p>
     </div>
     
     <div className="flex border-b mb-6">
@@ -109,7 +61,7 @@ export const CustomizationControls = ({
             onChange={(e) => setFilter('nodeColorBase', e.target.value)}
             className={`w-full bg-transparent border p-2 text-xs font-mono outline-none transition-colors mb-2 ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0] [&>option]:bg-[#1a1a1a]' : 'border-[#141414] focus:border-black text-[#141414] [&>option]:bg-white'}`}
           >
-            <option value="custom">Custom</option>
+            <option value="custom">Custom Community</option>
             {hasType && <option value="type">Node Type</option>}
             {hasLouvain && <option value="louvain">Louvain</option>}
             {hasDegree && <option value="degreeCentrality">Node Degree</option>}
@@ -140,7 +92,6 @@ export const CustomizationControls = ({
             onChange={(e) => setFilter('nodeSizeBase', e.target.value)}
             className={`w-full bg-transparent border p-2 text-xs font-mono outline-none transition-colors ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0] [&>option]:bg-[#1a1a1a]' : 'border-[#141414] focus:border-black text-[#141414] [&>option]:bg-white'}`}
           >
-            <option value="uniform">Uniform</option>
             {hasAbundance && <option value="abundance">Abundance</option>}
             {hasDegree && <option value="degree">Node Degree</option>}
             {hasEigen && <option value="eigenvector">Eigenvector Centrality</option>}
@@ -148,9 +99,6 @@ export const CustomizationControls = ({
             {hasBetweenness && <option value="betweenness">Betweenness Centrality</option>}
             {hasCloseness && <option value="closeness">Closeness Centrality</option>}
             {hasClustering && <option value="clustering">Clustering Coefficient</option>}
-            {selectedNodeCustomMetadata && ['discrete', 'continuous'].includes(selectedNodeCustomMetadata.selectedType) && (
-              <option value="custom">Custom: {selectedNodeCustomMetadata.name}</option>
-            )}
           </select>
         </div>
         
@@ -168,44 +116,6 @@ export const CustomizationControls = ({
             min="1" max="10" step="0.5"
             value={filters.nodeSize}
             onChange={(v: number) => setFilter('nodeSize', v)}
-            isDarkMode={isDarkMode}
-          />
-        </div>
-
-        {bipartite && (
-          <div className="group pt-2">
-            <label className={`flex items-center justify-between text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
-              <span>Bipartite Node Size</span>
-              <SyncInput 
-                className={`w-14 bg-transparent border-b text-right font-mono outline-none ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0]' : 'border-[#ccc] focus:border-[#141414] text-[#141414]'}`}
-                value={filters.bipartiteNodeSize ?? 2}
-                onChange={(v: number) => setFilter('bipartiteNodeSize', v)}
-                step="0.5"
-              />
-            </label>
-            <CustomSlider 
-              min="0.5" max="10" step="0.5"
-              value={filters.bipartiteNodeSize ?? 2}
-              onChange={(v: number) => setFilter('bipartiteNodeSize', v)}
-              isDarkMode={isDarkMode}
-            />
-          </div>
-        )}
-
-        <div className="group pt-2">
-          <label className={`flex items-center justify-between text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
-            <span>Node Opacity</span>
-            <SyncInput 
-              className={`w-14 bg-transparent border-b text-right font-mono outline-none ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0]' : 'border-[#ccc] focus:border-[#141414] text-[#141414]'}`}
-              value={filters.nodeOpacity ?? 1}
-              onChange={(v: number) => setFilter('nodeOpacity', v)}
-              step="0.05"
-            />
-          </label>
-          <CustomSlider 
-            min="0.0" max="1.0" step="0.05"
-            value={filters.nodeOpacity ?? 1}
-            onChange={(v: number) => setFilter('nodeOpacity', v)}
             isDarkMode={isDarkMode}
           />
         </div>
@@ -245,9 +155,8 @@ export const CustomizationControls = ({
             className={`w-full bg-transparent border p-2 text-xs font-mono outline-none transition-colors mb-2 ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0] [&>option]:bg-[#1a1a1a]' : 'border-[#141414] focus:border-black text-[#141414] [&>option]:bg-white'}`}
           >
             <option value="uniform">Uniform</option>
-            <option value="weight_raw">Raw / Absolute Edge Weight</option>
-            {hasSecondaryWeight && <option value="weight_secondary">{directed ? 'Directed / Conditional Edge Weight' : 'Secondary / Transformed Edge Weight'}</option>}
-            {numericCustomEdgeOptions.map((attribute) => <option key={`edge-color-${attribute}`} value={`edge:${attribute}`}>Custom Edge: {attribute}</option>)}
+            <option value="weight_raw">Primary Weight</option>
+            {hasSecondaryWeight && <option value="weight_secondary">Secondary Weight</option>}
             <option value="nodeMetric">Node Metrics</option>
           </select>
           {filters.edgeColorBase === 'uniform' && (
@@ -282,8 +191,7 @@ export const CustomizationControls = ({
               onChange={(e) => setFilter('edgeColorNodeMetric', e.target.value)}
               className={`w-full bg-transparent border p-2 mt-2 text-xs font-mono outline-none transition-colors ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0] [&>option]:bg-[#1a1a1a]' : 'border-[#141414] focus:border-black text-[#141414] [&>option]:bg-white'}`}
             >
-              <option value="custom">Custom</option>
-              {customNodeOptions.map((attribute) => <option key={`edge-node-custom-${attribute}`} value={`custom:${attribute}`}>Custom: {attribute}</option>)}
+              <option value="custom">Custom Community</option>
               {hasType && <option value="type">Node Type</option>}
               {hasLouvain && <option value="louvain">Louvain</option>}
               {hasDegree && <option value="degreeCentrality">Node Degree</option>}
@@ -303,19 +211,8 @@ export const CustomizationControls = ({
             onChange={(e) => setFilter('edgeWeightBase', e.target.value)}
             className={`w-full bg-transparent border p-2 text-xs font-mono outline-none transition-colors ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0] [&>option]:bg-[#1a1a1a]' : 'border-[#141414] focus:border-black text-[#141414] [&>option]:bg-white'}`}
           >
-            <option value="weight_raw">Raw / Absolute Edge Weight</option>
-            {hasSecondaryWeight && <option value="weight_secondary">{directed ? 'Directed / Conditional Edge Weight' : 'Secondary / Transformed Edge Weight'}</option>}
-            {numericCustomEdgeOptions.map((attribute) => <option key={`edge-size-${attribute}`} value={`edge:${attribute}`}>Custom Edge: {attribute}</option>)}
-            <option value="node:abundance">Node Abundance (Mean)</option>
-            {numericCustomOptions.map((attribute) => <option key={`edge-size-node-${attribute}`} value={`node:${attribute}`}>Custom Node: {attribute}</option>)}
-            <option value="node:degree">Node Degree (Mean)</option>
-            {directed && <option value="node:inDegree">Node In-Degree (Mean)</option>}
-            {directed && <option value="node:outDegree">Node Out-Degree (Mean)</option>}
-            {hasEigen && <option value="metric:eigenvector">Eigenvector Centrality (Mean)</option>}
-            {hasPageRank && <option value="metric:pagerank">PageRank (Mean)</option>}
-            {hasBetweenness && <option value="metric:betweenness">Betweenness Centrality (Mean)</option>}
-            {hasCloseness && <option value="metric:closeness">Closeness Centrality (Mean)</option>}
-            {hasClustering && <option value="metric:clustering">Clustering Coefficient (Mean)</option>}
+            <option value="weight_raw">Primary Weight</option>
+            {hasSecondaryWeight && <option value="weight_secondary">Secondary Weight</option>}
             <option value="uniform">Uniform</option>
           </select>
         </div>
@@ -345,28 +242,10 @@ export const CustomizationControls = ({
             className={`w-full bg-transparent border p-2 text-xs font-mono outline-none transition-colors ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0] [&>option]:bg-[#1a1a1a]' : 'border-[#141414] focus:border-black text-[#141414] [&>option]:bg-white'}`}
           >
             <option value="uniform">Uniform</option>
-            <option value="weight_raw">Raw / Absolute Edge Weight</option>
-            {hasSecondaryWeight && <option value="weight_secondary">{directed ? 'Directed / Conditional Edge Weight' : 'Secondary / Transformed Edge Weight'}</option>}
-            {numericCustomEdgeOptions.map((attribute) => <option key={`edge-opacity-${attribute}`} value={`edge:${attribute}`}>Custom Edge: {attribute}</option>)}
-            <option value="nodeMetric">Node Metrics</option>
+            <option value="weight_raw">Primary Weight</option>
+            {hasSecondaryWeight && <option value="weight_secondary">Secondary Weight</option>}
           </select>
         </div>
-        {filters.edgeOpacityBase === 'nodeMetric' && (
-          <select
-            value={filters.edgeColorNodeMetric}
-            onChange={(event) => setFilter('edgeColorNodeMetric', event.target.value)}
-            className={`w-full bg-transparent border p-2 text-xs font-mono outline-none transition-colors ${isDarkMode ? 'border-[#333] text-[#E4E3E0]' : 'border-[#141414] text-[#141414]'}`}
-          >
-            <option value="custom">Custom</option>
-            {numericCustomOptions.map((attribute) => <option key={`edge-opacity-node-${attribute}`} value={`custom:${attribute}`}>Custom: {attribute}</option>)}
-            <option value="degreeCentrality">Node Degree</option>
-            {hasEigen && <option value="eigenvector">Eigenvector Centrality</option>}
-            {hasPageRank && <option value="pagerank">PageRank</option>}
-            {hasBetweenness && <option value="betweenness">Betweenness Centrality</option>}
-            {hasCloseness && <option value="closeness">Closeness Centrality</option>}
-            {hasClustering && <option value="clustering">Clustering Coefficient</option>}
-          </select>
-        )}
         <div className="group pt-2">
           <label className={`flex items-center justify-between text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
             <span>Base Opacity</span>
@@ -374,11 +253,11 @@ export const CustomizationControls = ({
               className={`w-14 bg-transparent border-b text-right font-mono outline-none ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0]' : 'border-[#ccc] focus:border-[#141414] text-[#141414]'}`}
               value={filters.edgeOpacity}
               onChange={(v: number) => setFilter('edgeOpacity', v)}
-              step="0.05"
+              step="0.1"
             />
           </label>
           <CustomSlider 
-            min="0.0" max="1.0" step="0.05"
+            min="0.1" max="1.0" step="0.1"
             value={filters.edgeOpacity}
             onChange={(v: number) => setFilter('edgeOpacity', v)}
             isDarkMode={isDarkMode}

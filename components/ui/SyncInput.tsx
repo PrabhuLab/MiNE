@@ -1,50 +1,33 @@
-/* eslint-disable react-hooks/set-state-in-effect */
 import React, { useState, useEffect } from 'react';
+import { useStore } from '@/store/useStore';
 
 export const SyncInput = ({ value, onChange, step, className }: any) => {
+  const liveUpdate = useStore(state => state.filters.liveUpdate);
   const [localVal, setLocalVal] = useState(value);
-
-  useEffect(() => {
-    setLocalVal(value);
-  }, [value]);
-
-  const commit = () => {
-    const num = Number(localVal);
-    if (!isNaN(num) && num !== value) {
-      onChange(num);
-    }
-  };
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => setLocalVal(value), [value]);
 
   return (
     <input 
       type="number"
       className={`text-inherit ${className}`}
-      value={localVal ?? ''}
-      onChange={e => setLocalVal(e.target.value)}
-      onBlur={commit}
-      onKeyDown={e => {
-        if (e.key === 'Enter') {
-          commit();
-          (e.target as HTMLInputElement).blur();
-        }
+      value={localVal}
+      onChange={e => {
+        setLocalVal(e.target.value);
+        if (liveUpdate) onChange(Number(e.target.value));
       }}
+      onBlur={() => onChange(Number(localVal))}
+      onKeyDown={e => e.key === 'Enter' && onChange(Number(localVal))}
       step={step}
     />
   );
 };
 
-export const SyncTextInput = ({ value, onChange, className, placeholder, list, options, live = false }: any) => {
+export const SyncTextInput = ({ value, onChange, className, placeholder, list, options }: any) => {
+  const liveUpdate = useStore(state => state.filters.liveUpdate);
   const [localVal, setLocalVal] = useState(value);
-
-  useEffect(() => {
-    setLocalVal(value);
-  }, [value]);
-
-  const commit = () => {
-    if (localVal !== value) {
-      onChange(localVal);
-    }
-  };
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => setLocalVal(value), [value]);
 
   // Support comma-separated autocomplete
   const tokens = typeof localVal === 'string' ? localVal.split(',') : [];
@@ -56,18 +39,13 @@ export const SyncTextInput = ({ value, onChange, className, placeholder, list, o
       <input 
         type="text"
         className={`text-inherit ${className}`}
-        value={localVal ?? ''}
+        value={localVal}
         onChange={e => {
           setLocalVal(e.target.value);
-          if (live) onChange(e.target.value);
+          if (liveUpdate) onChange(e.target.value);
         }}
-        onBlur={commit}
-        onKeyDown={e => {
-          if (e.key === 'Enter') {
-            commit();
-            (e.target as HTMLInputElement).blur();
-          }
-        }}
+        onBlur={() => onChange(localVal)}
+        onKeyDown={e => e.key === 'Enter' && onChange(localVal)}
         placeholder={placeholder}
         list={list}
       />

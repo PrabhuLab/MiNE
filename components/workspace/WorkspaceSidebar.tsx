@@ -7,20 +7,17 @@ import { SearchControls } from './SearchControls';
 import { CustomizationControls } from './CustomizationControls';
 import { CalculationControls } from './CalculationControls';
 import { FilterControls } from './FilterControls';
-import type { MetricGraphContext, MetricsSelection } from '@/services/metrics/types';
 
 interface WorkspaceSidebarProps {
   isSidebarCollapsed: boolean;
   setIsSidebarCollapsed: (v: boolean) => void;
   handleImportWorkspace: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  metricsToRun: MetricsSelection;
-  setMetricsToRun: React.Dispatch<React.SetStateAction<MetricsSelection>>;
-  runSelectedMetrics: (metricIds?: string[]) => void;
+  metricsToRun: any;
+  setMetricsToRun: React.Dispatch<React.SetStateAction<any>>;
+  runSelectedMetrics: () => void;
   metricsLoading: boolean;
-  metricContext: MetricGraphContext;
-  staleMetricIds: string[];
-  metricWarnings: Record<string, string>;
-  layoutControls: React.ReactNode;
+  maxRelWeight: number;
+  maxRawWeight: number;
   hasType: boolean;
   hasAbundance: boolean;
   hasSecondaryWeight: boolean;
@@ -42,10 +39,8 @@ export const WorkspaceSidebar = ({
   setMetricsToRun,
   runSelectedMetrics,
   metricsLoading,
-  metricContext,
-  staleMetricIds,
-  metricWarnings,
-  layoutControls,
+  maxRelWeight,
+  maxRawWeight,
   hasType,
   hasAbundance,
   hasSecondaryWeight,
@@ -86,7 +81,7 @@ export const WorkspaceSidebar = ({
       <div className="flex items-center justify-between">
         <h2 className="text-xs font-bold uppercase tracking-widest">Controls</h2>
         <div className="flex items-center space-x-2">
-          <label className={`p-1.5 rounded-full hover:bg-black/10 dark:hover:bg-white/10 transition-colors cursor-pointer ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`} title="Import Workspace Settings JSON (settings only)">
+          <label className={`p-1.5 rounded-full hover:bg-black/10 dark:hover:bg-white/10 transition-colors cursor-pointer ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`} title="Import Workspace">
             <Download size={16} className="rotate-180" />
             <input type="file" accept=".json" className="hidden" onChange={handleImportWorkspace} />
           </label>
@@ -120,6 +115,8 @@ export const WorkspaceSidebar = ({
         hasType={hasType}
         hasAbundance={hasAbundance}
         hasSecondaryWeight={hasSecondaryWeight}
+        maxRelWeight={maxRelWeight}
+        maxRawWeight={maxRawWeight}
       />
          
       <div className={`h-px w-full my-4 ${isDarkMode ? 'bg-[#333]' : 'bg-[#ccc]'}`}></div>
@@ -129,16 +126,13 @@ export const WorkspaceSidebar = ({
         setMetricsToRun={setMetricsToRun}
         runSelectedMetrics={runSelectedMetrics}
         metricsLoading={metricsLoading}
-        metricContext={metricContext}
-        staleMetricIds={staleMetricIds}
-        metricWarnings={metricWarnings}
-        rawEdges={rawEdges}
-        layoutControls={layoutControls}
       />
          
       <div className={`h-px w-full my-4 ${isDarkMode ? 'bg-[#333]' : 'bg-[#ccc]'}`}></div>
 
       <FilterControls 
+        maxRelWeight={maxRelWeight}
+        maxRawWeight={maxRawWeight}
         hasSecondaryWeight={hasSecondaryWeight}
         validNodes={validNodes}
         rawNodes={rawNodes}

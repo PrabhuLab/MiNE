@@ -2,28 +2,21 @@
 
 /* eslint-disable react-hooks/set-state-in-effect */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import type Graph from 'graphology';
+import React, { useEffect, useRef, useState } from 'react';
 import { useStore, RawNode, RawEdge } from '@/store/useStore';
 import GraphLegend from '@/components/graph/GraphLegend';
 import GraphControlOverlay from '@/components/graph/GraphControlOverlay';
 import NodeDetailsSidebar from '@/components/graph/NodeDetailsSidebar';
-import GraphTooltip from '@/components/graph/GraphTooltip';
-import type { TooltipData } from '@/services/graphInteraction/types';
+import GraphTooltip, { TooltipData } from '@/components/graph/GraphTooltip';
 import { useGraphStyles } from '@/hooks/useGraphStyles';
 import { useGraphSimulation } from '@/hooks/useGraphSimulation';
-import type { GraphFocusRequest } from '@/services/workspace/types';
-import { createElementLegendItems } from '@/components/graph/legend/elementItems';
-import { collectVisibleD3NodeIds } from '@/components/graph/d3/presentation';
 
 interface D3GraphProps {
-  graph: Graph;
   nodes: RawNode[];
   edges: RawEdge[];
   communityMap: Record<string, string>;
   networkMetrics?: any[];
   nodeSizeMult: number;
-  bipartiteNodeSizeMult?: number;
   nodeSizeBase?: string;
   nodeColorBase?: string;
   uniformNodeColor?: string;
@@ -42,34 +35,19 @@ interface D3GraphProps {
   livePhysics?: boolean;
   isDarkMode?: boolean;
   refreshKey?: number;
-  layoutRevision?: number;
   onRefresh?: () => void;
   onElementDoubleClick?: (id: string, type: 'node' | 'edge') => void;
   onClearSelection?: () => void;
   searchQuery?: string;
   selectedElement?: string | null;
-  focusRequest?: GraphFocusRequest | null;
-  onSwitchRenderer?: (engine: 'd3' | 'sigma') => void;
-  isRendererSwitching?: boolean;
-  registerD3TickListener?: (cb: () => void) => () => void;
-  beginDrag?: (id: string, x: number, y: number) => void;
-  movePinnedNode?: (id: string, x: number, y: number) => void;
-  endDrag?: (id: string) => void;
-  d3NodesRef?: React.RefObject<any[]>;
-  d3LinksRef?: React.RefObject<any[]>;
-  d3NodesMapRef?: React.RefObject<Map<string, any>>;
-  getNodeSize: (node: RawNode) => number;
-  getEdgeSize: (edge: RawEdge) => number;
 }
 
 export default function D3Graph({
-  graph,
   nodes,
   edges,
   communityMap,
   networkMetrics = [],
   nodeSizeMult,
-  bipartiteNodeSizeMult = 2,
   nodeSizeBase = 'abundance',
   nodeColorBase = 'custom',
   uniformNodeColor = '#cccccc',
@@ -88,24 +66,11 @@ export default function D3Graph({
   livePhysics,
   isDarkMode,
   refreshKey,
-  layoutRevision = 0,
   onRefresh,
   onElementDoubleClick,
   onClearSelection,
   searchQuery = '',
   selectedElement = null,
-  focusRequest = null,
-  onSwitchRenderer,
-  isRendererSwitching = false,
-  registerD3TickListener,
-  beginDrag,
-  movePinnedNode,
-  endDrag,
-  d3NodesRef,
-  d3LinksRef,
-  d3NodesMapRef,
-  getNodeSize,
-  getEdgeSize,
 }: D3GraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -122,19 +87,13 @@ export default function D3Graph({
     setHiddenLegendItems,
     isolatedLegendItem,
     setIsolatedLegendItem,
-    selectedCommunityId,
-    setSelectedCommunityId,
-    isolatedCommunityId,
-    setIsolatedCommunityId,
-    hoveredCommunityId,
-    setHoveredCommunityId,
     showArrowheads,
     setShowArrowheads,
     showNodeLabels,
     setShowNodeLabels,
   } = useStore();
 
-  const hiddenItems = useMemo(() => new Set(hiddenLegendItems), [hiddenLegendItems]);
+  const hiddenItems = new Set(hiddenLegendItems);
   const setHiddenItems = (updater: (prev: Set<string>) => Set<string>) => {
     setHiddenLegendItems(Array.from(updater(new Set(hiddenLegendItems))));
   };
@@ -144,39 +103,29 @@ export default function D3Graph({
   useEffect(() => { clickedNodeRef.current = clickedNode; }, [clickedNode]);
   useEffect(() => { clickedEdgeRef.current = clickedEdge; }, [clickedEdge]);
 
-  const focusedEdgeNodeIds = useMemo(() => {
-    if (focusRequest?.type !== 'edge') return new Set<string>();
-    return new Set([focusRequest.source, focusRequest.target].filter((id): id is string => Boolean(id)));
-  }, [focusRequest]);
-  const renderNodes = useMemo(
-    () => focusedEdgeNodeIds.size > 0 ? nodes.filter((node) => focusedEdgeNodeIds.has(node.id)) : nodes,
-    [nodes, focusedEdgeNodeIds],
-  );
-  const renderEdges = useMemo(
-    () => focusedEdgeNodeIds.size > 0
-      ? edges.filter((edge) => focusedEdgeNodeIds.has(edge.source) && focusedEdgeNodeIds.has(edge.target))
-      : edges,
-    [edges, focusedEdgeNodeIds],
-  );
-
   useEffect(() => {
     if (selectedElement) {
-      const node = nodes.find((candidate) => candidate.id === selectedElement);
-      if (node) {
-        setClickedNode(node);
-        setClickedEdge(null);
-        return;
-      }
-
-      const edge = edges.find((candidate) => {
-        const forward = `${candidate.source}-${candidate.target}`;
-        const reverse = `${candidate.target}-${candidate.source}`;
-        return selectedElement === forward || (!directed && selectedElement === reverse);
-      });
-      if (edge) {
-        setClickedEdge(edge);
-        setClickedNode(null);
-        return;
+      if (!selectedElement.includes('-')) {
+        const node = nodes.find((n) => n.id === selectedElement);
+        if (node) {
+          setClickedNode(node);
+          setClickedEdge(null);
+          return;
+        }
+      } else {
+        const parts = selectedElement.split('-');
+        if (parts.length >= 2) {
+          const edge = edges.find(
+            (e) =>
+              (e.source === parts[0] && e.target === parts[1]) ||
+              (!directed && e.source === parts[1] && e.target === parts[0])
+          );
+          if (edge) {
+            setClickedEdge(edge);
+            setClickedNode(null);
+            return;
+          }
+        }
       }
       setClickedNode(null);
       setClickedEdge(null);
@@ -190,13 +139,14 @@ export default function D3Graph({
 
   const {
     customColorMap,
-    communityDisplay,
+    communityColorMap,
     netMap,
     maxRaw,
     maxSec,
     getShouldShowArrowhead,
+    elementLegendItems,
+    elementLegendIds,
     legendCategories,
-    legendMetricScale,
     getNodeColor,
     getEdgeColor,
     getEdgeOpacity,
@@ -220,58 +170,20 @@ export default function D3Graph({
     isDarkMode,
     searchQuery,
     selectedElement,
-    selectedCommunityId,
-    isolatedCommunityId,
     showArrowheads,
     isolatedLegendItem,
     clickedNodeRef,
     clickedEdgeRef,
   });
-  const elementLegendItems = useMemo(
-    () => createElementLegendItems(bipartite, directed, isDarkMode),
-    [bipartite, directed, isDarkMode],
-  );
-  const elementLegendIds = useMemo(
-    () => elementLegendItems.map((item) => item.id),
-    [elementLegendItems],
-  );
 
-  const getVisibleNodeIds = React.useCallback(
-    (
-      targetFilter?: string | null,
-      isolatedCommunityOverride?: string | null,
-      isolatedLegendOverride?: string | null,
-      hiddenOverride?: Set<string>,
-    ) => collectVisibleD3NodeIds(
-      nodes,
-      {
-        bipartite,
-        hiddenItems: hiddenOverride ?? hiddenItems,
-        isolatedLegendItem,
-        isolatedCommunityId,
-        displayMap: communityDisplay.displayMap,
-      },
-      targetFilter,
-      isolatedCommunityOverride,
-      isolatedLegendOverride,
-    ),
-    [nodes, bipartite, hiddenItems, isolatedLegendItem, isolatedCommunityId, communityDisplay.displayMap],
-  );
-  const fittedNodeIds = useMemo(
-    () => focusedEdgeNodeIds.size > 0 ? Array.from(focusedEdgeNodeIds) : getVisibleNodeIds(),
-    [focusedEdgeNodeIds, getVisibleNodeIds],
-  );
-
-  const { fitD3NodeSet } = useGraphSimulation({
-    graph,
+  const { handleZoomFit } = useGraphSimulation({
     containerRef,
     svgRef,
-    nodes: renderNodes,
-    edges: renderEdges,
+    nodes,
+    edges,
     communityMap,
     networkMetrics,
     nodeSizeMult,
-    bipartiteNodeSizeMult,
     nodeSizeBase,
     nodeColorBase,
     uniformNodeColor,
@@ -290,7 +202,6 @@ export default function D3Graph({
     livePhysics,
     isDarkMode,
     refreshKey,
-    layoutRevision,
     onRefresh,
     onElementDoubleClick,
     onClearSelection,
@@ -298,9 +209,6 @@ export default function D3Graph({
     selectedElement,
     hiddenItems,
     isolatedLegendItem,
-    selectedCommunityId,
-    isolatedCommunityId,
-    hoveredCommunityId,
     showArrowheads,
     showNodeLabels,
     getShouldShowArrowhead,
@@ -308,7 +216,6 @@ export default function D3Graph({
     getEdgeColor,
     getEdgeOpacity,
     netMap,
-    displayMap: communityDisplay.displayMap,
     maxRaw,
     maxSec,
     clickedNode,
@@ -319,115 +226,56 @@ export default function D3Graph({
     setTooltip,
     isCalculatingLayout,
     setIsCalculatingLayout,
-    registerD3TickListener,
-    beginDrag,
-    movePinnedNode,
-    endDrag,
-    d3NodesRef,
-    d3LinksRef,
-    d3NodesMapRef,
-    focusedEdgeNodeSet: focusedEdgeNodeIds,
-    fitNodeIds: fittedNodeIds,
-    getNodeSize,
-    getEdgeSize,
   });
 
-  useEffect(() => {
-    if (!focusRequest) return;
-    let frameId = 0;
-    const focusWhenVisible = () => {
-      const container = containerRef.current;
-      if (!container || container.clientWidth <= 0 || container.clientHeight <= 0) {
-        frameId = requestAnimationFrame(focusWhenVisible);
-        return;
-      }
-      const nodeIds = focusRequest.type === 'node'
-        ? [focusRequest.id]
-        : [focusRequest.source, focusRequest.target].filter((id): id is string => Boolean(id));
-      fitD3NodeSet(nodeIds);
-    };
-    frameId = requestAnimationFrame(focusWhenVisible);
-    return () => cancelAnimationFrame(frameId);
-  }, [focusRequest, fitD3NodeSet]);
+  const clickTimers = useRef<{ [key: string]: NodeJS.Timeout }>({});
+  const clickCounts = useRef<{ [key: string]: number }>({});
 
   const handleLegendClick = (e: React.MouseEvent, id: string, categoryIds: string[]) => {
     e.stopPropagation();
-    setHiddenItems((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
+    clickCounts.current[id] = (clickCounts.current[id] || 0) + 1;
 
-  const handleCommunitySingleClick = (id: string) => {
-    setHiddenItems((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const handleElementSingleClick = (id: string) => {
-    setHiddenItems((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const handleCommunityDoubleClick = (id: string) => {
-    const isCurrentlyIsolated = isolatedCommunityId === id || isolatedLegendItem === id;
-    if (isCurrentlyIsolated) {
-      setIsolatedCommunityId(null);
-      setSelectedCommunityId(null);
-      fitD3NodeSet(getVisibleNodeIds(null, null, isolatedLegendItem));
-    } else {
-      const revealedItems = new Set(hiddenItems);
-      revealedItems.delete(id);
-      setHiddenItems((previous) => {
-        const next = new Set(previous);
-        next.delete(id);
-        return next;
-      });
-      setIsolatedCommunityId(id);
-      setSelectedCommunityId(id);
-      fitD3NodeSet(getVisibleNodeIds(id, id, isolatedLegendItem, revealedItems));
+    if (clickTimers.current[id]) {
+      clearTimeout(clickTimers.current[id]);
     }
-  };
 
-  const handleElementDoubleClick = (id: string) => {
-    const isCurrentlyIsolated = isolatedLegendItem === id;
-    if (isCurrentlyIsolated) {
+    if (clickCounts.current[id] >= 3) {
+      clickCounts.current[id] = 0;
       setIsolatedLegendItem(null);
-      fitD3NodeSet(getVisibleNodeIds(null, isolatedCommunityId, null));
-    } else {
-      const revealedItems = new Set(hiddenItems);
-      revealedItems.delete(id);
-      setHiddenItems((previous) => {
-        const next = new Set(previous);
-        next.delete(id);
+      setHiddenItems((prev) => {
+        const next = new Set(prev);
+        categoryIds.forEach((cid) => next.delete(cid));
         return next;
       });
-      setIsolatedLegendItem(id);
-      fitD3NodeSet(getVisibleNodeIds(id, isolatedCommunityId, id, revealedItems));
+      handleZoomFit();
+    } else {
+      clickTimers.current[id] = setTimeout(() => {
+        const count = clickCounts.current[id];
+        clickCounts.current[id] = 0;
+        delete clickTimers.current[id];
+
+        if (count === 1) {
+          if (isolatedLegendItem === id) {
+            setIsolatedLegendItem(null);
+          } else {
+            setHiddenItems((prev) => {
+              const next = new Set(prev);
+              if (next.has(id)) next.delete(id);
+              else next.add(id);
+              return next;
+            });
+          }
+        } else if (count === 2) {
+          setIsolatedLegendItem(id);
+          setHiddenItems((prev) => {
+            const next = new Set(prev);
+            next.delete(id);
+            return next;
+          });
+          handleZoomFit(id);
+        }
+      }, 300);
     }
-  };
-
-  const handleZoomFit = () => fitD3NodeSet(fittedNodeIds);
-
-  const handleResetView = () => {
-    setIsolatedCommunityId(null);
-    setSelectedCommunityId(null);
-    setIsolatedLegendItem(null);
-    setHiddenLegendItems([]);
-    setHoveredCommunityId(null);
-    setClickedNode(null);
-    setClickedEdge(null);
-    if (onClearSelection) onClearSelection();
-    fitD3NodeSet(getVisibleNodeIds(null, null, null, new Set()));
   };
 
   return (
@@ -437,14 +285,18 @@ export default function D3Graph({
       <GraphControlOverlay
         isDarkMode={isDarkMode}
         onZoomFit={handleZoomFit}
-        onResetView={handleResetView}
         onRefreshGraph={() => {
-          if (onRefresh) onRefresh();
+          nodes.forEach((n: any) => {
+            n.x = undefined;
+            n.y = undefined;
+            n.vx = undefined;
+            n.vy = undefined;
+            n.fx = undefined;
+            n.fy = undefined;
+          });
+          onRefresh && onRefresh();
         }}
         isCalculatingLayout={isCalculatingLayout}
-        activeRenderer="d3"
-        onSwitchRenderer={onSwitchRenderer}
-        isRendererSwitching={isRendererSwitching}
       />
 
       <NodeDetailsSidebar
@@ -469,21 +321,13 @@ export default function D3Graph({
         elementLegendIds={elementLegendIds}
         hiddenItems={hiddenItems}
         isolatedLegendItem={isolatedLegendItem}
-        selectedCommunityId={selectedCommunityId}
-        isolatedCommunityId={isolatedCommunityId}
         handleLegendClick={handleLegendClick}
-        onElementSingleClick={handleElementSingleClick}
-        onElementDoubleClick={handleElementDoubleClick}
-        onCommunitySingleClick={handleCommunitySingleClick}
-        onCommunityDoubleClick={handleCommunityDoubleClick}
-        onCommunityHover={setHoveredCommunityId}
         showNodeLabels={showNodeLabels}
         setShowNodeLabels={setShowNodeLabels}
         directed={directed}
         showArrowheads={showArrowheads}
         setShowArrowheads={setShowArrowheads}
         legendCategories={legendCategories}
-        legendMetricScale={legendMetricScale}
         isLegendMinimized={isLegendMinimized}
         setIsLegendMinimized={setIsLegendMinimized}
       />

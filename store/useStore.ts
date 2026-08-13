@@ -5,14 +5,8 @@ export interface RawNode {
   name: string;
   label?: string;
   type?: string;
-  group?: string | number;
-  bipartite?: number | string;
   community?: string | number;
   abundance: number;
-  x?: number;
-  y?: number;
-  partition?: string | number;
-  [key: string]: any;
 }
 
 export interface RawEdge {
@@ -20,29 +14,11 @@ export interface RawEdge {
   target: string;
   weight_raw: number;
   weight_secondary: number;
-  [key: string]: any;
-}
-
-export type CustomAttributeType = 'binary' | 'discrete' | 'continuous' | 'nominal' | 'ordinal';
-
-export interface CustomAttributeMetadata {
-  name: string;
-  scope: 'node' | 'edge';
-  detectedType: CustomAttributeType;
-  selectedType: CustomAttributeType;
-  ordinalOrder?: string[];
-}
-
-export interface ImportedMetricsBundle {
-  graph: Record<string, any>;
-  nodes: Record<string, Record<string, any>>;
-  edges: Record<string, Record<string, any>>;
-  metadata: Record<string, any>;
 }
 
 export interface WeightFilter {
   id: string;
-  type: string;
+  type: 'weight_raw' | 'weight_secondary';
   cutoff: number;
 }
 
@@ -52,7 +28,6 @@ export interface WorkspaceFilters {
   removedNodes: string;
   resolution: number;
   nodeSize: number;
-  bipartiteNodeSize: number;
   nodeSizeBase: string;
   nodeColorBase: string;
   uniformNodeColor: string;
@@ -67,12 +42,9 @@ export interface WorkspaceFilters {
   edgeOpacityBase: string;
   forceStrength: number;
   louvainSeed: number;
-  metricWeightAttribute: string;
   liveUpdate: boolean;
   livePhysics: boolean;
-  customAttributeScope: 'node' | 'edge';
-  customNodeAttribute: string;
-  customEdgeAttribute: string;
+  
 }
 
 interface AppState {
@@ -83,10 +55,6 @@ interface AppState {
   rawNodes: RawNode[];
   rawEdges: RawEdge[];
   setRawData: (nodes: RawNode[], edges: RawEdge[], directed?: boolean, bipartite?: boolean) => void;
-  customAttributes: CustomAttributeMetadata[];
-  setCustomAttributes: (attributes: CustomAttributeMetadata[]) => void;
-  importedMetrics: ImportedMetricsBundle | null;
-  setImportedMetrics: (metrics: ImportedMetricsBundle | null) => void;
 
   filters: WorkspaceFilters;
   setFilter: <K extends keyof WorkspaceFilters>(key: K, value: WorkspaceFilters[K]) => void;
@@ -96,13 +64,6 @@ interface AppState {
   
   selectedElement: string | null;
   setSelectedElement: (val: string | null) => void;
-  selectedCommunityId: string | null;
-  setSelectedCommunityId: (val: string | null) => void;
-  isolatedCommunityId: string | null;
-  setIsolatedCommunityId: (val: string | null) => void;
-  hoveredCommunityId: string | null;
-  setHoveredCommunityId: (val: string | null) => void;
-  
   hiddenLegendItems: string[];
   setHiddenLegendItems: (val: string[]) => void;
   isolatedLegendItem: string | null;
@@ -113,10 +74,6 @@ interface AppState {
   setShowArrowheads: (val: boolean) => void;
   showNodeLabels: boolean;
   setShowNodeLabels: (val: boolean) => void;
-  rendererEngine: 'auto' | 'd3' | 'sigma';
-  setRendererEngine: (engine: 'auto' | 'd3' | 'sigma') => void;
-  isRendererSwitching: boolean;
-  setIsRendererSwitching: (val: boolean) => void;
   projectName: string;
   setProjectName: (val: string) => void;
   clearStore: () => void;
@@ -125,10 +82,6 @@ interface AppState {
 export const useStore = create<AppState>((set) => ({
   isDarkMode: false,
   setIsDarkMode: (val) => set({ isDarkMode: val }),
-  rendererEngine: 'auto',
-  setRendererEngine: (val) => set({ rendererEngine: val }),
-  isRendererSwitching: false,
-  setIsRendererSwitching: (val) => set({ isRendererSwitching: val }),
   projectName: 'NEW_PROJECT_NAME',
   setProjectName: (val) => set({ projectName: val }),
   directed: false,
@@ -136,20 +89,9 @@ export const useStore = create<AppState>((set) => ({
   rawNodes: [],
   rawEdges: [],
   setRawData: (nodes, edges, directed = false, bipartite = false) => set({ rawNodes: nodes, rawEdges: edges, directed, bipartite }),
-  customAttributes: [],
-  setCustomAttributes: (customAttributes) => set({ customAttributes }),
-  importedMetrics: null,
-  setImportedMetrics: (importedMetrics) => set({ importedMetrics }),
 
   selectedElement: null,
   setSelectedElement: (val) => set({ selectedElement: val }),
-  selectedCommunityId: null,
-  setSelectedCommunityId: (val) => set({ selectedCommunityId: val }),
-  isolatedCommunityId: null,
-  setIsolatedCommunityId: (val) => set({ isolatedCommunityId: val }),
-  hoveredCommunityId: null,
-  setHoveredCommunityId: (val) => set({ hoveredCommunityId: val }),
-
   hiddenLegendItems: [],
   setHiddenLegendItems: (val) => set({ hiddenLegendItems: val }),
   isolatedLegendItem: null,
@@ -167,7 +109,6 @@ export const useStore = create<AppState>((set) => ({
     removedNodes: "",
     resolution: 1.0,
     nodeSize: 3,
-    bipartiteNodeSize: 2,
     nodeSizeBase: 'abundance',
     nodeColorBase: 'custom',
     uniformNodeColor: '#cccccc',
@@ -182,12 +123,9 @@ export const useStore = create<AppState>((set) => ({
     edgeOpacityBase: 'uniform',
     forceStrength: -100,
     louvainSeed: 42,
-    metricWeightAttribute: 'weight_raw',
     liveUpdate: true,
     livePhysics: false,
-    customAttributeScope: 'node',
-    customNodeAttribute: '',
-    customEdgeAttribute: '',
+    
   },
   setFilter: (key, value) => 
     set((state) => ({ filters: { ...state.filters, [key]: value } })),
@@ -201,13 +139,7 @@ export const useStore = create<AppState>((set) => ({
     bipartite: false,
     rawNodes: [],
     rawEdges: [],
-    customAttributes: [],
-    importedMetrics: null,
     communityMap: {},
-    selectedElement: null,
-    selectedCommunityId: null,
-    isolatedCommunityId: null,
-    hoveredCommunityId: null,
     hiddenLegendItems: [],
     isolatedLegendItem: null,
     showArrowheads: false,
@@ -218,7 +150,6 @@ export const useStore = create<AppState>((set) => ({
       removedNodes: "",
       resolution: 1.0,
       nodeSize: 3,
-      bipartiteNodeSize: 2,
       nodeSizeBase: 'abundance',
       nodeColorBase: 'custom',
       uniformNodeColor: '#cccccc',
@@ -233,12 +164,9 @@ export const useStore = create<AppState>((set) => ({
       edgeOpacityBase: 'uniform',
       forceStrength: -100,
       louvainSeed: 42,
-      metricWeightAttribute: 'weight_raw',
       liveUpdate: true,
       livePhysics: false,
-      customAttributeScope: 'node',
-      customNodeAttribute: '',
-      customEdgeAttribute: '',
+      
     }
   })
 }));

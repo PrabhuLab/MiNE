@@ -1,5 +1,4 @@
-import type Graph from 'graphology';
-import modularityMetric from 'graphology-metrics/graph/modularity';
+import Graph from 'graphology';
 
 export function computeMaxRelWeight(rawEdges: any[]): number {
   if (!rawEdges || rawEdges.length === 0) return 100;
@@ -30,79 +29,39 @@ export function computeActiveNetwork(rawNodes: any[], rawEdges: any[], appliedFi
       .filter(Boolean)
   );
 
-  const degreeByNode = new Map<string, { degree: number; inDegree: number; outDegree: number }>();
-  const ensureDegree = (id: unknown) => {
-    const key = String(id);
-    if (!degreeByNode.has(key)) degreeByNode.set(key, { degree: 0, inDegree: 0, outDegree: 0 });
-    return degreeByNode.get(key)!;
-  };
-  (rawNodes || []).forEach((node) => ensureDegree(node.id));
-  (rawEdges || []).forEach((edge) => {
-    const source = ensureDegree(edge.source);
-    const target = ensureDegree(edge.target);
-    source.degree += 1;
-    source.outDegree += 1;
-    target.degree += 1;
-    target.inDegree += 1;
-  });
-
-  const nodeFilters = (appliedFilters.weightFilters || []).filter((filter: any) => String(filter.type).startsWith('node:'));
-  const edgeFilters = (appliedFilters.weightFilters || []).filter((filter: any) => !String(filter.type).startsWith('node:'));
-  const customNodeAttribute = appliedFilters.customNodeAttribute;
-  const nodeFilterValue = (node: any, type: string) => {
-    const metric = type.slice('node:'.length);
-    const degrees = degreeByNode.get(String(node.id));
-    if (metric === 'custom') return customNodeAttribute ? node[customNodeAttribute] : undefined;
-    if (metric === 'degree') return degrees?.degree;
-    if (metric === 'inDegree') return degrees?.inDegree;
-    if (metric === 'outDegree') return degrees?.outDegree;
-    return node[metric];
-  };
-
-  const eligibleNodes = (rawNodes || []).filter(n => {
-    const nodeIdStr = String(n.id);
-    if (removedSet.has(nodeIdStr)) return false;
-    return nodeFilters.every((filter: any) => {
-      const value = Number(nodeFilterValue(n, String(filter.type)));
-      return !Number.isFinite(value) || value >= Number(filter.cutoff);
-    });
-  });
-  const eligibleNodeIds = new Set(eligibleNodes.map(n => String(n.id)));
-
-  const filteredEdges = (rawEdges || []).filter(e => {
-    const passesWeightFilters = edgeFilters.every((filter: any) => {
-      const type = String(filter.type);
-      const attribute = type.startsWith('edge:') ? type.slice('edge:'.length) : type;
-      const value = Number(e[attribute]);
-      if (!Number.isFinite(value)) return true;
-      return value >= Number(filter.cutoff);
+  const filteredEdges = rawEdges.filter(e => {
+    const passesWeightFilters = (appliedFilters.weightFilters || []).every((filter: any) => {
+      const val = e[filter.type];
+      if (val === undefined || val === null) return true;
+      return val >= filter.cutoff;
     });
 
     return passesWeightFilters &&
-      !removedSet.has(String(e.source)) &&
-      !removedSet.has(String(e.target)) &&
-      eligibleNodeIds.has(String(e.source)) &&
-      eligibleNodeIds.has(String(e.target));
+      !removedSet.has(e.source) &&
+      !removedSet.has(e.target);
   });
-  const strictlyValidEdges = filteredEdges.filter(e =>
-    eligibleNodeIds.has(String(e.source)) && eligibleNodeIds.has(String(e.target))
-  );
 
   const nodesWithEdges = new Set<string>();
-  strictlyValidEdges.forEach(e => {
-    nodesWithEdges.add(String(e.source));
-    nodesWithEdges.add(String(e.target));
+  filteredEdges.forEach(e => {
+    nodesWithEdges.add(e.source);
+    nodesWithEdges.add(e.target);
   });
-  const filteredNodes = eligibleNodes.filter(n => nodesWithEdges.has(String(n.id)));
+
+  const filteredNodes = rawNodes.filter(n => 
+    nodesWithEdges.has(n.id) && !removedSet.has(n.id)
+  );
+
+  const validNodeIds = new Set(filteredNodes.map(n => n.id));
+  const strictlyValidEdges = filteredEdges.filter(e => validNodeIds.has(e.source) && validNodeIds.has(e.target));
 
   return { validNodes: filteredNodes, validEdges: strictlyValidEdges };
 }
 
 export function computeCommunityMetrics(graph: Graph, newCommunityMap: Record<string, any>, directed: boolean) {
   let sumWeights = 0;
-  graph.forEachEdge((e: any, atts: any) => { sumWeights += (atts.weight || 1); });
+  graph.forEachEdge((e, atts) => { sumWeights += (atts.weight || 1); });
       
-  const metrics = graph.nodes().map((nodeId: string) => {
+  const metrics = graph.nodes().map(nodeId => {
     const comm = newCommunityMap[nodeId] || "";
         
     if (directed) {
@@ -110,74 +69,73 @@ export function computeCommunityMetrics(graph: Graph, newCommunityMap: Record<st
       let nodeInDegree = 0;
       let nodeOutDegree = 0;
           
-      graph.forEachInEdge(nodeId, (e: any, atts: any) => { nodeInDegree += (atts.weight || 1); });
-      graph.forEachOutEdge(nodeId, (e: any, atts: any) => { nodeOutDegree += (atts.weight || 1); });
+      graph.forEachInEdge(nodeId, (e, atts) => { nodeInDegree += (atts.weight || 1); });
+      graph.forEachOutEdge(nodeId, (e, atts) => { nodeOutDegree += (atts.weight || 1); });
 
       let commInDegree = 0;
       let commOutDegree = 0;
-      graph.forEachNode((n: any) => {
+      graph.forEachNode(n => {
         if (newCommunityMap[n] === comm) {
-          graph.forEachInEdge(n, (e: any, atts: any) => { commInDegree += (atts.weight || 1); });
-          graph.forEachOutEdge(n, (e: any, atts: any) => { commOutDegree += (atts.weight || 1); });
+          graph.forEachInEdge(n, (e, atts) => { commInDegree += (atts.weight || 1); });
+          graph.forEachOutEdge(n, (e, atts) => { commOutDegree += (atts.weight || 1); });
         }
       });
 
       let k_in_from_comm = 0;
       let k_out_to_comm = 0;
-      graph.forEachInEdge(nodeId, (e: any, atts: any, source: any) => {
+      graph.forEachInEdge(nodeId, (e, atts, source) => {
         if (newCommunityMap[source] === comm) k_in_from_comm += (atts.weight || 1);
       });
-      graph.forEachOutEdge(nodeId, (e: any, atts: any, source: any, target: any) => {
+      graph.forEachOutEdge(nodeId, (e, atts, source, target) => {
         if (newCommunityMap[target] === comm) k_out_to_comm += (atts.weight || 1);
       });
           
-      const nodeCommunityDegree = k_in_from_comm + k_out_to_comm;
-      const deltaQ = totalWeight > 0
-        ? modularityMetric.directedDelta(totalWeight, commInDegree, commOutDegree, nodeInDegree, nodeOutDegree, nodeCommunityDegree)
-        : 0;
+      const deltaQ = totalWeight > 0 ? 
+        ((k_in_from_comm + k_out_to_comm) / totalWeight) - 
+        ((nodeOutDegree * commInDegree + nodeInDegree * commOutDegree) / Math.pow(totalWeight, 2)) : 0;
             
       return {
         id: nodeId,
         community: comm,
-        k_i_in: nodeCommunityDegree,
+        k_i_in: (k_in_from_comm + k_out_to_comm).toFixed(4),
         nodeDegree: `↓${nodeInDegree.toFixed(2)} ↑${nodeOutDegree.toFixed(2)}`,
         communityDegree: `↓${commInDegree.toFixed(2)} ↑${commOutDegree.toFixed(2)}`,
-        deltaQ
+        deltaQ: deltaQ.toFixed(6)
       };
     } else {
-      const totalWeight = sumWeights;
+      const totalWeight2m = sumWeights * 2;
       let nodeDegree = 0;
-      graph.forEachEdge(nodeId, (e: any, atts: any) => { nodeDegree += (atts.weight || 1); });
+      graph.forEachEdge(nodeId, (e, atts) => { nodeDegree += (atts.weight || 1); });
           
       let communityDegree = 0;
-      graph.forEachNode((n: any) => {
+      graph.forEachNode(n => {
         if (newCommunityMap[n] === comm) {
-          graph.forEachEdge(n, (e: any, atts: any) => { communityDegree += (atts.weight || 1); });
+          graph.forEachEdge(n, (e, atts) => { communityDegree += (atts.weight || 1); });
         }
       });
 
       let k_i_in = 0;
-      graph.forEachEdge(nodeId, (edge: any, atts: any, source: any, target: any) => {
+      graph.forEachEdge(nodeId, (edge, atts, source, target) => {
         const neighbor = source === nodeId ? target : source;
         if (newCommunityMap[neighbor] === comm) {
           k_i_in += (atts.weight || 1);
         }
       });
 
-      const deltaQ = totalWeight > 0 ? modularityMetric.undirectedDelta(totalWeight, communityDegree, nodeDegree, k_i_in * 2) : 0;
+      const deltaQ = totalWeight2m > 0 ? (k_i_in / totalWeight2m) - ((nodeDegree * communityDegree) / Math.pow(totalWeight2m, 2)) : 0;
           
       return {
         id: nodeId,
         community: comm,
-        k_i_in,
-        nodeDegree,
-        communityDegree,
-        deltaQ
+        k_i_in: k_i_in.toFixed(4),
+        nodeDegree: nodeDegree.toFixed(4),
+        communityDegree: communityDegree.toFixed(4),
+        deltaQ: deltaQ.toFixed(6)
       };
     }
   });
 
-  metrics.sort((a: any, b: any) => parseFloat(b.deltaQ) - parseFloat(a.deltaQ));
+  metrics.sort((a,b) => parseFloat(b.deltaQ) - parseFloat(a.deltaQ));
   return metrics;
 }
 
@@ -202,8 +160,8 @@ export function computeTableDataNodes(validNodes: any[], networkMetrics: any[], 
 
   if (sortConfig) {
     data.sort((a, b) => {
-      let aVal: any = a[sortConfig.key] ?? a.net?.[sortConfig.key] ?? a.mod?.[sortConfig.key] ?? a.id;
-      let bVal: any = b[sortConfig.key] ?? b.net?.[sortConfig.key] ?? b.mod?.[sortConfig.key] ?? b.id;
+      let aVal: any = a.id;
+      let bVal: any = b.id;
 
       if (sortConfig.key === "id") {
         aVal = a.id; bVal = b.id;
@@ -256,8 +214,8 @@ export function computeTableDataEdges(validEdges: any[], searchQuery: string, so
   
   if (sortConfig) {
     data = [...data].sort((a, b) => {
-      let aVal: any = a[sortConfig.key] ?? a.source;
-      let bVal: any = b[sortConfig.key] ?? b.source;
+      let aVal: any = a.source;
+      let bVal: any = b.source;
 
       if (sortConfig.key === "source") {
         aVal = a.source; bVal = b.source;

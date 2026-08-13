@@ -4,33 +4,24 @@ import React from 'react';
 
 interface GraphControlOverlayProps {
   isDarkMode?: boolean;
-  onZoomFit?: () => void;
-  onResetView?: () => void;
+  onZoomFit: () => void;
   onRefreshGraph: () => void;
   isCalculatingLayout?: boolean;
-  activeRenderer?: 'd3' | 'sigma';
-  onSwitchRenderer?: (engine: 'd3' | 'sigma') => void;
-  isRendererSwitching?: boolean;
 }
 
 export default function GraphControlOverlay({
   isDarkMode,
   onZoomFit,
-  onResetView,
   onRefreshGraph,
   isCalculatingLayout,
-  activeRenderer = 'd3',
-  onSwitchRenderer,
-  isRendererSwitching,
 }: GraphControlOverlayProps) {
-  const handleReset = onResetView || onZoomFit;
   return (
     <>
-      {(isCalculatingLayout || isRendererSwitching) && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/30 dark:bg-black/60 backdrop-blur-md z-50">
-          <div className="w-8 h-8 border-2 border-t-transparent border-[#141414] dark:border-[#E4E3E0] rounded-full animate-spin mb-4"></div>
-          <span className="text-[11px] font-bold uppercase tracking-widest font-mono text-[#141414] dark:text-[#E4E3E0]">
-            {isRendererSwitching ? 'Switching Renderer...' : 'Calculating Layout...'}
+      {isCalculatingLayout && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/10 dark:bg-white/5 backdrop-blur-sm z-50">
+          <div className="w-6 h-6 border-2 border-t-transparent border-[#141414] dark:border-[#E4E3E0] rounded-full animate-spin mb-4"></div>
+          <span className="text-[10px] font-bold uppercase tracking-widest font-mono">
+            Calculating Layout...
           </span>
         </div>
       )}
@@ -38,15 +29,14 @@ export default function GraphControlOverlay({
       {/* Tools Menu */}
       <div className="absolute top-6 right-6 flex flex-col space-y-2 z-10">
         <button
-          onClick={handleReset}
+          onClick={onZoomFit}
           className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest border transition-colors ${
             isDarkMode
               ? 'bg-[#141414] border-[#333] text-[#E4E3E0] hover:bg-[#E4E3E0] hover:text-[#141414]'
               : 'bg-white border-[#141414] text-[#141414] hover:bg-[#141414] hover:text-white'
           }`}
-          title="Clear temporary isolation and fit all currently visible nodes"
         >
-          [ RESET VIEW ]
+          [ FIT ZOOM ]
         </button>
         <button
           onClick={onRefreshGraph}

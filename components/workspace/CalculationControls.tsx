@@ -1,104 +1,140 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { useStore } from '@/store/useStore';
 import { SyncInput } from '@/components/ui/SyncInput';
 import { CustomSlider } from '@/components/ui/CustomSlider';
-import { availableNumericCustomEdgeAttributes } from '@/lib/graphIO';
-import { METRIC_REGISTRY, isMetricCompatible } from '@/services/metrics/registry';
-import type { MetricGraphContext, MetricsSelection } from '@/services/metrics/types';
 
 interface CalculationControlsProps {
-  metricsToRun: MetricsSelection;
-  setMetricsToRun: React.Dispatch<React.SetStateAction<MetricsSelection>>;
-  runSelectedMetrics: (metricIds?: string[]) => void;
+  metricsToRun: any;
+  setMetricsToRun: React.Dispatch<React.SetStateAction<any>>;
+  runSelectedMetrics: () => void;
   metricsLoading: boolean;
-  metricContext: MetricGraphContext;
-  staleMetricIds: string[];
-  metricWarnings: Record<string, string>;
-  rawEdges: any[];
-  layoutControls?: React.ReactNode;
 }
 
-export const CalculationControls = ({ metricsToRun, setMetricsToRun, runSelectedMetrics, metricsLoading, metricContext, staleMetricIds, metricWarnings, rawEdges, layoutControls }: CalculationControlsProps) => {
+export const CalculationControls = ({ metricsToRun, setMetricsToRun, runSelectedMetrics, metricsLoading }: CalculationControlsProps) => {
   const { filters, setFilter, isDarkMode, directed } = useStore();
-  const [activeControlTab, setActiveControlTab] = useState<'communities' | 'metrics' | 'layout'>('communities');
-  const compatible = useMemo(() => METRIC_REGISTRY.filter((metric) => isMetricCompatible(metric, metricContext)), [metricContext]);
-  const customWeights = useMemo(() => availableNumericCustomEdgeAttributes(rawEdges), [rawEdges]);
-  const selectedMetricCount = compatible.filter((metric) => metricsToRun[metric.id]).length;
+  const [activeControlTab, setActiveControlTab] = useState<"communities" | "metrics">("communities");
 
   return (
-    <div className="min-w-0">
+    <div>
       <div className="flex items-center justify-between mb-4">
-        <h3 className={`text-[10px] font-bold uppercase tracking-widest opacity-70 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Calculations</h3>
-        {staleMetricIds.length > 0 && <span className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-amber-500/20 text-amber-500 border border-amber-500/30 rounded-sm">{staleMetricIds.length} stale</span>}
-      </div>
-      <div className="flex border-b mb-4">
-        {(['communities', 'metrics', 'layout'] as const).map((tab) => (
-          <button key={tab} className={`flex-1 text-[9px] font-bold uppercase tracking-widest py-2 border-b-2 transition-colors ${activeControlTab === tab ? (isDarkMode ? 'border-[#E4E3E0] text-[#E4E3E0]' : 'border-[#141414] text-[#141414]') : 'border-transparent text-[#888]'}`} onClick={() => setActiveControlTab(tab)}>
-            {tab}
-          </button>
-        ))}
-      </div>
+      <h3 className={`text-[10px] font-bold uppercase tracking-widest opacity-70 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Calculations</h3>
+    </div>
+      <div className="flex border-b mb-6">
+      <button 
+        className={`flex-1 text-[10px] font-bold uppercase tracking-widest py-2 border-b-2 transition-colors ${activeControlTab === "communities" ? (isDarkMode ? "border-[#E4E3E0] text-[#E4E3E0]" : "border-[#141414] text-[#141414]") : (isDarkMode ? "border-transparent text-[#888] hover:text-[#ccc]" : "border-transparent text-[#888] hover:text-[#444]")}`}
+        onClick={() => setActiveControlTab("communities")}
+      >
+        Communities
+      </button>
+      <button 
+        className={`flex-1 text-[10px] font-bold uppercase tracking-widest py-2 border-b-2 transition-colors ${activeControlTab === "metrics" ? (isDarkMode ? "border-[#E4E3E0] text-[#E4E3E0]" : "border-[#141414] text-[#141414]") : (isDarkMode ? "border-transparent text-[#888] hover:text-[#ccc]" : "border-transparent text-[#888] hover:text-[#444]")}`}
+        onClick={() => setActiveControlTab("metrics")}
+      >
+        Metrics
+      </button>
+    </div>
 
-      {activeControlTab === 'communities' && (
+      {activeControlTab === "communities" && (
         <div className="space-y-5">
-          <label className="flex items-center space-x-2 cursor-pointer">
-            <input type="checkbox" checked={Boolean(metricsToRun.louvain)} onChange={(event) => setMetricsToRun((current) => ({ ...current, louvain: event.target.checked }))} className="accent-[#141414] dark:accent-[#E4E3E0] w-3 h-3" />
-            <span className="text-[10px] uppercase font-mono tracking-wider">Louvain + node ΔQ</span>
-          </label>
-          {metricsToRun.louvain && (
-            <div className={`pt-4 border-t border-dotted ${isDarkMode ? 'border-[#555]' : 'border-[#ccc]'}`}>
-              <label className="flex items-center justify-between text-[10px] font-bold uppercase tracking-widest mb-2">
-                <span>Louvain Resolution</span>
-                <SyncInput className="w-12 bg-transparent border-b text-right font-mono outline-none" value={filters.resolution} onChange={(value: number) => setFilter('resolution', value)} step="0.1" />
-              </label>
-              <CustomSlider min="0.1" max="5" step="0.1" value={filters.resolution} onChange={(value: number) => setFilter('resolution', value)} isDarkMode={isDarkMode} />
+          <div className="group">
+            <label className={`block text-[10px] font-bold uppercase tracking-widest mb-4 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
+              Community Detection Algorithms
+            </label>
+            <div className="space-y-3">
+              {[
+                { key: "louvain", label: "Louvain" }
+              ].map(({ key, label }) => (
+                <label key={key} className="flex items-center space-x-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={(metricsToRun as any)[key]}
+                    onChange={(e) => setMetricsToRun((prev: any) => ({ ...prev, [key]: e.target.checked }))}
+                    className="accent-[#141414] dark:accent-[#E4E3E0] w-3 h-3"
+                  />
+                  <span className={`text-[10px] uppercase font-mono tracking-wider ${isDarkMode ? 'text-[#aaa]' : 'text-[#555]'}`}>
+                    {label}
+                  </span>
+                </label>
+              ))}
             </div>
-          )}
-          <button onClick={() => runSelectedMetrics(['louvain'])} disabled={metricsLoading || !metricsToRun.louvain || !metricContext.hasEdges} className="w-full py-2 text-[10px] uppercase font-bold tracking-widest border disabled:opacity-40">
-            {metricsLoading ? 'Computing…' : 'Run Communities'}
-          </button>
-        </div>
-      )}
 
-      {activeControlTab === 'metrics' && (
-        <div className="max-h-[28rem] overflow-y-auto overflow-x-hidden pr-1 space-y-4">
-          <div>
-            <label className="block text-[9px] font-bold uppercase tracking-widest mb-2">Metric Weight Source</label>
-            <select value={filters.metricWeightAttribute} onChange={(event) => setFilter('metricWeightAttribute', event.target.value)} className={`w-full bg-transparent border p-2 text-[10px] font-mono ${isDarkMode ? 'border-[#333]' : 'border-[#141414]'}`}>
-              <option value="weight_raw">Raw / Absolute</option>
-              <option value="weight_secondary">{directed ? 'Directed / Conditional' : 'Secondary / Transformed'}</option>
-              {customWeights.map((attribute) => <option key={attribute} value={attribute}>Custom: {attribute}</option>)}
-            </select>
-          </div>
-          {(['graph', 'node', 'edge', 'layout'] as const).map((scope) => {
-            const definitions = compatible.filter((metric) => metric.scope === scope);
-            if (!definitions.length) return null;
-            return (
-              <div key={scope}>
-                <div className="text-[9px] font-bold uppercase tracking-[0.16em] opacity-60 mb-2">{scope === 'layout' ? 'Layout quality' : `${scope} metrics`}</div>
-                <div className="space-y-2">
-                  {definitions.map((metric) => (
-                    <label key={metric.id} className="flex items-start gap-2 cursor-pointer">
-                      <input type="checkbox" checked={Boolean(metricsToRun[metric.id])} onChange={(event) => setMetricsToRun((current) => ({ ...current, [metric.id]: event.target.checked }))} className="mt-0.5 accent-[#141414] dark:accent-[#E4E3E0] w-3 h-3" />
-                      <span className="min-w-0 flex-1 text-[10px] uppercase font-mono tracking-wider">
-                        {metric.label}
-                        <span className="ml-1 opacity-45">· {metric.cost}</span>
-                        {staleMetricIds.includes(metric.id) && <span className="ml-1 text-amber-500">· stale</span>}
-                        {metricWarnings[metric.id] && <span className="block normal-case text-red-500 mt-1 break-words">{metricWarnings[metric.id]}</span>}
-                      </span>
-                    </label>
-                  ))}
-                </div>
+            {metricsToRun.louvain && (
+              <div className={`mt-4 pt-4 border-t border-dotted ${isDarkMode ? 'border-[#555]' : 'border-[#ccc]'}`}>
+                <label className={`flex items-center justify-between text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
+                  <span>Louvain Resolution</span>
+                  <SyncInput 
+                    className={`w-12 bg-transparent border-b text-right font-mono outline-none ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0]' : 'border-[#ccc] focus:border-[#141414] text-[#141414]'}`}
+                    value={filters.resolution}
+                    onChange={(v: number) => setFilter('resolution', v)}
+                    step="0.1"
+                  />
+                </label>
+                <CustomSlider
+                  min="0.1" max="5.0" step="0.1"
+                  value={filters.resolution}
+                  onChange={(v: number) => setFilter('resolution', v)}
+                  isDarkMode={isDarkMode}
+                />
               </div>
-            );
-          })}
-          <button onClick={() => runSelectedMetrics()} disabled={metricsLoading || selectedMetricCount === 0} className={`sticky bottom-0 w-full py-2 text-[10px] uppercase font-bold tracking-widest border shadow-sm disabled:opacity-40 ${isDarkMode ? 'bg-[#E4E3E0] text-[#141414] border-[#E4E3E0]' : 'bg-[#141414] text-white border-[#141414]'}`}>
-            {metricsLoading ? 'Computing…' : `Calculate ${selectedMetricCount || ''} Metric${selectedMetricCount === 1 ? '' : 's'}`}
-          </button>
+            )}
+
+            <button
+              onClick={runSelectedMetrics}
+              disabled={metricsLoading || !metricsToRun.louvain}
+              className={`mt-6 w-full py-2 text-[10px] uppercase font-bold tracking-widest border transition-colors ${
+                metricsLoading 
+                ? "opacity-50 cursor-not-allowed border-gray-400 text-gray-400" 
+                : (isDarkMode ? "border-[#E4E3E0] text-[#E4E3E0] hover:bg-[#E4E3E0] hover:text-[#141414]" : "border-[#141414] text-[#141414] hover:bg-[#141414] hover:text-white")
+              }`}
+            >
+              {metricsLoading ? "Computing..." : "Run Communities"}
+            </button>
+          </div>
         </div>
       )}
 
-      {activeControlTab === 'layout' && (layoutControls || <div className="text-[10px] font-mono opacity-60">Layout controller unavailable.</div>)}
+      {activeControlTab === "metrics" && (
+        <div className="space-y-5">
+          <div className="group">
+            <label className={`block text-[10px] font-bold uppercase tracking-widest mb-4 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
+              Select Metrics to Compute
+            </label>
+            <div className="space-y-3">
+              {[
+                { key: "degree", label: directed ? "In/Out Degree Centrality" : "Degree Centrality" },
+                { key: "betweenness", label: "Betweenness Centrality" },
+                { key: "closeness", label: "Closeness Centrality" },
+                { key: "clustering", label: "Clustering Coefficient" },
+                { key: "pagerank", label: "PageRank" },
+                { key: "eigenvector", label: "Eigenvector Centrality" }
+              ].map(({ key, label }) => (
+                <label key={key} className="flex items-center space-x-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={(metricsToRun as any)[key]}
+                    onChange={(e) => setMetricsToRun((prev: any) => ({ ...prev, [key]: e.target.checked }))}
+                    className="accent-[#141414] dark:accent-[#E4E3E0] w-3 h-3"
+                  />
+                  <span className={`text-[10px] uppercase font-mono tracking-wider ${isDarkMode ? 'text-[#aaa]' : 'text-[#555]'}`}>
+                    {label}
+                  </span>
+                </label>
+              ))}
+            </div>
+            <button
+              onClick={runSelectedMetrics}
+              disabled={metricsLoading || !Object.values({ ...metricsToRun, louvain: false }).some(v => v)}
+              className={`mt-6 w-full py-2 text-[10px] uppercase font-bold tracking-widest border transition-colors ${
+                metricsLoading 
+                ? "opacity-50 cursor-not-allowed border-gray-400 text-gray-400" 
+                : (isDarkMode ? "border-[#E4E3E0] text-[#E4E3E0] hover:bg-[#E4E3E0] hover:text-[#141414]" : "border-[#141414] text-[#141414] hover:bg-[#141414] hover:text-white")
+              }`}
+            >
+              {metricsLoading ? "Computing..." : "Run Metrics"}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
