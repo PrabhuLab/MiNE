@@ -208,7 +208,7 @@ export function useGraphSimulation({
     const dx = Math.max(20, maxX - minX);
     const dy = Math.max(20, maxY - minY);
     const padding = 0.75;
-    const scale = Math.max(0.1, Math.min(4, padding / Math.max(dx / width, dy / height)));
+    const scale = Math.max(0.000001, Math.min(1000, padding / Math.max(dx / width, dy / height)));
     const translate = [width / 2 - scale * cx, height / 2 - scale * cy];
 
     applyTransform(d3.zoomIdentity.translate(translate[0], translate[1]).scale(scale));
@@ -254,7 +254,7 @@ export function useGraphSimulation({
     const zoomBehavior = d3
       .zoom<SVGSVGElement, unknown>()
       .extent([[0, 0], [width, height]])
-      .scaleExtent([0.05, 8])
+      .scaleExtent([0.000001, 1000])
       .on('zoom', (e) => {
         zoomGroup.attr('transform', e.transform);
       });
@@ -264,10 +264,10 @@ export function useGraphSimulation({
 
     zoomGroup
       .append('rect')
-      .attr('width', width * 10)
-      .attr('height', height * 10)
-      .attr('x', -width * 4)
-      .attr('y', -height * 4)
+      .attr('width', width * 100000)
+      .attr('height', height * 100000)
+      .attr('x', -width * 50000)
+      .attr('y', -height * 50000)
       .style('fill', 'transparent')
       .on('click', () => {
         setClickedNode(null);

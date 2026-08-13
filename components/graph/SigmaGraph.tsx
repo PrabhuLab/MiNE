@@ -411,6 +411,8 @@ export default function SigmaGraph({
         enableEdgeEvents: false,
         enableNodeDrag: true,
         renderLabels: shouldRenderLabels,
+        minCameraRatio: null,
+        maxCameraRatio: null,
         labelRenderedSizeThreshold: 0,
         labelDensity: 1,
         labelGridCellSize: 100,
