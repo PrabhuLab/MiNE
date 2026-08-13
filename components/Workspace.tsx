@@ -518,8 +518,6 @@ export default function Workspace() {
                   d3NodesRef={d3NodesRef}
                   d3LinksRef={d3LinksRef}
                   d3NodesMapRef={d3NodesMapRef}
-                  getNodeSize={getNodeSize}
-                  getEdgeSize={getEdgeSize}
                 />
               )}
             </div>

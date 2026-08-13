@@ -1,4 +1,5 @@
 import { TopologyType, ColumnMappingState, ParsedDataState } from '../types';
+import { explicitPartitionRole } from '@/services/graphPresentation/visibility';
 
 export interface GraphNode {
   id: string;
@@ -56,7 +57,14 @@ export function constructGraph(
     parsedData.rawNodes.forEach((n: any, index: number) => {
       const id = String(n[nodeIdCol || 'id'] ?? n.id ?? `node_${index}`);
       const mappedType = nodeTypeCol ? n[nodeTypeCol] : n.type;
-      const mappedPartition = nodePartitionCol ? n[nodePartitionCol] : n.partition;
+      const rawPartition = nodePartitionCol ? n[nodePartitionCol] : n.partition;
+      let mappedPartition: string | undefined = undefined;
+      if (topology === 'Bipartite') {
+        const role = explicitPartitionRole(rawPartition);
+        mappedPartition = role !== null ? (role ? 'B' : 'A') : (rawPartition ? String(rawPartition) : 'A');
+      } else if (rawPartition !== undefined && rawPartition !== '') {
+        mappedPartition = String(rawPartition);
+      }
       nodesMap.set(id, {
         ...n,
         id,
@@ -428,6 +436,12 @@ export function constructGraph(
           const comm = commIdx !== -1 && row[commIdx] ? row[commIdx] : undefined;
           const abund = abnIdx !== -1 ? parseFloat(row[abnIdx]) : 10;
 
+          let resolvedPartition = partition;
+          if (topology === 'Bipartite' && partition !== undefined) {
+            const role = explicitPartitionRole(partition);
+            if (role !== null) resolvedPartition = role ? 'B' : 'A';
+          }
+
           if (nodesMap.has(id)) {
             const existing = nodesMap.get(id)!;
             const extraProps: any = {};
@@ -442,7 +456,7 @@ export function constructGraph(
               ...existing,
               name: lblIdx !== -1 && row[lblIdx] ? name : existing.name,
               type: type || existing.type,
-              partition: partition ?? existing.partition,
+              partition: resolvedPartition ?? existing.partition ?? (topology === 'Bipartite' ? 'A' : undefined),
               community: comm || existing.community,
               abundance: isNaN(abund) ? existing.abundance : abund,
               ...extraProps,
@@ -456,7 +470,15 @@ export function constructGraph(
                 }
               }
             }
-            nodesMap.set(id, { id, name, type, partition, community: comm, abundance: isNaN(abund) ? 10 : abund, ...extraProps });
+            nodesMap.set(id, {
+              id,
+              name,
+              type,
+              partition: resolvedPartition ?? (topology === 'Bipartite' ? 'A' : undefined),
+              community: comm,
+              abundance: isNaN(abund) ? 10 : abund,
+              ...extraProps,
+            });
           }
         }
       }

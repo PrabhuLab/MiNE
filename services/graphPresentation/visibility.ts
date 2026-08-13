@@ -1,8 +1,14 @@
-function explicitPartitionRole(value: unknown): boolean | null {
+export function explicitPartitionRole(value: unknown): boolean | null {
   if (value === undefined || value === null || value === '') return null;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (value === 1) return true;
+    if (value === 0) return false;
+    return null;
+  }
   const normalized = String(value).trim().toUpperCase();
-  if (['1', 'B', 'SECONDARY', 'RIGHT', 'TARGET'].includes(normalized)) return true;
-  if (['0', 'A', 'PRIMARY', 'LEFT', 'SOURCE'].includes(normalized)) return false;
+  if (['1', 'B', 'SECONDARY', 'RIGHT', 'TARGET', 'TRUE'].includes(normalized)) return true;
+  if (['0', 'A', 'PRIMARY', 'LEFT', 'SOURCE', 'FALSE'].includes(normalized)) return false;
   return null;
 }
 
@@ -26,11 +32,13 @@ export function isSecondaryNode(node: any, isBipartite: boolean): boolean {
     if (role !== null) return role;
   }
   if (node.partitionIndex !== undefined && node.partitionIndex !== null) {
-    return Number(node.partitionIndex) === 1;
+    if (Number(node.partitionIndex) === 1) return true;
+    if (Number(node.partitionIndex) === 0) return false;
   }
-  for (const value of [node.type, node.group]) {
-    const role = explicitPartitionRole(value);
-    if (role !== null) return role;
+  if (node.type !== undefined && node.type !== null && typeof node.type === 'string') {
+    const normType = node.type.trim().toUpperCase();
+    if (['B', 'SECONDARY', 'RIGHT', 'TARGET'].includes(normType)) return true;
+    if (['A', 'PRIMARY', 'LEFT', 'SOURCE'].includes(normType)) return false;
   }
   return false;
 }

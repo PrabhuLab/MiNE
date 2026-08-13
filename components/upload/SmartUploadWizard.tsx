@@ -237,18 +237,24 @@ export default function SmartUploadWizard() {
     const canonical = graphToRaw(graphFromRaw(previewGraph.nodes, previewGraph.edges, isDirected, topology === 'Bipartite'));
     setRawData(canonical.nodes, canonical.edges, isDirected, topology === 'Bipartite');
     const inferredCustomAttributes = [...inferCustomNodeAttributes(canonical.nodes), ...inferCustomEdgeAttributes(canonical.edges)];
-    if (inferredCustomAttributes.length) {
-      const firstNodeAttribute = inferredCustomAttributes.find((attribute) => attribute.scope === 'node');
-      const firstEdgeAttribute = inferredCustomAttributes.find((attribute) => attribute.scope === 'edge');
-      useStore.setState((state) => ({
-        filters: {
-          ...state.filters,
-          customNodeAttribute: state.filters.customNodeAttribute || firstNodeAttribute?.name || '',
-          customEdgeAttribute: state.filters.customEdgeAttribute || firstEdgeAttribute?.name || '',
-        },
-        customAttributes: inferredCustomAttributes,
-      }));
-    }
+    const hasChosenCommunity = Boolean(
+      (mapping.nodeCommunityCol && mapping.nodeCommunityCol !== '') ||
+      canonical.nodes.some((node) => node.community !== undefined && node.community !== null && String(node.community).trim() !== '')
+    );
+    const firstNodeAttribute = inferredCustomAttributes.find((attribute) => attribute.scope === 'node');
+    const firstEdgeAttribute = inferredCustomAttributes.find((attribute) => attribute.scope === 'edge');
+    useStore.setState((state) => ({
+      filters: {
+        ...state.filters,
+        nodeColorBase: hasChosenCommunity ? 'custom' : 'louvain',
+        edgeColorBase: hasChosenCommunity ? 'uniform' : 'nodeMetric',
+        edgeColorNodeMetric: hasChosenCommunity ? '' : 'louvain',
+        edgeColorNodeTarget: 'source' as const,
+        customNodeAttribute: state.filters.customNodeAttribute || firstNodeAttribute?.name || '',
+        customEdgeAttribute: state.filters.customEdgeAttribute || firstEdgeAttribute?.name || '',
+      },
+      customAttributes: inferredCustomAttributes,
+    }));
     router.push('/workspace');
   };
 
@@ -256,8 +262,24 @@ export default function SmartUploadWizard() {
     const { nodes, edges } = graphToRaw(parsed.graph);
     const workspace = parsed.workspace;
     const inferredCustomAttributes = [...inferCustomNodeAttributes(nodes), ...inferCustomEdgeAttributes(edges)];
+    const hasExplicitCommunity = Boolean(
+      (workspace?.appearance.communityMap && Object.keys(workspace.appearance.communityMap).length > 0) ||
+      nodes.some((node) => node.community !== undefined && node.community !== null && String(node.community).trim() !== '') ||
+      (workspace?.filters?.nodeColorBase && workspace.filters.nodeColorBase !== 'louvain')
+    );
     resetCommunityColorCache();
     clearStore();
+    const defaultFilters = useStore.getState().filters;
+    const nextFilters = workspace?.filters ? {
+      ...defaultFilters,
+      ...workspace.filters,
+    } : {
+      ...defaultFilters,
+      nodeColorBase: hasExplicitCommunity ? 'custom' : 'louvain',
+      edgeColorBase: hasExplicitCommunity ? 'uniform' : 'nodeMetric',
+      edgeColorNodeMetric: hasExplicitCommunity ? '' : 'louvain',
+      edgeColorNodeTarget: 'source' as const,
+    };
     useStore.setState({
       rawNodes: nodes,
       rawEdges: edges,
@@ -266,7 +288,7 @@ export default function SmartUploadWizard() {
       importedMetrics: parsed.metrics,
       projectName: workspace?.projectName || parsed.projectName || networkFiles[0]?.name.replace(/\.[^.]+$/, '') || 'NEW_PROJECT_NAME',
       rendererEngine: workspace?.rendererEngine || 'auto',
-      filters: workspace?.filters || useStore.getState().filters,
+      filters: nextFilters,
       isDarkMode: workspace?.appearance.isDarkMode ?? useStore.getState().isDarkMode,
       showNodeLabels: workspace?.appearance.showNodeLabels ?? false,
       showArrowheads: workspace?.appearance.showArrowheads ?? false,

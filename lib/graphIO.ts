@@ -10,7 +10,7 @@ import type {
   RawNode,
 } from '@/store/useStore';
 import { cleanAttributes, meaningful, numeric } from '@/services/graphIO/attributes';
-import { orderPartitionValues } from '@/services/graphPresentation/visibility';
+import { explicitPartitionRole, orderPartitionValues } from '@/services/graphPresentation/visibility';
 import {
   EMPTY_METRICS,
   GRAPH_IO_VERSION,
@@ -57,10 +57,20 @@ export function graphFromRaw(
   const partitionValueSet = new Set<string>();
   if (bipartite) {
     nodes.forEach((node) => {
-      const value = meaningful(node.partition)
-        ? node.partition
-        : node.bipartite ?? node.group ?? (node.type === 'A' || node.type === 'B' ? node.type : undefined);
-      if (meaningful(value)) partitionValueSet.add(String(value));
+      let val: string | undefined = undefined;
+      if (meaningful(node.partition)) {
+        const role = explicitPartitionRole(node.partition);
+        val = role !== null ? (role ? 'B' : 'A') : String(node.partition);
+      } else if (node.bipartite !== undefined && typeof node.bipartite !== 'object') {
+        const role = explicitPartitionRole(node.bipartite);
+        val = role !== null ? (role ? 'B' : 'A') : String(node.bipartite);
+      } else if (node.set !== undefined) {
+        const role = explicitPartitionRole(node.set);
+        if (role !== null) val = role ? 'B' : 'A';
+      } else if (node.type === 'A' || node.type === 'B') {
+        val = node.type;
+      }
+      if (meaningful(val)) partitionValueSet.add(String(val));
     });
   }
   const partitionValues = new Map(orderPartitionValues(partitionValueSet).map((value, index) => [value, index]));
@@ -73,12 +83,24 @@ export function graphFromRaw(
     attributes.label = node.label || node.name || id;
     attributes.name = node.name || node.label || id;
     attributes.abundance = numeric(node.abundance, 10);
-    if (bipartite && !meaningful(attributes.partition)) {
-      const legacyPartition = node.bipartite ?? node.group ?? (node.type === 'A' || node.type === 'B' ? node.type : undefined);
-      if (meaningful(legacyPartition)) attributes.partition = legacyPartition;
-    }
-    if (bipartite && meaningful(attributes.partition)) {
-      attributes.partitionIndex = partitionValues.get(String(attributes.partition)) ?? 0;
+    if (bipartite) {
+      if (!meaningful(attributes.partition)) {
+        if (node.bipartite !== undefined && typeof node.bipartite !== 'object') {
+          const role = explicitPartitionRole(node.bipartite);
+          attributes.partition = role !== null ? (role ? 'B' : 'A') : 'A';
+        } else if (node.set !== undefined) {
+          const role = explicitPartitionRole(node.set);
+          attributes.partition = role !== null ? (role ? 'B' : 'A') : 'A';
+        } else if (node.type === 'A' || node.type === 'B') {
+          attributes.partition = node.type;
+        } else {
+          attributes.partition = 'A';
+        }
+      } else {
+        const role = explicitPartitionRole(attributes.partition);
+        if (role !== null) attributes.partition = role ? 'B' : 'A';
+      }
+      attributes.partitionIndex = partitionValues.get(String(attributes.partition)) ?? (attributes.partition === 'B' ? 1 : 0);
     }
     graph.addNode(id, attributes);
   });
@@ -123,7 +145,8 @@ export function canonicalExportGraph(
   graph.forEachNode((node) => {
     const pos = sourcePositions.get(node);
     const metricAttributes = metrics.nodes[node] || {};
-    graph.mergeNodeAttributes(node, cleanAttributes({ ...metricAttributes, ...pos }));
+    const { partition: _mPart, partitionIndex: _mPartIdx, ...cleanMetricAttrs } = metricAttributes;
+    graph.mergeNodeAttributes(node, cleanAttributes({ ...cleanMetricAttrs, ...pos }));
   });
 
   graph.forEachEdge((edge, attrs, source, target) => {
@@ -213,7 +236,25 @@ function normalizeParsedGraph(graph: Graph, metadata: Record<string, any> = {}):
   if (bipartite && partitionValues.size) {
     const partitionIndexes = new Map(orderPartitionValues(partitionValues).map((value, index) => [value, index]));
     graph.forEachNode((node, attrs) => {
-      if (meaningful(attrs.partition)) graph.setNodeAttribute(node, 'partitionIndex', partitionIndexes.get(String(attrs.partition)) ?? 0);
+      if (meaningful(attrs.partition)) {
+        const role = explicitPartitionRole(attrs.partition);
+        if (role !== null) {
+          graph.setNodeAttribute(node, 'partition', role ? 'B' : 'A');
+          graph.setNodeAttribute(node, 'partitionIndex', role ? 1 : 0);
+        } else {
+          graph.setNodeAttribute(node, 'partitionIndex', partitionIndexes.get(String(attrs.partition)) ?? 0);
+        }
+      } else {
+        graph.setNodeAttribute(node, 'partition', 'A');
+        graph.setNodeAttribute(node, 'partitionIndex', 0);
+      }
+    });
+    graph.setAttribute('partitionAttribute', 'partition');
+  } else if (bipartite) {
+    graph.forEachNode((node, attrs) => {
+      const role = explicitPartitionRole(attrs.partition);
+      graph.setNodeAttribute(node, 'partition', role ? 'B' : 'A');
+      graph.setNodeAttribute(node, 'partitionIndex', role ? 1 : 0);
     });
     graph.setAttribute('partitionAttribute', 'partition');
   }
@@ -308,7 +349,7 @@ async function parseCsvPair(files: File[]): Promise<ParsedNetwork> {
   const parseRows = async (file: File) => Papa.parse<Record<string, any>>(await file.text(), { header: true, skipEmptyLines: true, dynamicTyping: true }).data;
   const [nodes, edges] = await Promise.all([parseRows(nodesFile), parseRows(edgesFile)]);
   const directed = edges.some((edge: any) => edge.directed === true);
-  const bipartite = nodes.some((node: any) => meaningful(node.partition));
+  const bipartite = nodes.some((node: any) => meaningful(node.partition) && explicitPartitionRole(node.partition) !== null);
   return normalizeParsedGraph(graphFromRaw(nodes as RawNode[], edges as RawEdge[], directed, bipartite), { directed, bipartite });
 }
 

@@ -147,16 +147,17 @@ export function useGraphMetrics(
   useEffect(() => {
     if (rawNodes.length) return;
     setMetricsToRun({ ...EMPTY_SELECTION });
-    setFilter('nodeColorBase', 'custom');
+    setFilter('nodeColorBase', 'louvain');
     setFilter('nodeSizeBase', 'abundance');
-    setFilter('edgeColorBase', 'uniform');
-    setFilter('edgeColorNodeMetric', 'custom');
+    setFilter('edgeColorBase', 'nodeMetric');
+    setFilter('edgeColorNodeMetric', 'louvain');
+    setFilter('edgeColorNodeTarget', 'source');
   }, [rawNodes.length, setFilter]);
 
   const runSelectedMetrics = useCallback((onlyMetricIds?: string[]) => {
     if (!validNodes.length) return;
     const requested = onlyMetricIds || Object.entries(metricsToRun).filter(([id, selected]) => id !== 'louvain' && selected).map(([id]) => id);
-    const runLouvain = onlyMetricIds?.includes('louvain') || (!onlyMetricIds && (metricsToRun.louvain || appliedFilters?.nodeColorBase === 'louvain'));
+    const runLouvain = onlyMetricIds?.includes('louvain') || (!onlyMetricIds && (metricsToRun.louvain || appliedFilters?.nodeColorBase === 'louvain' || appliedFilters?.edgeColorNodeMetric === 'louvain'));
     const positionedNodes = accessors.getPositionedNodes?.() || validNodes;
     setMetricsLoading(true);
     setTimeout(() => {
@@ -196,7 +197,22 @@ export function useGraphMetrics(
         console.error('Failed to run metrics:', error);
       }).finally(() => setMetricsLoading(false));
     }, 50);
-  }, [accessors, appliedFilters?.louvainSeed, appliedFilters?.metricWeightAttribute, appliedFilters?.nodeColorBase, appliedFilters?.resolution, bipartite, directed, filterRevision, graphRevision, metricsToRun, setCommunityMap, validEdges, validNodes]);
+  }, [accessors, appliedFilters?.edgeColorNodeMetric, appliedFilters?.louvainSeed, appliedFilters?.metricWeightAttribute, appliedFilters?.nodeColorBase, appliedFilters?.resolution, bipartite, directed, filterRevision, graphRevision, metricsToRun, setCommunityMap, validEdges, validNodes]);
+
+  useEffect(() => {
+    if (!validNodes.length || !validEdges.length) return;
+    const shouldAutoRunLouvain =
+      appliedFilters?.nodeColorBase === 'louvain' ||
+      appliedFilters?.edgeColorNodeMetric === 'louvain' ||
+      metricsToRun.louvain;
+    const hasLouvainData = networkMetrics.some((node) => node.louvain !== undefined);
+    if (shouldAutoRunLouvain && !hasLouvainData && !metricsLoading) {
+      const timer = setTimeout(() => {
+        runSelectedMetrics(['louvain']);
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [appliedFilters?.edgeColorNodeMetric, appliedFilters?.nodeColorBase, metricsLoading, metricsToRun.louvain, networkMetrics, runSelectedMetrics, validEdges.length, validNodes.length]);
 
   useEffect(() => {
     const cheapSelected = Object.entries(metricsToRun)

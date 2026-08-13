@@ -58,8 +58,6 @@ interface D3GraphProps {
   d3NodesRef?: React.RefObject<any[]>;
   d3LinksRef?: React.RefObject<any[]>;
   d3NodesMapRef?: React.RefObject<Map<string, any>>;
-  getNodeSize: (node: RawNode) => number;
-  getEdgeSize: (edge: RawEdge) => number;
 }
 
 export default function D3Graph({
@@ -104,8 +102,6 @@ export default function D3Graph({
   d3NodesRef,
   d3LinksRef,
   d3NodesMapRef,
-  getNodeSize,
-  getEdgeSize,
 }: D3GraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -328,8 +324,6 @@ export default function D3Graph({
     d3NodesMapRef,
     focusedEdgeNodeSet: focusedEdgeNodeIds,
     fitNodeIds: fittedNodeIds,
-    getNodeSize,
-    getEdgeSize,
   });
 
   useEffect(() => {

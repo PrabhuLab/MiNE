@@ -111,7 +111,7 @@ export const CustomizationControls = ({
           >
             <option value="custom">Custom</option>
             {hasType && <option value="type">Node Type</option>}
-            {hasLouvain && <option value="louvain">Louvain</option>}
+            <option value="louvain">Louvain</option>
             {hasDegree && <option value="degreeCentrality">Node Degree</option>}
             {hasEigen && <option value="eigenvector">Eigenvector Centrality</option>}
             {hasPageRank && <option value="pagerank">PageRank</option>}
@@ -203,7 +203,7 @@ export const CustomizationControls = ({
             />
           </label>
           <CustomSlider 
-            min="0.0" max="1.0" step="0.05"
+            min="0" max="1" step="0.05"
             value={filters.nodeOpacity ?? 1}
             onChange={(v: number) => setFilter('nodeOpacity', v)}
             isDarkMode={isDarkMode}
@@ -232,17 +232,11 @@ export const CustomizationControls = ({
     {activeControlTab === "edges" && (
       <div className="space-y-5">
         <div>
-          <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Edge Color Base</label>
+          <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Edge Color Coding</label>
           <select 
             value={filters.edgeColorBase}
-            onChange={(e) => {
-              const val = e.target.value;
-              setFilter('edgeColorBase', val);
-              if (val === 'nodeMetric' && !filters.edgeColorNodeMetric) {
-                setFilter('edgeColorNodeMetric', 'custom');
-              }
-            }}
-            className={`w-full bg-transparent border p-2 text-xs font-mono outline-none transition-colors mb-2 ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0] [&>option]:bg-[#1a1a1a]' : 'border-[#141414] focus:border-black text-[#141414] [&>option]:bg-white'}`}
+            onChange={(e) => setFilter('edgeColorBase', e.target.value)}
+            className={`w-full bg-transparent border p-2 text-xs font-mono outline-none transition-colors ${isDarkMode ? 'border-[#333] focus:border-[#E4E3E0] text-[#E4E3E0] [&>option]:bg-[#1a1a1a]' : 'border-[#141414] focus:border-black text-[#141414] [&>option]:bg-white'}`}
           >
             <option value="uniform">Uniform</option>
             <option value="weight_raw">Raw / Absolute Edge Weight</option>
@@ -285,7 +279,7 @@ export const CustomizationControls = ({
               <option value="custom">Custom</option>
               {customNodeOptions.map((attribute) => <option key={`edge-node-custom-${attribute}`} value={`custom:${attribute}`}>Custom: {attribute}</option>)}
               {hasType && <option value="type">Node Type</option>}
-              {hasLouvain && <option value="louvain">Louvain</option>}
+              <option value="louvain">Louvain</option>
               {hasDegree && <option value="degreeCentrality">Node Degree</option>}
               {hasEigen && <option value="eigenvector">Eigenvector Centrality</option>}
               {hasPageRank && <option value="pagerank">PageRank</option>}

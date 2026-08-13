@@ -66,8 +66,6 @@ interface UseGraphSimulationProps {
   clickedEdge: RawEdge | null;
   focusedEdgeNodeSet: Set<string>;
   fitNodeIds: string[];
-  getNodeSize: (node: RawNode) => number;
-  getEdgeSize: (edge: RawEdge) => number;
   setClickedEdge: React.Dispatch<React.SetStateAction<RawEdge | null>>;
   setClickedDegree: (deg: number) => void;
   setTooltip: React.Dispatch<React.SetStateAction<TooltipData | null>>;
@@ -89,6 +87,14 @@ export function useGraphSimulation({
   nodes,
   edges,
   communityMap,
+  networkMetrics = [],
+  nodeSizeMult = 3,
+  bipartiteNodeSizeMult = 2,
+  nodeSizeBase = 'abundance',
+  edgeWeightMult = 1,
+  edgeWeightBase = 'weight_raw',
+  maxRaw = 1,
+  maxSec = 1,
   nodeOpacity = 1,
   directed,
   bipartite,
@@ -118,8 +124,6 @@ export function useGraphSimulation({
   setClickedEdge,
   focusedEdgeNodeSet,
   fitNodeIds,
-  getNodeSize,
-  getEdgeSize,
   setClickedDegree,
   setTooltip,
   setIsCalculatingLayout,
@@ -140,7 +144,7 @@ export function useGraphSimulation({
   const onDoubleClickRef = useRef(onElementDoubleClick);
   useEffect(() => { onDoubleClickRef.current = onElementDoubleClick; }, [onElementDoubleClick]);
   const pendingFitRef = useRef<{ nodeIds: string[]; duration: number } | null>(null);
-  const referenceScaleRef = useRef<number | null>(null);
+
 
   const fitD3NodeSet = useCallback((nodeIds: string[], duration = 450, isAutoReapply = false) => {
     if (!isAutoReapply) {
@@ -200,7 +204,7 @@ export function useGraphSimulation({
     const cy = (minY + maxY) / 2;
 
     if (validCount === 1) {
-      const scale = 1.5;
+      const scale = 2;
       const translate = [width / 2 - scale * cx, height / 2 - scale * cy];
       applyTransform(d3.zoomIdentity.translate(translate[0], translate[1]).scale(scale));
       return;
@@ -208,8 +212,8 @@ export function useGraphSimulation({
 
     const dx = Math.max(20, maxX - minX);
     const dy = Math.max(20, maxY - minY);
-    const padding = 0.75;
-    const scale = Math.max(0.000001, Math.min(1000, padding / Math.max(dx / width, dy / height)));
+    const padding = 0.85;
+    const scale = Math.max(0.1, Math.min(4, padding / Math.max(dx / width, dy / height)));
     const translate = [width / 2 - scale * cx, height / 2 - scale * cy];
 
     applyTransform(d3.zoomIdentity.translate(translate[0], translate[1]).scale(scale));
@@ -235,20 +239,24 @@ export function useGraphSimulation({
 
     svg.selectAll('*').remove();
 
-    const defs = svg.append('defs');
-    defs
-      .append('marker')
-      .attr('id', 'arrowhead')
-      .attr('viewBox', '0 -5 10 10')
-      .attr('refX', 10)
-      .attr('refY', 0)
-      .attr('markerWidth', 8)
-      .attr('markerHeight', 8)
-      .attr('markerUnits', 'userSpaceOnUse')
-      .attr('orient', 'auto')
-      .append('path')
-      .attr('d', 'M0,-5L10,0L0,5')
-      .attr('fill', isDarkMode ? '#888888' : '#666666');
+    if (directed) {
+      svg
+        .append('defs')
+        .append('marker')
+        .attr('id', 'arrowhead')
+        .attr('viewBox', '0 -5 10 10')
+        .attr('refX', 5)
+        .attr('refY', 0)
+        .attr('markerWidth', 10)
+        .attr('markerHeight', 10)
+        .attr('markerUnits', 'userSpaceOnUse')
+        .attr('orient', 'auto')
+        .append('path')
+        .attr('class', 'arrowhead-path')
+        .attr('d', 'M0,-5L10,0L0,5')
+        .attr('fill', isDarkMode ? '#eeeeee' : '#141414')
+        .attr('opacity', isDarkMode ? 0.9 : 0.6);
+    }
 
     const zoomGroup = svg.append('g').attr('class', 'zoom-group');
     zoomGroupRef.current = zoomGroup;
@@ -276,6 +284,16 @@ export function useGraphSimulation({
         setClickedEdge(null);
         if (onClearSelection) onClearSelection();
       });
+    // Build degree map for degree-based node sizing
+    const degreeMap: Record<string, number> = {};
+    if (nodeSizeBase === 'degree') {
+      nodes.forEach((n) => (degreeMap[n.id] = 0));
+      edges.forEach((e) => {
+        if (degreeMap[String(e.source)] !== undefined) degreeMap[String(e.source)]++;
+        if (degreeMap[String(e.target)] !== undefined) degreeMap[String(e.target)]++;
+      });
+    }
+
     // O(1) Map lookup for shared simulation node objects
     const sharedD3NodesMap = d3NodesMapRef?.current;
     const graphNodes = nodes.map((d) => {
@@ -292,7 +310,23 @@ export function useGraphSimulation({
         y = d.y ?? (Math.random() - 0.5) * 600;
       }
 
-      const baseRadius = Math.max(2, Number(getNodeSize(d)) || 2);
+      // Compute radius in graph coordinates — old D3 formula, no referenceScale normalization
+      const net = netMap.get(d.id);
+      let baseVal = 10;
+      if (nodeSizeBase === 'abundance') baseVal = (d.abundance ?? 10);
+      else if (nodeSizeBase === 'degree') baseVal = (degreeMap[d.id] || 0) * 5;
+      else if (nodeSizeBase === 'eigenvector') baseVal = parseFloat(net?.eigenvector || '0') * 50;
+      else if (nodeSizeBase === 'pagerank') baseVal = parseFloat(net?.pagerank || '0') * 500;
+      else if (nodeSizeBase === 'betweenness') baseVal = parseFloat(net?.betweenness || '0') * 100;
+      else if (nodeSizeBase === 'closeness') baseVal = parseFloat(net?.closeness || '0') * 100;
+      else if (nodeSizeBase === 'clustering') baseVal = parseFloat(net?.clustering || '0') * 20;
+      else if (nodeSizeBase === 'degreeCentrality') baseVal = parseFloat(net?.degreeCentrality || '0') * 100;
+      else if (nodeSizeBase === 'inDegreeCentrality') baseVal = parseFloat(net?.inDegreeCentrality || '0') * 100;
+      else if (nodeSizeBase === 'outDegreeCentrality') baseVal = parseFloat(net?.outDegreeCentrality || '0') * 100;
+      else if (nodeSizeBase === 'uniform') baseVal = 5;
+      const isSquare = isSecondaryNode(d, bipartite);
+      const mult = isSquare ? bipartiteNodeSizeMult : nodeSizeMult;
+      const baseRadius = mult * Math.max(Math.log(baseVal + 2), 1) + 2;
 
       if (!sharedNode) {
         sharedNode = {
@@ -324,36 +358,8 @@ export function useGraphSimulation({
       } = d as RawNode & d3.SimulationNodeDatum;
       Object.assign(sharedNode, metadata);
       sharedNode.baseRadius = baseRadius;
+      sharedNode.currentRadius = baseRadius;
       return sharedNode;
-    });
-
-    // Sigma sizes nodes in screen pixels. D3 circles live inside the zoomed
-    // graph coordinate system, so using the same raw radius makes nodes nearly
-    // disappear when a large topology is initially fitted (often at k=0.05).
-    // Normalize against the transform that will be active after this render;
-    // subsequent user zooming can still enlarge/shrink nodes naturally.
-    const fitIdSet = new Set(fitNodeIds.length > 0 ? fitNodeIds : graphNodes.map((node: any) => String(node.id)));
-    const fittedGraphNodes = graphNodes.filter((node: any) => fitIdSet.has(String(node.id)));
-    let referenceScale = referenceScaleRef.current;
-    if (shouldFitTopology || !referenceScale) {
-      if (fittedGraphNodes.length === 1) {
-        referenceScale = 1.5;
-      } else if (fittedGraphNodes.length > 1) {
-        const minX = d3.min(fittedGraphNodes, (node: any) => Number(node.x)) ?? 0;
-        const maxX = d3.max(fittedGraphNodes, (node: any) => Number(node.x)) ?? 0;
-        const minY = d3.min(fittedGraphNodes, (node: any) => Number(node.y)) ?? 0;
-        const maxY = d3.max(fittedGraphNodes, (node: any) => Number(node.y)) ?? 0;
-        const dx = Math.max(20, maxX - minX);
-        const dy = Math.max(20, maxY - minY);
-        referenceScale = Math.max(0.000001, Math.min(1000, 0.75 / Math.max(dx / width, dy / height)));
-      } else {
-        referenceScale = 1;
-      }
-      referenceScaleRef.current = referenceScale;
-    }
-    graphNodes.forEach((node: any) => {
-      node.currentRadius = node.baseRadius / referenceScale;
-      node.presentationScale = referenceScale;
     });
 
     const sharedD3Links = d3LinksRef?.current;
@@ -449,7 +455,16 @@ export function useGraphSimulation({
       .style('display', (d: any) => edgePresentation(d).hidden ? 'none' : null)
       .attr('stroke', (d: any) => getEdgeColor(d.rawEdge || d))
       .attr('stroke-opacity', (d: any) => edgePresentation(d).opacity)
-      .attr('stroke-width', (d: any) => `${Math.max(0.25, Number(getEdgeSize(d.rawEdge || d)) || 0.25)}px`)
+      .attr('stroke-width', (d: any) => {
+        const raw = d.rawEdge || d;
+        let w = 1;
+        if (edgeWeightBase === 'weight_raw') w = raw.weight_raw !== undefined ? Number(raw.weight_raw) : 1;
+        else if (edgeWeightBase === 'weight_secondary') w = raw.weight_secondary !== undefined ? Number(raw.weight_secondary) : 1;
+        const maxW = edgeWeightBase === 'weight_raw' ? maxRaw : edgeWeightBase === 'weight_secondary' ? maxSec : 1;
+        const normalizedW = maxW > 0 ? w / maxW : 1;
+        const strokeWidth = Math.min(0.5 + 3.5 * normalizedW, 4) * edgeWeightMult;
+        return `${Math.max(strokeWidth, 2)}px`;
+      })
       .attr('marker-end', (d: any) => (
         directed && getShouldShowArrowhead(d.rawEdge || d)
           ? 'url(#arrowhead)'
@@ -506,13 +521,13 @@ export function useGraphSimulation({
 
     nodeGroupRef.current = nodeGroup as any;
 
-    const strokeColor = isDarkMode ? '#ffffff' : '#141414';
+    const strokeColor = isDarkMode ? '#444444' : '#141414';
 
     nodeGroup.each(function (d: any) {
       const g = d3.select(this);
       const isSquare = isSecondaryNode(d, bipartite);
       const presentation = nodePresentation.get(String(d.id));
-      const strokeWidth = presentation?.focused ? 2.5 : presentation?.neighbor || presentation?.communityMember ? 2 : 1.5;
+      const strokeWidth = presentation?.focused ? 2.5 : presentation?.neighbor || presentation?.communityMember ? 2 : 1;
 
       if (isSquare) {
         g.append('rect')
@@ -521,12 +536,10 @@ export function useGraphSimulation({
           .attr('y', -d.currentRadius)
           .attr('width', d.currentRadius * 2)
           .attr('height', d.currentRadius * 2)
-          .attr('rx', Math.min(3, d.baseRadius * 0.2) / d.presentationScale)
-          .attr('ry', Math.min(3, d.baseRadius * 0.2) / d.presentationScale)
           .attr('fill', getNodeColor(d))
           .attr('opacity', presentation?.opacity ?? nodeOpacity)
           .attr('stroke', strokeColor)
-          .attr('stroke-width', strokeWidth / d.presentationScale)
+          .attr('stroke-width', strokeWidth)
           .style('cursor', 'pointer');
       } else {
         g.append('circle')
@@ -535,7 +548,7 @@ export function useGraphSimulation({
           .attr('fill', getNodeColor(d))
           .attr('opacity', presentation?.opacity ?? nodeOpacity)
           .attr('stroke', strokeColor)
-          .attr('stroke-width', strokeWidth / d.presentationScale)
+          .attr('stroke-width', strokeWidth)
           .style('cursor', 'pointer');
       }
     });
@@ -583,13 +596,13 @@ export function useGraphSimulation({
       .append('text')
       .text((d: any) => d.label || d.name || d.id)
       .attr('class', 'node-label')
-      .attr('text-anchor', (d: any) => (d.baseRadius >= 14 ? 'middle' : 'start'))
-      .attr('dx', (d: any) => (d.baseRadius >= 14 ? 0 : d.currentRadius + (4 / d.presentationScale)))
+      .attr('text-anchor', (d: any) => (d.currentRadius >= 14 ? 'middle' : 'start'))
+      .attr('dx', (d: any) => (d.currentRadius >= 14 ? 0 : d.currentRadius + 4))
       .attr('dy', '0.3em')
-      .attr('font-size', (d: any) => `${10 / d.presentationScale}px`)
+      .attr('font-size', '10px')
       .attr('font-family', 'var(--f-mono)')
       .attr('font-weight', 'bold')
-      .attr('fill', isDarkMode ? '#ffffff' : '#141414')
+      .attr('fill', (d: any) => d.currentRadius >= 14 ? (isDarkMode ? '#222' : '#fff') : isDarkMode ? '#ddd' : '#141414')
       .style('pointer-events', 'none')
       .style('display', (d: any) => nodePresentation.get(String(d.id))?.labelVisible ? 'block' : 'none');
 
@@ -707,9 +720,68 @@ export function useGraphSimulation({
     clickedEdge,
     focusedEdgeNodeSet,
     fitNodeIds,
-    getNodeSize,
-    getEdgeSize,
   ]);
+
+  // Fast Node Sizing & Edge Thickness Update
+  // Updates SVG attributes directly without tearing down the DOM, preventing visual snap on slider changes.
+  useEffect(() => {
+    if (!svgRef.current || !d3NodesMapRef?.current) return;
+    const svg = d3.select(svgRef.current);
+
+    const fastDegreeMap: Record<string, number> = {};
+    if (nodeSizeBase === 'degree') {
+      nodes.forEach((n) => (fastDegreeMap[n.id] = 0));
+      edges.forEach((e) => {
+        if (fastDegreeMap[String(e.source)] !== undefined) fastDegreeMap[String(e.source)]++;
+        if (fastDegreeMap[String(e.target)] !== undefined) fastDegreeMap[String(e.target)]++;
+      });
+    }
+
+    d3NodesMapRef.current.forEach((node: any) => {
+      const net = netMap.get(node.id);
+      let baseVal = 10;
+      if (nodeSizeBase === 'abundance') baseVal = (node.abundance ?? 10);
+      else if (nodeSizeBase === 'degree') baseVal = (fastDegreeMap[node.id] || 0) * 5;
+      else if (nodeSizeBase === 'eigenvector') baseVal = parseFloat(net?.eigenvector || '0') * 50;
+      else if (nodeSizeBase === 'pagerank') baseVal = parseFloat(net?.pagerank || '0') * 500;
+      else if (nodeSizeBase === 'betweenness') baseVal = parseFloat(net?.betweenness || '0') * 100;
+      else if (nodeSizeBase === 'closeness') baseVal = parseFloat(net?.closeness || '0') * 100;
+      else if (nodeSizeBase === 'clustering') baseVal = parseFloat(net?.clustering || '0') * 20;
+      else if (nodeSizeBase === 'degreeCentrality') baseVal = parseFloat(net?.degreeCentrality || '0') * 100;
+      else if (nodeSizeBase === 'inDegreeCentrality') baseVal = parseFloat(net?.inDegreeCentrality || '0') * 100;
+      else if (nodeSizeBase === 'outDegreeCentrality') baseVal = parseFloat(net?.outDegreeCentrality || '0') * 100;
+      else if (nodeSizeBase === 'uniform') baseVal = 5;
+      const isSquare = isSecondaryNode(node, bipartite);
+      const mult = isSquare ? bipartiteNodeSizeMult : nodeSizeMult;
+      node.currentRadius = mult * Math.max(Math.log(baseVal + 2), 1) + 2;
+    });
+
+    svg
+      .selectAll<SVGRectElement, any>('rect.node-shape')
+      .attr('x', (d: any) => -d.currentRadius)
+      .attr('y', (d: any) => -d.currentRadius)
+      .attr('width', (d: any) => d.currentRadius * 2)
+      .attr('height', (d: any) => d.currentRadius * 2);
+
+    svg.selectAll<SVGCircleElement, any>('circle.node-shape').attr('r', (d: any) => d.currentRadius);
+
+    svg
+      .selectAll<SVGTextElement, any>('.node-label')
+      .attr('text-anchor', (d: any) => d.currentRadius >= 14 ? 'middle' : 'start')
+      .attr('dx', (d: any) => d.currentRadius >= 14 ? 0 : d.currentRadius + 4)
+      .attr('fill', (d: any) => d.currentRadius >= 14 ? (isDarkMode ? '#222' : '#fff') : isDarkMode ? '#ddd' : '#141414');
+
+    const maxW = edgeWeightBase === 'weight_raw' ? maxRaw : edgeWeightBase === 'weight_secondary' ? maxSec : 1;
+    svg.selectAll<SVGPathElement, any>('.graph-link').style('stroke-width', (d: any) => {
+      const raw = d.rawEdge || d;
+      let w = 1;
+      if (edgeWeightBase === 'weight_raw') w = raw.weight_raw !== undefined ? Number(raw.weight_raw) : 1;
+      else if (edgeWeightBase === 'weight_secondary') w = raw.weight_secondary !== undefined ? Number(raw.weight_secondary) : 1;
+      const normalizedW = maxW > 0 ? w / maxW : 1;
+      const strokeWidth = Math.min(0.5 + 3.5 * normalizedW, 4) * edgeWeightMult;
+      return `${Math.max(strokeWidth, 2)}px`;
+    });
+  }, [nodeSizeBase, nodeSizeMult, bipartiteNodeSizeMult, bipartite, edgeWeightBase, edgeWeightMult, networkMetrics, nodes, edges, isDarkMode, maxRaw, maxSec, netMap, svgRef, d3NodesMapRef]);
 
   // Subscribe to direct D3 physics ticks for fast SVG DOM updates
   useEffect(() => {
