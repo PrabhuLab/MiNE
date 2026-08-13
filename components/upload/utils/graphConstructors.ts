@@ -39,6 +39,7 @@ export function constructGraph(
     nodeIdCol,
     nodeLabelCol,
     nodeTypeCol,
+    nodePartitionCol,
     nodeCommunityCol,
     nodeAbundCol,
     rowHeadersCol,
@@ -53,12 +54,17 @@ export function constructGraph(
     const edgeSet = new Set<string>();
 
     parsedData.rawNodes.forEach((n: any, index: number) => {
-      const id = n[nodeIdCol || 'id'] || n['id'] || `node_${index}`;
+      const id = String(n[nodeIdCol || 'id'] ?? n.id ?? `node_${index}`);
+      const mappedType = nodeTypeCol ? n[nodeTypeCol] : n.type;
+      const mappedPartition = nodePartitionCol ? n[nodePartitionCol] : n.partition;
       nodesMap.set(id, {
+        ...n,
         id,
         name: n[nodeLabelCol || 'name'] || n['name'] || id,
+        label: n[nodeLabelCol || 'label'] || n.label || n.name || id,
         abundance: parseFloat(n[nodeAbundCol || 'abundance'] || n['abundance']) || 10,
-        type: n[nodeTypeCol || 'type'] || n['type'] || 'A',
+        ...(mappedType !== undefined && mappedType !== '' ? { type: mappedType } : {}),
+        ...(mappedPartition !== undefined && mappedPartition !== '' ? { partition: mappedPartition } : {}),
         community: n[nodeCommunityCol || 'community'] || n['community'] || '',
       });
     });
@@ -76,6 +82,7 @@ export function constructGraph(
       if (!edgeSet.has(edgeId)) {
         edgeSet.add(edgeId);
         edges.push({
+          ...e,
           source: sourceId,
           target: targetId,
           weight_raw: parseFloat(e[weightRawCol || 'weight'] || e['weight']) || 1,
@@ -101,23 +108,23 @@ export function constructGraph(
       const matrix = parsedData.matrix;
 
       for (let col = safeDataStartCol; col < (matrix[safeColHeadersRow]?.length || 0); col++) {
-        const colNodeId = matrix[safeColHeadersRow]?.[col]?.trim();
+        const colNodeId = String(matrix[safeColHeadersRow]?.[col] ?? '').trim();
         if (colNodeId) {
-          nodesMap.set(colNodeId, { id: colNodeId, name: colNodeId, label: colNodeId, type: 'B', abundance: 0 });
+          nodesMap.set(colNodeId, { id: colNodeId, name: colNodeId, label: colNodeId, partition: 'B', abundance: 0 });
         }
       }
 
       for (let row = safeDataStartRow; row < matrix.length; row++) {
         if (!matrix[row] || matrix[row].length === 0) continue;
-        const rowNodeId = matrix[row][safeRowHeadersCol]?.trim();
+        const rowNodeId = String(matrix[row][safeRowHeadersCol] ?? '').trim();
         if (!rowNodeId) continue;
 
         if (!nodesMap.has(rowNodeId)) {
-          nodesMap.set(rowNodeId, { id: rowNodeId, name: rowNodeId, label: rowNodeId, type: 'A', abundance: 0 });
+          nodesMap.set(rowNodeId, { id: rowNodeId, name: rowNodeId, label: rowNodeId, partition: 'A', abundance: 0 });
         }
 
         for (let col = safeDataStartCol; col < matrix[row].length; col++) {
-          const rawVal = matrix[row][col]?.trim();
+          const rawVal = String(matrix[row][col] ?? '').trim();
           let isConnected = false;
           let parsedWeight = parseFloat(rawVal);
 
@@ -129,7 +136,7 @@ export function constructGraph(
           }
 
           if (isConnected) {
-            const colNodeId = matrix[safeColHeadersRow]?.[col]?.trim();
+            const colNodeId = String(matrix[safeColHeadersRow]?.[col] ?? '').trim();
             if (colNodeId) {
               edges.push({
                 source: rowNodeId,
@@ -208,23 +215,71 @@ export function constructGraph(
     } else if (isFormatMatrix && parsedData.matrix) {
       const data = parsedData.matrix;
       const headers = data[safeColHeadersRow] || [];
+
+      // Keep every column-header node. This is important for triangular matrices,
+      // whose final nodes may only appear as targets (or have no off-diagonal ties).
+      const headerIndexById = new Map<string, number>();
+      for (let j = safeDataStartCol; j < headers.length; j++) {
+        const headerId = String(headers[j] ?? '').trim();
+        if (!headerId) continue;
+        headerIndexById.set(headerId, j);
+        nodesMap.set(headerId, { id: headerId, name: headerId, abundance: 10 });
+      }
+
+      /**
+       * A triangular CSV can be represented in either of two ways:
+       *
+       * - padded: empty lower-left cells keep every row aligned with its header;
+       * - compact: those cells are omitted, so each row starts at its diagonal
+       *   (or immediately after it).
+       *
+       * Rows that remain header-width are always treated as padded. For shorter
+       * rows, their expected remaining cell count tells us whether the diagonal
+       * is included. This keeps compact matrices from being shifted onto the
+       * wrong target labels while leaving ordinary square matrices unchanged.
+       */
+      const resolveHeaderIndex = (row: any[], sourceHeaderIndex: number, cellIndex: number) => {
+        if (sourceHeaderIndex < safeDataStartCol || row.length >= headers.length) return cellIndex;
+
+        const valueOffset = cellIndex - safeDataStartCol;
+        const valueCount = Math.max(0, row.length - safeDataStartCol);
+        const remainingWithDiagonal = Math.max(0, headers.length - sourceHeaderIndex);
+        const remainingWithoutDiagonal = Math.max(0, remainingWithDiagonal - 1);
+
+        if (valueCount === remainingWithoutDiagonal) return sourceHeaderIndex + 1 + valueOffset;
+        if (valueCount === remainingWithDiagonal) return sourceHeaderIndex + valueOffset;
+        return cellIndex;
+      };
+
       for (let i = safeDataStartRow; i < data.length; i++) {
-        const row = data[i];
-        const sourceId = row[safeRowHeadersCol];
+        const row = data[i] || [];
+        const sourceId = String(row[safeRowHeadersCol] ?? '').trim();
         if (!sourceId) continue;
 
         let abundance = 0;
-        const colIndex = headers.indexOf(sourceId);
-        if (colIndex !== -1) abundance = parseFloat(row[colIndex]) || 0;
+        const colIndex = headerIndexById.get(sourceId);
+        if (colIndex !== undefined) {
+          if (row.length >= headers.length) {
+            abundance = parseFloat(row[colIndex]) || 0;
+          } else {
+            const valueCount = Math.max(0, row.length - safeDataStartCol);
+            const remainingWithDiagonal = Math.max(0, headers.length - colIndex);
+            if (valueCount === remainingWithDiagonal) {
+              abundance = parseFloat(row[safeDataStartCol]) || 0;
+            }
+          }
+        }
         if (abundance === 0) abundance = 10;
         nodesMap.set(sourceId, { id: sourceId, name: sourceId, abundance });
       }
       for (let i = safeDataStartRow; i < data.length; i++) {
-        const row = data[i];
-        const sourceId = row[safeRowHeadersCol];
+        const row = data[i] || [];
+        const sourceId = String(row[safeRowHeadersCol] ?? '').trim();
         if (!sourceId) continue;
-        for (let j = safeDataStartCol; j < Math.min(row.length, headers.length); j++) {
-          const targetId = headers[j];
+        const sourceHeaderIndex = headerIndexById.get(sourceId) ?? -1;
+        for (let j = safeDataStartCol; j < row.length; j++) {
+          const headerIndex = resolveHeaderIndex(row, sourceHeaderIndex, j);
+          const targetId = String(headers[headerIndex] ?? '').trim();
           if (!targetId || sourceId === targetId) continue;
           const value = parseFloat(row[j]) || 0;
           if (value !== 0) {
@@ -271,8 +326,8 @@ export function constructGraph(
               }
             }
             edges.push({ source: sId, target: tId, weight_raw: finalWR, weight_secondary: finalWS, ...extraEdgeProps });
-            if (!nodesMap.has(sId)) nodesMap.set(sId, { id: sId, name: sId, abundance: 10, type: topology === 'Bipartite' ? 'A' : undefined });
-            if (!nodesMap.has(tId)) nodesMap.set(tId, { id: tId, name: tId, abundance: 10, type: topology === 'Bipartite' ? 'B' : undefined });
+            if (!nodesMap.has(sId)) nodesMap.set(sId, { id: sId, name: sId, abundance: 10, partition: topology === 'Bipartite' ? 'A' : undefined });
+            if (!nodesMap.has(tId)) nodesMap.set(tId, { id: tId, name: tId, abundance: 10, partition: topology === 'Bipartite' ? 'B' : undefined });
           }
         }
       }
@@ -326,6 +381,11 @@ export function constructGraph(
             if (existingEdge) {
               if (wrIdx !== -1 && !isNaN(parseFloat(row[wrIdx]))) existingEdge.weight_raw = parseFloat(row[wrIdx]);
               if (wsIdx !== -1 && !isNaN(parseFloat(row[wsIdx]))) existingEdge.weight_secondary = parseFloat(row[wsIdx]);
+              for (let j = 0; j < eHeaders.length; j++) {
+                if (j !== sIdx && j !== tIdx && j !== wrIdx && j !== wsIdx && row[j] !== undefined && row[j] !== '') {
+                  existingEdge[eHeaders[j]] = row[j];
+                }
+              }
             }
           } else {
             const wRaw = wrIdx !== -1 ? parseFloat(row[wrIdx]) : 1;
@@ -333,7 +393,13 @@ export function constructGraph(
             const finalWR = !isNaN(wRaw) ? wRaw : 1;
             const finalWS = !isNaN(wSec) ? wSec : finalWR;
             edgeSet.add(edgeId);
-            edges.push({ source: sId, target: tId, weight_raw: finalWR, weight_secondary: finalWS });
+            const extraEdgeProps: Record<string, any> = {};
+            for (let j = 0; j < eHeaders.length; j++) {
+              if (j !== sIdx && j !== tIdx && j !== wrIdx && j !== wsIdx && row[j] !== undefined && row[j] !== '') {
+                extraEdgeProps[eHeaders[j]] = row[j];
+              }
+            }
+            edges.push({ source: sId, target: tId, weight_raw: finalWR, weight_secondary: finalWS, ...extraEdgeProps });
             if (!nodesMap.has(sId)) nodesMap.set(sId, { id: sId, name: sId, abundance: 10 });
             if (!nodesMap.has(tId)) nodesMap.set(tId, { id: tId, name: tId, abundance: 10 });
           }
@@ -347,6 +413,7 @@ export function constructGraph(
       const idIdx = nHeaders.indexOf(nodeIdCol);
       const lblIdx = nHeaders.indexOf(nodeLabelCol);
       const typIdx = nHeaders.indexOf(nodeTypeCol);
+      const partitionIdx = nHeaders.indexOf(nodePartitionCol);
       const commIdx = nHeaders.indexOf(nodeCommunityCol);
       const abnIdx = nHeaders.indexOf(nodeAbundCol);
 
@@ -357,6 +424,7 @@ export function constructGraph(
           if (!id) continue;
           const name = lblIdx !== -1 && row[lblIdx] ? row[lblIdx] : id;
           const type = typIdx !== -1 ? row[typIdx] : undefined;
+          const partition = partitionIdx !== -1 ? row[partitionIdx] : undefined;
           const comm = commIdx !== -1 && row[commIdx] ? row[commIdx] : undefined;
           const abund = abnIdx !== -1 ? parseFloat(row[abnIdx]) : 10;
 
@@ -364,7 +432,7 @@ export function constructGraph(
             const existing = nodesMap.get(id)!;
             const extraProps: any = {};
             for (let j = 0; j < nHeaders.length; j++) {
-              if (j !== idIdx && j !== lblIdx && j !== typIdx && j !== commIdx && j !== abnIdx) {
+              if (j !== idIdx && j !== lblIdx && j !== typIdx && j !== partitionIdx && j !== commIdx && j !== abnIdx) {
                 if (row[j] !== undefined && row[j] !== '') {
                   extraProps[nHeaders[j]] = row[j];
                 }
@@ -374,6 +442,7 @@ export function constructGraph(
               ...existing,
               name: lblIdx !== -1 && row[lblIdx] ? name : existing.name,
               type: type || existing.type,
+              partition: partition ?? existing.partition,
               community: comm || existing.community,
               abundance: isNaN(abund) ? existing.abundance : abund,
               ...extraProps,
@@ -381,13 +450,13 @@ export function constructGraph(
           } else {
             const extraProps: any = {};
             for (let j = 0; j < nHeaders.length; j++) {
-              if (j !== idIdx && j !== lblIdx && j !== typIdx && j !== commIdx && j !== abnIdx) {
+              if (j !== idIdx && j !== lblIdx && j !== typIdx && j !== partitionIdx && j !== commIdx && j !== abnIdx) {
                 if (row[j] !== undefined && row[j] !== '') {
                   extraProps[nHeaders[j]] = row[j];
                 }
               }
             }
-            nodesMap.set(id, { id, name, type, community: comm, abundance: isNaN(abund) ? 10 : abund, ...extraProps });
+            nodesMap.set(id, { id, name, type, partition, community: comm, abundance: isNaN(abund) ? 10 : abund, ...extraProps });
           }
         }
       }

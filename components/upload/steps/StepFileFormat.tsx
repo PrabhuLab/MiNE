@@ -160,7 +160,7 @@ export const StepFileFormat: React.FC<StepFileFormatProps> = ({
               </div>
               <div>
                 <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
-                  Nodes (CSV) [Optional]
+                  Nodes (CSV) {format !== 'Bipartite Edge List' && format !== 'Directed Bipartite Edge List' && '[Optional]'}
                 </label>
                 <label className={dropzoneClass}>
                   <div className="flex flex-col items-center justify-center">

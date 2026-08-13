@@ -1,9 +1,19 @@
 import React from 'react';
 
-export const SegmentedToggle = ({ checked, onChange, isDarkMode }: any) => {
+export const SegmentedToggle = ({ checked, onChange, isDarkMode, ariaLabel }: any) => {
   return (
     <div 
       onClick={() => onChange(!checked)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onChange(!checked);
+        }
+      }}
+      role="switch"
+      aria-label={ariaLabel}
+      aria-checked={checked}
+      tabIndex={0}
       className={`cursor-pointer flex items-center border text-[9px] font-bold uppercase transition-colors ${
         isDarkMode ? 'border-[#555]' : 'border-[#ccc]'
       }`}

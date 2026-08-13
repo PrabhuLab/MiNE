@@ -1,6 +1,7 @@
 import type {NextConfig} from 'next';
 
 const nextConfig: NextConfig = {
+  output: 'standalone',
   reactStrictMode: true,
   eslint: {
     ignoreDuringBuilds: true,
@@ -21,15 +22,7 @@ const nextConfig: NextConfig = {
   },
   
   transpilePackages: ['motion'],
-  webpack: (config, {dev}) => {
-    // Disable file watching to prevent flickering when DISABLE_HMR is set
-    if (dev && process.env.DISABLE_HMR === 'true') {
-      config.watchOptions = {
-        ignored: /.*/,
-      };
-    }
-    return config;
-  },
+  allowedDevOrigins: ['*.run.app', 'localhost:3000'],
 };
 
 export default nextConfig;

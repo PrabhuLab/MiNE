@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { computeTableDataNodes, computeTableDataEdges } from '@/lib/workspaceUtils';
 import { useStore } from '@/store/useStore';
+import { isSecondaryNode } from '@/services/graphPresentation/visibility';
 
 export function useDataTableSort(validNodes: any[], validEdges: any[], networkMetrics: any[], nodeMetrics: any[]) {
   const { communityMap, searchQuery, setSearchQuery, hiddenLegendItems, isolatedLegendItem, bipartite, selectedElement, filters } = useStore();
@@ -14,7 +15,7 @@ export function useDataTableSort(validNodes: any[], validEdges: any[], networkMe
     
     // Filter by legend states
     nodes = nodes.filter(d => {
-      const isBipartiteNode = bipartite && (d.type === 'B' || d.group === 1);
+      const isBipartiteNode = isSecondaryNode(d, bipartite);
       if (isBipartiteNode && hiddenSet.has('element:bipartite')) return false;
       if (!isBipartiteNode && hiddenSet.has('element:standard')) return false;
       

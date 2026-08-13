@@ -1,13 +1,9 @@
 'use client';
 
 import React from 'react';
+import type { TooltipData } from '@/services/graphInteraction/types';
 
-export interface TooltipData {
-  x: number;
-  y: number;
-  title: string;
-  items?: { label: string; value: string | number }[];
-}
+export type { TooltipData } from '@/services/graphInteraction/types';
 
 interface GraphTooltipProps {
   tooltip: TooltipData | null;

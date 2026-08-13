@@ -3,8 +3,11 @@
 import React, { useMemo, useCallback } from 'react';
 import * as d3 from 'd3';
 import { RawNode, RawEdge } from '@/store/useStore';
-import { COMMUNITY_COLORS } from '@/lib/communityUtils';
-import { ElementLegendItem } from '@/components/graph/GraphLegend';
+import { getCommunityDisplayMap, getCommunityColor } from '@/lib/communityUtils';
+import { useStore } from '@/store/useStore';
+import { useGraphColorScales } from '@/hooks/graphStyles/useGraphColorScales';
+import { numericExtent } from '@/lib/utils';
+export type { LegendMetricScale } from '@/services/graphStyles/types';
 
 interface UseGraphStylesProps {
   nodes: RawNode[];
@@ -26,6 +29,8 @@ interface UseGraphStylesProps {
   isDarkMode?: boolean;
   searchQuery?: string;
   selectedElement?: string | null;
+  selectedCommunityId?: string | null;
+  isolatedCommunityId?: string | null;
   showArrowheads: boolean;
   isolatedLegendItem: string | null;
   clickedNodeRef: React.RefObject<RawNode | null>;
@@ -50,68 +55,66 @@ export function useGraphStyles({
   isDarkMode,
   searchQuery = '',
   selectedElement = null,
+  selectedCommunityId = null,
+  isolatedCommunityId = null,
   showArrowheads,
   isolatedLegendItem,
   clickedNodeRef,
   clickedEdgeRef,
 }: UseGraphStylesProps) {
-  const customLabels = useMemo(
-    () =>
-      Array.from(new Set(Object.values(communityMap || {}).filter(Boolean))).sort((a, b) =>
-        String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' })
-      ),
-    [communityMap]
-  );
-
-  const louvainLabels = useMemo(
-    () =>
-      Array.from(new Set((networkMetrics || []).map((m) => m.louvain).filter(Boolean))).sort(
-        (a, b) => String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' })
-      ),
+  const customNodeAttribute = useStore((state) => state.filters.customNodeAttribute);
+  const customAttributes = useStore((state) => state.customAttributes);
+  const selectedCustomMetadata = customAttributes.find((attribute) => attribute.scope === 'node' && attribute.name === customNodeAttribute);
+  const customIsNumeric = Boolean(selectedCustomMetadata && ['discrete', 'continuous'].includes(selectedCustomMetadata.selectedType));
+  const {
+    customNumericColorScale,
+    eigenColorScale,
+    prColorScale,
+    betweennessColorScale,
+    closenessColorScale,
+    clusteringColorScale,
+    degreeCentColorScale,
+    abundanceColorScale,
+    legendMetricScale,
+  } = useGraphColorScales({
+    nodes,
+    networkMetrics,
+    nodeColorBase,
+    customNodeAttribute,
+    customIsNumeric,
+  });
+  const netMap = useMemo(
+    () => new Map((networkMetrics || []).map((m: any) => [m.id, m])),
     [networkMetrics]
   );
 
-  const customColorMap = useMemo(() => {
-    const map: Record<string, string> = {};
-    customLabels.forEach((label, i) => {
-      map[label] = COMMUNITY_COLORS[i % COMMUNITY_COLORS.length] || COMMUNITY_COLORS[0];
-    });
-    return map;
-  }, [customLabels]);
-
-  const louvainColorMap = useMemo(() => {
-    const map: Record<string, string> = {};
-    louvainLabels.forEach((label, i) => {
-      map[label] = COMMUNITY_COLORS[i % COMMUNITY_COLORS.length] || COMMUNITY_COLORS[0];
-    });
-    return map;
-  }, [louvainLabels]);
-
-  const communityLabels = useMemo(() => {
-    if (nodeColorBase === 'louvain') return louvainLabels;
-    return customLabels;
-  }, [nodeColorBase, customLabels, louvainLabels]);
-
-  const communityColorMap = useMemo(() => {
-    if (nodeColorBase === 'louvain') return louvainColorMap;
-    return customColorMap;
-  }, [nodeColorBase, customColorMap, louvainColorMap]);
-
-  const communityLegendIds = useMemo(
-    () => communityLabels.map((c) => `community:${c}`),
-    [communityLabels]
+  // Compute contiguous display mapping (0, 1, 2, 3...)
+  const communityDisplay = useMemo(
+    () => getCommunityDisplayMap(nodes, communityMap, networkMetrics, nodeColorBase, customNodeAttribute),
+    [nodes, communityMap, networkMetrics, nodeColorBase, customNodeAttribute]
   );
+
+  const displayMap = communityDisplay.displayMap; // nodeId -> displayInt (e.g. 0, 1, 2, or -1)
+
+  // Map each contiguous display integer to its distinct non-repeating color
+  const communityColorMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    Object.values(communityDisplay.rawToDisplayMap).forEach((dispIdx) => {
+      map[String(dispIdx)] = getCommunityColor(communityDisplay.displayToRawMap[dispIdx]);
+    });
+    map['-1'] = '#777777';
+    map['unassigned'] = '#777777';
+    return map;
+  }, [communityDisplay.rawToDisplayMap, communityDisplay.displayToRawMap]);
+
+  const customColorMap = communityColorMap;
+  const nodeById = useMemo(() => new Map(nodes.map((node) => [String(node.id), node])), [nodes]);
 
   const typeLabels = useMemo(() => {
     return Array.from(new Set(nodes.map((n) => n.type).filter(Boolean))) as string[];
   }, [nodes]);
 
   const typeColorScale = useMemo(() => d3.scaleOrdinal(d3.schemeCategory10), []);
-
-  const netMap = useMemo(
-    () => new Map((networkMetrics || []).map((m: any) => [m.id, m])),
-    [networkMetrics]
-  );
 
   const getShouldShowArrowhead = useCallback(
     (d: any) => {
@@ -150,25 +153,18 @@ export function useGraphStyles({
         }
       }
 
-      if (isolatedLegendItem && isolatedLegendItem.startsWith('community:')) {
-        const commVal = isolatedLegendItem.split('community:')[1];
+      const activeComm =
+        isolatedCommunityId ||
+        selectedCommunityId ||
+        (isolatedLegendItem && isolatedLegendItem.startsWith('community:')
+          ? isolatedLegendItem
+          : null);
+      if (activeComm) {
+        const commVal = String(activeComm).replace('community:', '');
+        const srcDisp = String(displayMap[srcId] ?? -1);
+        const tgtDisp = String(displayMap[tgtId] ?? -1);
 
-        const getNodeComm = (nodeId: string) => {
-          const net = netMap.get(nodeId);
-          if (nodeColorBase === 'louvain') return net?.louvain;
-          if (nodeColorBase === 'infomap') return net?.infomap;
-          if (nodeColorBase === 'fast_greedy') return net?.fast_greedy;
-          if (nodeColorBase === 'label_propagation') return net?.label_propagation;
-          if (nodeColorBase === 'walktrap') return net?.walktrap;
-          if (nodeColorBase === 'eigenvector') return net?.eigenvector;
-          if (nodeColorBase === 'spinglass') return net?.spinglass;
-          return communityMap[nodeId] ?? net?.community ?? net?.louvain;
-        };
-
-        const srcComm = getNodeComm(srcId);
-        const tgtComm = getNodeComm(tgtId);
-
-        if (String(srcComm) === String(commVal) || String(tgtComm) === String(commVal)) {
+        if (srcDisp === commVal || tgtDisp === commVal) {
           return true;
         }
       }
@@ -186,93 +182,39 @@ export function useGraphStyles({
       directed,
       showArrowheads,
       selectedElement,
+      isolatedCommunityId,
+      selectedCommunityId,
       isolatedLegendItem,
-      netMap,
-      nodeColorBase,
-      communityMap,
+      displayMap,
       searchQuery,
       clickedNodeRef,
       clickedEdgeRef,
     ]
   );
 
-  const elementLegendItems: ElementLegendItem[] = useMemo(
-    () => [
-      {
-        id: 'element:standard',
-        label: 'Standard Node',
-        Icon: () => (
-          <div
-            className={`w-3 h-3 rounded-full border ${
-              isDarkMode ? 'border-[#E4E3E0] bg-transparent' : 'border-[#141414] bg-transparent'
-            }`}
-          />
-        ),
-      },
-      ...(bipartite
-        ? [
-            {
-              id: 'element:bipartite',
-              label: 'Bipartite Node',
-              Icon: () => (
-                <div
-                  className={`w-3 h-3 border ${
-                    isDarkMode
-                      ? 'border-[#E4E3E0] bg-transparent'
-                      : 'border-[#141414] bg-transparent'
-                  }`}
-                />
-              ),
-            },
-          ]
-        : []),
-      {
-        id: 'element:edges',
-        label: directed ? 'Directed Edge' : 'Undirected Edge',
-        Icon: () => (
-          <div className="w-3 relative flex items-center justify-center">
-            <div className={`w-full h-[1px] ${isDarkMode ? 'bg-[#bbb]' : 'bg-[#141414]'}`} />
-            {directed && (
-              <div
-                className={`absolute right-0 translate-x-[2px] w-0 h-0 border-y-[3px] border-y-transparent border-l-[4px] ${
-                  isDarkMode ? 'border-l-[#bbb]' : 'border-l-[#141414]'
-                } opacity-80`}
-              />
-            )}
-          </div>
-        ),
-      },
-    ],
-    [bipartite, directed, isDarkMode]
-  );
-
-  const elementLegendIds = useMemo(() => elementLegendItems.map((item) => item.id), [
-    elementLegendItems,
-  ]);
-
   const legendCategories = useMemo(() => {
     if (
-      (nodeColorBase === 'custom' || nodeColorBase === 'louvain') &&
-      communityLabels.length > 0
+      (nodeColorBase === 'louvain' || nodeColorBase === 'community' || (nodeColorBase === 'custom' && !customIsNumeric)) &&
+      Object.keys(communityDisplay.rawToDisplayMap).length > 0
     ) {
+      const sortedDispIndices = Object.values(communityDisplay.rawToDisplayMap).sort((a, b) => a - b);
       return {
-        title:
-          nodeColorBase === 'custom'
-            ? 'Custom Communities'
-            : 'Louvain Communities',
-        items: communityLabels.map((label) => ({
-          label,
-          id: `community:${label}`,
-          color: communityColorMap[label],
-          nodes: nodes
-            .filter((n) => {
-              if (nodeColorBase === 'custom') return communityMap[n.id] === label;
-              const net = netMap.get(n.id);
-              return net && net[nodeColorBase] === label;
-            })
-            .map((n) => n.label || n.name || n.id),
-          allIds: communityLegendIds,
-        })),
+        title: nodeColorBase === 'custom' && customNodeAttribute ? customNodeAttribute : 'Communities',
+        items: sortedDispIndices.map((dispIdx) => {
+          const rawId = communityDisplay.displayToRawMap[dispIdx];
+          const color = getCommunityColor(communityDisplay.displayToRawMap[dispIdx]);
+          const memberNodes = nodes
+            .filter((n) => displayMap[n.id] === dispIdx)
+            .map((n) => n.label || n.name || n.id);
+
+          return {
+            label: nodeColorBase === 'custom' && customNodeAttribute ? rawId : `Community ${dispIdx}`,
+            id: `community:${dispIdx}`,
+            color,
+            nodes: memberNodes,
+            allIds: sortedDispIndices.map((i) => `community:${i}`),
+          };
+        }),
       };
     } else if (nodeColorBase === 'type' && typeLabels.length > 0) {
       return {
@@ -289,76 +231,14 @@ export function useGraphStyles({
     return null;
   }, [
     nodeColorBase,
-    communityLabels,
-    communityColorMap,
-    communityMap,
+    communityDisplay,
+    displayMap,
+    nodes,
     typeLabels,
     typeColorScale,
-    nodes,
-    communityLegendIds,
-    netMap,
+    customNodeAttribute,
+    customIsNumeric,
   ]);
-
-  const maxEigen = useMemo(
-    () => d3.max(networkMetrics, (d: any) => parseFloat(d.eigenvector)) || 1,
-    [networkMetrics]
-  );
-  const minEigen = useMemo(
-    () => d3.min(networkMetrics, (d: any) => parseFloat(d.eigenvector)) || 0,
-    [networkMetrics]
-  );
-  const maxPageRank = useMemo(
-    () => d3.max(networkMetrics, (d: any) => parseFloat(d.pagerank)) || 1,
-    [networkMetrics]
-  );
-  const minPageRank = useMemo(
-    () => d3.min(networkMetrics, (d: any) => parseFloat(d.pagerank)) || 0,
-    [networkMetrics]
-  );
-  const maxBetweenness = useMemo(
-    () => d3.max(networkMetrics, (d: any) => parseFloat(d.betweenness)) || 1,
-    [networkMetrics]
-  );
-  const maxCloseness = useMemo(
-    () => d3.max(networkMetrics, (d: any) => parseFloat(d.closeness)) || 1,
-    [networkMetrics]
-  );
-  const maxClustering = useMemo(
-    () => d3.max(networkMetrics, (d: any) => parseFloat(d.clustering)) || 1,
-    [networkMetrics]
-  );
-  const maxDegreeCent = useMemo(
-    () =>
-      d3.max(networkMetrics, (d: any) =>
-        parseFloat(d.degreeCentrality || d.inDegreeCentrality || 0)
-      ) || 1,
-    [networkMetrics]
-  );
-
-  const eigenColorScale = useMemo(
-    () => d3.scaleSequential(d3.interpolatePurples).domain([minEigen, maxEigen]),
-    [minEigen, maxEigen]
-  );
-  const prColorScale = useMemo(
-    () => d3.scaleSequential(d3.interpolateGreens).domain([minPageRank, maxPageRank]),
-    [minPageRank, maxPageRank]
-  );
-  const betweennessColorScale = useMemo(
-    () => d3.scaleSequential(d3.interpolateOranges).domain([0, maxBetweenness]),
-    [maxBetweenness]
-  );
-  const closenessColorScale = useMemo(
-    () => d3.scaleSequential(d3.interpolateBlues).domain([0, maxCloseness]),
-    [maxCloseness]
-  );
-  const clusteringColorScale = useMemo(
-    () => d3.scaleSequential(d3.interpolateReds).domain([0, maxClustering]),
-    [maxClustering]
-  );
-  const degreeCentColorScale = useMemo(
-    () => d3.scaleSequential(d3.interpolateYlOrBr).domain([0, maxDegreeCent]),
-    [maxDegreeCent]
-  );
 
   const getNodeColor = useCallback(
     (d: any) => {
@@ -375,37 +255,73 @@ export function useGraphStyles({
         }
         return uniformNodeColor;
       }
-      if (nodeColorBase === 'custom')
-        return customColorMap[communityMap[d.id] ?? d.community] || defaultNodeColor;
-      if (nodeColorBase === 'louvain' && net?.louvain)
-        return louvainColorMap[net.louvain] || defaultNodeColor;
-      if (nodeColorBase === 'type' && d.type) return typeColorScale(d.type);
-      if (nodeColorBase === 'eigenvector' && net?.eigenvector !== undefined)
-        return eigenColorScale(parseFloat(net.eigenvector));
-      if (nodeColorBase === 'pagerank' && net?.pagerank !== undefined)
-        return prColorScale(parseFloat(net.pagerank));
-      if (nodeColorBase === 'betweenness' && net?.betweenness !== undefined)
-        return betweennessColorScale(parseFloat(net.betweenness));
-      if (nodeColorBase === 'closeness' && net?.closeness !== undefined)
-        return closenessColorScale(parseFloat(net.closeness));
-      if (nodeColorBase === 'clustering' && net?.clustering !== undefined)
-        return clusteringColorScale(parseFloat(net.clustering));
-      if (nodeColorBase === 'degreeCentrality' && net?.degreeCentrality !== undefined)
-        return degreeCentColorScale(parseFloat(net.degreeCentrality));
-      if (nodeColorBase === 'inDegreeCentrality' && net?.inDegreeCentrality !== undefined)
-        return degreeCentColorScale(parseFloat(net.inDegreeCentrality));
-      if (nodeColorBase === 'outDegreeCentrality' && net?.outDegreeCentrality !== undefined)
-        return degreeCentColorScale(parseFloat(net.outDegreeCentrality));
+      if (nodeColorBase === 'abundance') {
+        const val = parseFloat(d.abundance ?? net?.abundance ?? 0);
+        return abundanceColorScale(val);
+      }
+      if (
+        nodeColorBase === 'custom' ||
+        nodeColorBase === 'louvain' ||
+        nodeColorBase === 'community'
+      ) {
+        if (nodeColorBase === 'custom' && customIsNumeric && customNodeAttribute) {
+          const value = Number(d[customNodeAttribute]);
+          if (Number.isFinite(value)) return customNumericColorScale(value);
+        }
+        const dispIdx = displayMap[d.id] ?? -1;
+        if (dispIdx >= 0) return getCommunityColor(communityDisplay.displayToRawMap[dispIdx]);
+        if (d.type) return typeColorScale(d.type);
+        if (d.group !== undefined) return getCommunityColor(String(d.group));
+        return defaultNodeColor;
+      }
+      if (nodeColorBase === 'type') {
+        const t = d.type || (d.group !== undefined ? String(d.group) : null);
+        if (t) return typeColorScale(t);
+      }
+      if (nodeColorBase === 'eigenvector') {
+        const val = parseFloat(net?.eigenvector ?? d.eigenvector ?? 0);
+        return eigenColorScale(val);
+      }
+      if (nodeColorBase === 'pagerank') {
+        const val = parseFloat(net?.pagerank ?? d.pagerank ?? 0);
+        return prColorScale(val);
+      }
+      if (nodeColorBase === 'betweenness') {
+        const val = parseFloat(net?.betweenness ?? d.betweenness ?? 0);
+        return betweennessColorScale(val);
+      }
+      if (nodeColorBase === 'closeness') {
+        const val = parseFloat(net?.closeness ?? d.closeness ?? 0);
+        return closenessColorScale(val);
+      }
+      if (nodeColorBase === 'clustering') {
+        const val = parseFloat(net?.clustering ?? d.clustering ?? 0);
+        return clusteringColorScale(val);
+      }
+      if (nodeColorBase === 'degreeCentrality' || nodeColorBase === 'degree') {
+        const val = parseFloat(net?.degreeCentrality ?? net?.degree ?? d.degreeCentrality ?? d.degree ?? d.abundance ?? 0);
+        return degreeCentColorScale(val);
+      }
+      if (nodeColorBase === 'inDegreeCentrality') {
+        const val = parseFloat(net?.inDegreeCentrality ?? d.inDegreeCentrality ?? 0);
+        return degreeCentColorScale(val);
+      }
+      if (nodeColorBase === 'outDegreeCentrality') {
+        const val = parseFloat(net?.outDegreeCentrality ?? d.outDegreeCentrality ?? 0);
+        return degreeCentColorScale(val);
+      }
       return defaultNodeColor;
     },
     [
       isDarkMode,
       nodeColorBase,
+      customNodeAttribute,
+      customIsNumeric,
+      customNumericColorScale,
       uniformNodeColor,
-      customColorMap,
-      louvainColorMap,
-      communityMap,
+      displayMap,
       typeColorScale,
+      abundanceColorScale,
       eigenColorScale,
       prColorScale,
       betweennessColorScale,
@@ -413,6 +329,7 @@ export function useGraphStyles({
       clusteringColorScale,
       degreeCentColorScale,
       netMap,
+      communityDisplay.displayToRawMap,
     ]
   );
 
@@ -436,6 +353,48 @@ export function useGraphStyles({
         .domain([0, maxSec]),
     [isDarkMode, maxSec]
   );
+  const customEdgeColorScales = useMemo(() => {
+    const attributes = new Set<string>();
+    if (edgeColorBase.startsWith('edge:')) attributes.add(edgeColorBase.slice('edge:'.length));
+    if (edgeOpacityBase.startsWith('edge:')) attributes.add(edgeOpacityBase.slice('edge:'.length));
+    const result = new Map<string, (value: number) => string>();
+    attributes.forEach((attribute) => {
+      const [min, max] = numericExtent(edges.map((edge: any) => Number(edge[attribute]))) || [0, 1];
+      result.set(attribute, d3.scaleSequential(d3.interpolateTurbo).domain([min, max === min ? min + 1 : max]));
+    });
+    return result;
+  }, [edgeColorBase, edgeOpacityBase, edges]);
+  const customEdgeOpacityMax = useMemo(() => {
+    if (!edgeOpacityBase.startsWith('edge:')) return 1;
+    const attribute = edgeOpacityBase.slice('edge:'.length);
+    return numericExtent(edges.map((edge: any) => Number(edge[attribute])))?.[1] ?? 1;
+  }, [edgeOpacityBase, edges]);
+  const getNodeMetricValue = useCallback((nodeId: string, metric: string): number | null => {
+    const node = nodeById.get(String(nodeId));
+    const net = netMap.get(String(nodeId));
+    if (metric === 'custom') {
+      const value = customNodeAttribute ? Number(node?.[customNodeAttribute]) : Number.NaN;
+      return Number.isFinite(value) ? value : null;
+    }
+    if (metric.startsWith('custom:')) {
+      const value = Number(node?.[metric.slice('custom:'.length)]);
+      return Number.isFinite(value) ? value : null;
+    }
+    if (metric === 'degreeCentrality') {
+      const value = Number(net?.degreeCentrality ?? net?.degree ?? net?.inDegree ?? node?.degree);
+      return Number.isFinite(value) ? value : null;
+    }
+    const value = Number(net?.[metric] ?? node?.[metric]);
+    return Number.isFinite(value) ? value : null;
+  }, [customNodeAttribute, netMap, nodeById]);
+  const nodeMetricExtent = useMemo(() => {
+    const [min, max] = numericExtent(nodes.map((node) => getNodeMetricValue(node.id, edgeColorNodeMetric) ?? Number.NaN)) || [0, 1];
+    return { min, max: max === min ? min + 1 : max };
+  }, [edgeColorNodeMetric, getNodeMetricValue, nodes]);
+  const nodeMetricColorScale = useMemo(
+    () => d3.scaleSequential(d3.interpolateViridis).domain([nodeMetricExtent.min, nodeMetricExtent.max]),
+    [nodeMetricExtent],
+  );
 
   const getEdgeColor = useCallback(
     (d: any) => {
@@ -445,10 +404,25 @@ export function useGraphStyles({
         const net = netMap.get(targetId);
         const mBase = edgeColorNodeMetric;
         const defaultColor = isDarkMode ? '#eeeeee' : '#141414';
-        if (mBase === 'custom') return customColorMap[communityMap[targetId]] || defaultColor;
-        if (mBase === 'louvain' && net?.louvain) return louvainColorMap[net.louvain] || defaultColor;
+        if (mBase.startsWith('custom:')) {
+          const attribute = mBase.slice('custom:'.length);
+          const value = getNodeMetricValue(targetId, mBase);
+          if (value !== null) return nodeMetricColorScale(value);
+          const rawValue = nodeById.get(String(targetId))?.[attribute];
+          return rawValue === null || rawValue === undefined || String(rawValue).trim() === ''
+            ? defaultColor
+            : getCommunityColor(`${attribute}:${String(rawValue)}`);
+        }
+        if (
+          mBase === 'custom' ||
+          mBase === 'community' ||
+          mBase === 'louvain'
+        ) {
+          const dispIdx = displayMap[targetId] ?? -1;
+          return getCommunityColor(communityDisplay.displayToRawMap[dispIdx]);
+        }
         if (mBase === 'type') {
-          const t = nodes.find((n) => n.id === targetId)?.type;
+          const t = nodeById.get(String(targetId))?.type;
           if (t) return typeColorScale(t);
         }
         if (mBase === 'eigenvector' && net?.eigenvector !== undefined)
@@ -463,16 +437,18 @@ export function useGraphStyles({
           return clusteringColorScale(parseFloat(net.clustering));
         if (mBase === 'degreeCentrality' && net?.degreeCentrality !== undefined)
           return degreeCentColorScale(parseFloat(net.degreeCentrality));
-        if (mBase === 'inDegreeCentrality' && net?.inDegreeCentrality !== undefined)
-          return degreeCentColorScale(parseFloat(net.inDegreeCentrality));
-        if (mBase === 'outDegreeCentrality' && net?.outDegreeCentrality !== undefined)
-          return degreeCentColorScale(parseFloat(net.outDegreeCentrality));
       }
 
       if (edgeColorBase === 'weight_raw' && d.weight_raw !== undefined)
         return rawColorScale(Number(d.weight_raw));
       if (edgeColorBase === 'weight_secondary' && d.weight_secondary !== undefined)
         return secColorScale(Number(d.weight_secondary));
+      if (edgeColorBase.startsWith('edge:')) {
+        const attribute = edgeColorBase.slice('edge:'.length);
+        const value = Number(d[attribute]);
+        const scale = customEdgeColorScales.get(attribute);
+        if (Number.isFinite(value) && scale) return scale(value);
+      }
       if (edgeColorBase === 'uniform') {
         if (isDarkMode) {
           if (
@@ -488,7 +464,8 @@ export function useGraphStyles({
             uniformEdgeColor === '#cccccc' ||
             uniformEdgeColor === '#E4E3E0' ||
             uniformEdgeColor === '#ffffff' ||
-            uniformEdgeColor === '#fff'
+            uniformEdgeColor === '#fff' ||
+            uniformEdgeColor === '#888888'
           ) {
             return '#333333';
           }
@@ -502,11 +479,9 @@ export function useGraphStyles({
       uniformEdgeColor,
       edgeColorNodeMetric,
       edgeColorNodeTarget,
-      nodes,
+      nodeById,
       netMap,
-      customColorMap,
-      louvainColorMap,
-      communityMap,
+      displayMap,
       typeColorScale,
       eigenColorScale,
       prColorScale,
@@ -516,31 +491,53 @@ export function useGraphStyles({
       degreeCentColorScale,
       rawColorScale,
       secColorScale,
+      customEdgeColorScales,
+      getNodeMetricValue,
+      nodeMetricColorScale,
       isDarkMode,
+      communityDisplay.displayToRawMap,
     ]
   );
 
   const getEdgeOpacity = useCallback(
     (d: any) => {
-      if (edgeOpacityBase === 'weight_raw' && d.weight_raw !== undefined)
-        return 0.1 + 0.9 * (Number(d.weight_raw) / maxRaw);
-      if (edgeOpacityBase === 'weight_secondary' && d.weight_secondary !== undefined)
-        return 0.1 + 0.9 * (Number(d.weight_secondary) / maxSec);
-      return edgeOpacity;
+      let alpha = edgeOpacity;
+      if (edgeOpacityBase === 'weight_raw' && d.weight_raw !== undefined) {
+        const ratio = maxRaw > 0 ? Number(d.weight_raw) / maxRaw : 1;
+        alpha = edgeOpacity * ratio;
+      } else if (edgeOpacityBase === 'weight_secondary' && d.weight_secondary !== undefined) {
+        const ratio = maxSec > 0 ? Number(d.weight_secondary) / maxSec : 1;
+        alpha = edgeOpacity * ratio;
+      } else if (edgeOpacityBase.startsWith('edge:')) {
+        const attribute = edgeOpacityBase.slice('edge:'.length);
+        const value = Number(d[attribute]);
+        if (Number.isFinite(value)) alpha = edgeOpacity * (customEdgeOpacityMax > 0 ? value / customEdgeOpacityMax : 1);
+      } else if (edgeOpacityBase === 'nodeMetric' && edgeColorNodeMetric) {
+        const sourceId = typeof d.source === 'object' ? d.source.id : d.source;
+        const targetId = typeof d.target === 'object' ? d.target.id : d.target;
+        const source = getNodeMetricValue(String(sourceId), edgeColorNodeMetric);
+        const target = getNodeMetricValue(String(targetId), edgeColorNodeMetric);
+        const value = source === null ? target : target === null ? source : (source + target) / 2;
+        if (value !== null) {
+          const ratio = (value - nodeMetricExtent.min) / (nodeMetricExtent.max - nodeMetricExtent.min);
+          alpha = edgeOpacity * Math.max(0.08, ratio);
+        }
+      }
+      return Math.max(0, Math.min(1, alpha));
     },
-    [edgeOpacityBase, maxRaw, maxSec, edgeOpacity]
+    [edgeOpacityBase, edgeColorNodeMetric, edgeOpacity, customEdgeOpacityMax, getNodeMetricValue, maxRaw, maxSec, nodeMetricExtent]
   );
 
   return {
     customColorMap,
     communityColorMap,
+    communityDisplay,
     netMap,
     maxRaw,
     maxSec,
     getShouldShowArrowhead,
-    elementLegendItems,
-    elementLegendIds,
     legendCategories,
+    legendMetricScale,
     getNodeColor,
     getEdgeColor,
     getEdgeOpacity,
