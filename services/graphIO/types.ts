@@ -19,6 +19,7 @@ export interface WorkspaceSettingsDocument {
     showArrowheads: boolean;
     communityMap: Record<string, string>;
     customAttributes?: CustomAttributeMetadata[];
+    legendColorOverrides?: Record<string, string>;
   };
   visibility: {
     hiddenLegendItems: string[];

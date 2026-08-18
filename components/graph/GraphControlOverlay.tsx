@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { RefreshCw } from 'lucide-react';
 
 interface GraphControlOverlayProps {
   isDarkMode?: boolean;
@@ -56,7 +57,7 @@ export default function GraphControlOverlay({
               : 'bg-white border-[#141414] text-[#141414] hover:bg-[#141414] hover:text-white'
           }`}
         >
-          [ REFRESH ]
+          <span className="flex items-center gap-1.5"><RefreshCw size={12} aria-hidden="true" /> Refresh</span>
         </button>
       </div>
     </>

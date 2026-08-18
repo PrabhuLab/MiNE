@@ -98,6 +98,7 @@ export function useSharedGraph({
       if (!graph.hasNode(n.id)) {
         needsLayout = true;
         graph.addNode(n.id, {
+          ...n,
           x: n.x,
           y: n.y,
           size,
@@ -111,6 +112,7 @@ export function useSharedGraph({
         });
       } else {
         graph.mergeNodeAttributes(n.id, {
+          ...n,
           size,
           color,
           opacity: nodeOpacity,
@@ -140,6 +142,7 @@ export function useSharedGraph({
         if (!edgeKey) {
           try {
             const newKey = graph.addEdge(e.source, e.target, {
+              ...e,
               size,
               color,
               opacity,
@@ -155,6 +158,7 @@ export function useSharedGraph({
         } else {
           targetEdgeKeys.add(edgeKey);
           graph.mergeEdgeAttributes(edgeKey, {
+            ...e,
             size,
             color,
             opacity,

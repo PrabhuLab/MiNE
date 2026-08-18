@@ -156,7 +156,7 @@ export function getCommunityDisplayMap(
     let rawVal: string | undefined;
     if (nodeColorBase === 'louvain' || nodeColorBase === 'infomap' || nodeColorBase === 'fast_greedy') {
       const net = (networkMetrics || []).find((m) => m.id === n.id);
-      if (net && net[nodeColorBase]) rawVal = String(net[nodeColorBase]);
+      if (net && net[nodeColorBase] !== undefined && net[nodeColorBase] !== null && net[nodeColorBase] !== '') rawVal = String(net[nodeColorBase]);
     } else if (nodeColorBase === 'custom' && customNodeAttribute) {
       rawVal = n[customNodeAttribute] !== undefined ? String(n[customNodeAttribute]) : undefined;
     } else {
@@ -191,7 +191,7 @@ export function getCommunityDisplayMap(
     let rawVal: string | undefined;
     if (nodeColorBase === 'louvain' || nodeColorBase === 'infomap' || nodeColorBase === 'fast_greedy') {
       const net = (networkMetrics || []).find((m) => m.id === n.id);
-      if (net && net[nodeColorBase]) rawVal = String(net[nodeColorBase]);
+      if (net && net[nodeColorBase] !== undefined && net[nodeColorBase] !== null && net[nodeColorBase] !== '') rawVal = String(net[nodeColorBase]);
     } else if (nodeColorBase === 'custom' && customNodeAttribute) {
       rawVal = n[customNodeAttribute] !== undefined ? String(n[customNodeAttribute]) : undefined;
     } else {

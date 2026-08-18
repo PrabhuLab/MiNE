@@ -50,7 +50,7 @@ export function useGraphMetrics(
   rawNodes: any[],
   accessors: GraphMetricAccessors = {},
 ) {
-  const { directed, bipartite, setCommunityMap, setFilter, importedMetrics } = useStore();
+  const { directed, bipartite, setCommunityMap, setFilter, importedMetrics, filters } = useStore();
   const [networkMetrics, setNetworkMetrics] = useState<any[]>([]);
   const [nodeMetrics, setNodeMetrics] = useState<any[]>([]);
   const [edgeMetrics, setEdgeMetrics] = useState<any[]>([]);
@@ -63,7 +63,14 @@ export function useGraphMetrics(
 
   const graphRevision = useMemo(() => revisionOf(rawNodes, useStore.getState().rawEdges, true), [rawNodes]);
   const filterRevision = useMemo(() => revisionOf(validNodes, validEdges, true), [validNodes, validEdges]);
-  const topology = useMemo(() => validNodes.length ? calculateTopologyMetrics(validNodes, validEdges, directed) : null, [validNodes, validEdges, directed]);
+  const communityAttribute = filters.communityAttribute || '';
+  const topologyNodes = useMemo(() => communityAttribute
+    ? validNodes.map((node) => ({ ...node, community: node[communityAttribute] }))
+    : validNodes.map((node) => {
+      const { community: _community, ...withoutCommunity } = node;
+      return withoutCommunity;
+    }), [communityAttribute, validNodes]);
+  const topology = useMemo(() => topologyNodes.length ? calculateTopologyMetrics(topologyNodes, validEdges, directed) : null, [topologyNodes, validEdges, directed]);
 
   const metricContext = useMemo<MetricGraphContext>(() => {
     const weightAttribute = appliedFilters?.metricWeightAttribute || 'weight_raw';
@@ -75,11 +82,11 @@ export function useGraphMetrics(
       multi: false,
       hasEdges: validEdges.length > 0,
       hasPositiveWeights: weights.length > 0 && weights.every((weight) => weight > 0),
-      hasCommunities: validNodes.some((node) => node.community !== undefined && node.community !== null && node.community !== '') || networkMetrics.some((node) => node.louvain !== undefined),
+      hasCommunities: Boolean(communityAttribute) || networkMetrics.some((node) => node.louvain !== undefined),
       // The shared graph guarantees finite canonical x/y before controls become actionable.
       hasPositions: validNodes.length > 0,
     };
-  }, [appliedFilters?.metricWeightAttribute, bipartite, directed, networkMetrics, validEdges, validNodes]);
+  }, [appliedFilters?.metricWeightAttribute, bipartite, communityAttribute, directed, networkMetrics, validEdges, validNodes]);
 
   useEffect(() => {
     if (!topology) {
@@ -213,6 +220,12 @@ export function useGraphMetrics(
       return () => clearTimeout(timer);
     }
   }, [appliedFilters?.edgeColorNodeMetric, appliedFilters?.nodeColorBase, metricsLoading, metricsToRun.louvain, networkMetrics, runSelectedMetrics, validEdges.length, validNodes.length]);
+
+  useEffect(() => {
+    if (!validNodes.length || communityAttribute) return;
+    const timer = setTimeout(() => runSelectedMetrics(['louvain']), 0);
+    return () => clearTimeout(timer);
+  }, [communityAttribute, filterRevision, runSelectedMetrics, validNodes.length]);
 
   useEffect(() => {
     const cheapSelected = Object.entries(metricsToRun)

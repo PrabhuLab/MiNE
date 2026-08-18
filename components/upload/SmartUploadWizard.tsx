@@ -15,6 +15,7 @@ import {
   graphToRaw,
   inferCustomEdgeAttributes,
   inferCustomNodeAttributes,
+  mergeCustomAttributeMetadata,
   parseNetworkFiles,
   type ParsedNetwork,
   type WorkspaceSettingsDocument,
@@ -25,6 +26,12 @@ import { StepWeights } from './steps/StepWeights';
 import { StepDirection } from './steps/StepDirection';
 import { StepFileFormat } from './steps/StepFileFormat';
 import { StepDataMapping } from './steps/StepDataMapping';
+
+const detectNodeIdColumn = (headers: string[]) =>
+  headers.find((header) => /^(?:id|node[ _-]?id|key|mode[ _-]?#)$/i.test(String(header).trim())) || headers[0] || '';
+
+const detectNodeLabelColumn = (headers: string[]) =>
+  headers.find((header) => /^(?:label|name|node[ _-]?label|mode[ _-]?name)$/i.test(String(header).trim())) || '';
 
 export default function SmartUploadWizard() {
   const router = useRouter();
@@ -69,12 +76,8 @@ export default function SmartUploadWizard() {
     weightSecCol: '',
     nodeIdCol: '',
     nodeLabelCol: '',
-    nodeTypeCol: '',
     nodePartitionCol: '',
     nodeCommunityCol: '',
-    nodeAbundCol: '',
-    customNodeAttribute: '',
-    customNodeAttributeType: 'nominal',
     rowHeadersCol: 0,
     colHeadersRow: 0,
     dataStartRow: 1,
@@ -115,7 +118,6 @@ export default function SmartUploadWizard() {
     if (format === 'Standard JSON') return filesState.jsonFile !== null;
     if (isFormatDualMatrix) return filesState.countsFile !== null && filesState.percentagesFile !== null;
     if (isFormatMatrix) return filesState.singleMatrixFile !== null;
-    if (format === 'Bipartite Edge List' || format === 'Directed Bipartite Edge List') return filesState.edgesFile !== null && filesState.nodesFile !== null;
     if (isFormatEdgeList) return filesState.edgesFile !== null;
     if (isFormatAdjList) return filesState.adjListFile !== null;
     return false;
@@ -153,7 +155,7 @@ export default function SmartUploadWizard() {
             const headers = edgeData[0];
             next.sourceCol = headers.find((header: string) => /^(source|from|src|origin)$/i.test(header)) || headers[0] || '';
             next.targetCol = headers.find((header: string) => /^(target|to|dst|destination)$/i.test(header)) || headers[1] || '';
-            next.weightRawCol = headers.find((header: string) => /^(weight_raw|raw_weight|absolute|count|weight)$/i.test(header)) || headers[2] || '';
+              next.weightRawCol = headers.find((header: string) => /^(weight_raw|raw_weight|absolute|count|weight)$/i.test(header)) || (isWeighted ? headers[2] || '' : '');
             next.weightSecCol = headers.find((header: string) => /^(weight_secondary|secondary_weight|conditional|percentage|percent|pct|log1p)$/i.test(header)) || '';
           }
           return next;
@@ -165,10 +167,8 @@ export default function SmartUploadWizard() {
             const next = { ...prev };
             if (nodeData[0]) {
               const headers = nodeData[0];
-              next.nodeIdCol = headers.find((header: string) => /^(id|node_id|key)$/i.test(header)) || headers[0] || '';
-              next.nodeLabelCol = headers.find((header: string) => /^(label|name)$/i.test(header)) || '';
-              next.nodeAbundCol = headers.find((header: string) => /^(abundance|size)$/i.test(header)) || '';
-              next.nodeTypeCol = headers.find((header: string) => /^type$/i.test(header)) || '';
+              next.nodeIdCol = detectNodeIdColumn(headers);
+              next.nodeLabelCol = detectNodeLabelColumn(headers);
               next.nodePartitionCol = topology === 'Bipartite' ? headers.find((header: string) => /^(partition|bipartite|set)$/i.test(header)) || '' : '';
               next.nodeCommunityCol = headers.find((header: string) => /^(community|group|cluster)$/i.test(header)) || '';
             }
@@ -193,7 +193,7 @@ export default function SmartUploadWizard() {
               ...prev,
               sourceCol: headers.find((header: string) => /^(source|from|src|origin)$/i.test(header)) || headers[0] || '',
               targetCol: headers.find((header: string) => /^(target|to|dst|destination)$/i.test(header)) || headers[1] || '',
-              weightRawCol: headers.find((header: string) => /^(weight_raw|raw_weight|absolute|count|weight)$/i.test(header)) || headers[2] || '',
+              weightRawCol: headers.find((header: string) => /^(weight_raw|raw_weight|absolute|count|weight)$/i.test(header)) || '',
               weightSecCol: headers.find((header: string) => /^(weight_secondary|secondary_weight|conditional|percentage|percent|pct|log1p)$/i.test(header)) || '',
             }));
           }
@@ -205,10 +205,8 @@ export default function SmartUploadWizard() {
             const headers = nodeData[0];
             setMapping((prev) => ({
               ...prev,
-              nodeIdCol: headers.find((header: string) => /^(id|node_id|key)$/i.test(header)) || headers[0] || '',
-              nodeLabelCol: headers.find((header: string) => /^(label|name)$/i.test(header)) || '',
-              nodeAbundCol: headers.find((header: string) => /^(abundance|size)$/i.test(header)) || '',
-              nodeTypeCol: headers.find((header: string) => /^type$/i.test(header)) || '',
+              nodeIdCol: detectNodeIdColumn(headers),
+              nodeLabelCol: detectNodeLabelColumn(headers),
               nodePartitionCol: topology === 'Bipartite' ? headers.find((header: string) => /^(partition|bipartite|set)$/i.test(header)) || '' : '',
               nodeCommunityCol: headers.find((header: string) => /(?:^|_)community$|^(group|cluster)$/i.test(header)) || '',
             }));
@@ -237,21 +235,16 @@ export default function SmartUploadWizard() {
     const canonical = graphToRaw(graphFromRaw(previewGraph.nodes, previewGraph.edges, isDirected, topology === 'Bipartite'));
     setRawData(canonical.nodes, canonical.edges, isDirected, topology === 'Bipartite');
     const inferredCustomAttributes = [...inferCustomNodeAttributes(canonical.nodes), ...inferCustomEdgeAttributes(canonical.edges)];
-    const hasChosenCommunity = Boolean(
-      (mapping.nodeCommunityCol && mapping.nodeCommunityCol !== '') ||
-      canonical.nodes.some((node) => node.community !== undefined && node.community !== null && String(node.community).trim() !== '')
-    );
-    const firstNodeAttribute = inferredCustomAttributes.find((attribute) => attribute.scope === 'node');
-    const firstEdgeAttribute = inferredCustomAttributes.find((attribute) => attribute.scope === 'edge');
     useStore.setState((state) => ({
       filters: {
         ...state.filters,
-        nodeColorBase: hasChosenCommunity ? 'custom' : 'louvain',
-        edgeColorBase: hasChosenCommunity ? 'uniform' : 'nodeMetric',
-        edgeColorNodeMetric: hasChosenCommunity ? '' : 'louvain',
+        customNodeAttribute: '',
+        customEdgeAttribute: '',
+        communityAttribute: '',
+        nodeColorBase: 'louvain',
+        edgeColorBase: 'nodeMetric',
+        edgeColorNodeMetric: 'louvain',
         edgeColorNodeTarget: 'source' as const,
-        customNodeAttribute: state.filters.customNodeAttribute || firstNodeAttribute?.name || '',
-        customEdgeAttribute: state.filters.customEdgeAttribute || firstEdgeAttribute?.name || '',
       },
       customAttributes: inferredCustomAttributes,
     }));
@@ -262,22 +255,20 @@ export default function SmartUploadWizard() {
     const { nodes, edges } = graphToRaw(parsed.graph);
     const workspace = parsed.workspace;
     const inferredCustomAttributes = [...inferCustomNodeAttributes(nodes), ...inferCustomEdgeAttributes(edges)];
-    const hasExplicitCommunity = Boolean(
-      (workspace?.appearance.communityMap && Object.keys(workspace.appearance.communityMap).length > 0) ||
-      nodes.some((node) => node.community !== undefined && node.community !== null && String(node.community).trim() !== '') ||
-      (workspace?.filters?.nodeColorBase && workspace.filters.nodeColorBase !== 'louvain')
-    );
     resetCommunityColorCache();
     clearStore();
     const defaultFilters = useStore.getState().filters;
     const nextFilters = workspace?.filters ? {
       ...defaultFilters,
       ...workspace.filters,
+      communityAttribute: '',
+      nodeColorBase: workspace.filters.nodeColorBase === 'community' ? 'louvain' : workspace.filters.nodeColorBase,
     } : {
       ...defaultFilters,
-      nodeColorBase: hasExplicitCommunity ? 'custom' : 'louvain',
-      edgeColorBase: hasExplicitCommunity ? 'uniform' : 'nodeMetric',
-      edgeColorNodeMetric: hasExplicitCommunity ? '' : 'louvain',
+      communityAttribute: '',
+      nodeColorBase: 'louvain',
+      edgeColorBase: 'nodeMetric',
+      edgeColorNodeMetric: 'louvain',
       edgeColorNodeTarget: 'source' as const,
     };
     useStore.setState({
@@ -293,9 +284,11 @@ export default function SmartUploadWizard() {
       showNodeLabels: workspace?.appearance.showNodeLabels ?? false,
       showArrowheads: workspace?.appearance.showArrowheads ?? false,
       communityMap: workspace?.appearance.communityMap || {},
-      customAttributes: workspace?.appearance.customAttributes?.length
-        ? workspace.appearance.customAttributes
-        : inferredCustomAttributes,
+      legendColorOverrides: workspace?.appearance.legendColorOverrides || {},
+      customAttributes: mergeCustomAttributeMetadata(
+        inferredCustomAttributes,
+        workspace?.appearance.customAttributes?.map((attribute) => ({ ...attribute, drivesCommunity: false })),
+      ),
       hiddenLegendItems: workspace?.visibility.hiddenLegendItems || [],
       isolatedLegendItem: workspace?.visibility.isolatedLegendItem || null,
       isolatedCommunityId: workspace?.visibility.isolatedCommunityId || null,
@@ -333,6 +326,7 @@ export default function SmartUploadWizard() {
           showArrowheads: state.showArrowheads,
           communityMap: {},
           customAttributes: [],
+          legendColorOverrides: {},
         },
         visibility: { hiddenLegendItems: [], isolatedLegendItem: null, isolatedCommunityId: null },
         calculations: { selected: {} },

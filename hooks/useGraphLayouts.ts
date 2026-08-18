@@ -8,7 +8,7 @@ import type { LayoutAlgorithm, LayoutSettings } from '@/services/layouts/types';
 const DEFAULT_SETTINGS: LayoutSettings = {
   random: { center: 0, scale: 100 },
   circular: { center: 0, scale: 100 },
-  circlepack: { center: 0, scale: 100, hierarchyAttributes: ['community', 'type'] },
+  circlepack: { center: 0, scale: 100, hierarchyAttributes: ['community'] },
   noverlap: { gridSize: 20, margin: 5, expansion: 1.1, ratio: 1, speed: 3, maxIterations: 500 },
   forceatlas2: { adjustSizes: false, barnesHutOptimize: true, barnesHutTheta: 0.5, edgeWeightInfluence: 1, gravity: 1, linLogMode: false, outboundAttractionDistribution: false, scalingRatio: 1, slowDown: 1, strongGravityMode: false },
 };

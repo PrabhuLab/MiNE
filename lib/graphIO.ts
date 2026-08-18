@@ -39,6 +39,7 @@ export {
   detectCustomAttributeType,
   inferCustomEdgeAttributes,
   inferCustomNodeAttributes,
+  mergeCustomAttributeMetadata,
 } from '@/services/graphIO/customAttributes';
 export { buildAllInOne, createRandomClusterAllInOne } from '@/services/graphIO/allInOne';
 
@@ -80,8 +81,8 @@ export function graphFromRaw(
     if (graph.hasNode(id)) return;
     const attributes = cleanAttributes({ ...node });
     delete attributes.id;
-    attributes.label = node.label || node.name || id;
-    attributes.name = node.name || node.label || id;
+    attributes.label = node.label ?? node.name ?? id;
+    attributes.name = node.name ?? node.label ?? id;
     attributes.abundance = numeric(node.abundance, 10);
     if (bipartite) {
       if (!meaningful(attributes.partition)) {
@@ -220,12 +221,23 @@ function normalizeParsedGraph(graph: Graph, metadata: Record<string, any> = {}):
   if (Object.keys(embeddedMetricsMetadata).length && !graph.hasAttribute('metricsMetadata')) {
     graph.setAttribute('metricsMetadata', JSON.stringify(embeddedMetricsMetadata));
   }
-  const directed = metadata.directed ?? graph.getAttribute('directed') ?? graph.type === 'directed';
+  const booleanValue = (value: unknown, fallback: boolean) => {
+    if (value === undefined || value === null || value === '') return fallback;
+    if (typeof value === 'string') return value.trim().toLowerCase() === 'true' || value.trim() === '1';
+    return Boolean(value);
+  };
+  const directed = booleanValue(metadata.directed ?? graph.getAttribute('directed'), graph.type === 'directed');
   const partitionValues = new Set<string>();
-  graph.forEachNode((_node, attrs) => {
-    if (meaningful(attrs.partition)) partitionValues.add(String(attrs.partition));
+  graph.forEachNode((node, attrs) => {
+    if (!meaningful(attrs.partition)) {
+      const legacyPartition = attrs.bipartite ?? attrs.set ?? attrs.group
+        ?? (attrs.type === 'A' || attrs.type === 'B' ? attrs.type : undefined);
+      if (meaningful(legacyPartition)) graph.setNodeAttribute(node, 'partition', legacyPartition);
+    }
+    const normalizedAttrs = graph.getNodeAttributes(node);
+    if (meaningful(normalizedAttrs.partition)) partitionValues.add(String(normalizedAttrs.partition));
   });
-  let bipartite = Boolean(metadata.bipartite ?? graph.getAttribute('bipartite'));
+  let bipartite = booleanValue(metadata.bipartite ?? graph.getAttribute('bipartite'), false);
   if (!bipartite && partitionValues.size === 2) {
     try {
       bipartite = isBipartiteBy(graph, 'partition');
@@ -258,11 +270,13 @@ function normalizeParsedGraph(graph: Graph, metadata: Record<string, any> = {}):
     });
     graph.setAttribute('partitionAttribute', 'partition');
   }
-  const weighted = Boolean(
-    metadata.weighted
-      ?? graph.getAttribute('weighted')
-      ?? graph.someEdge((_edge, attrs) => numeric(attrs.weight_raw ?? attrs.weight, 1) !== 1),
+  const weighted = booleanValue(
+    metadata.weighted ?? graph.getAttribute('weighted'),
+    graph.someEdge((_edge, attrs) => numeric(attrs.weight_raw ?? attrs.weight, 1) !== 1),
   );
+  graph.setAttribute('directed', directed);
+  graph.setAttribute('bipartite', bipartite);
+  graph.setAttribute('weighted', weighted);
   const metricNames = new Set([
     'community', 'deltaQ', 'k_i_in', 'nodeDegree', 'communityDegree', 'degree', 'inDegree', 'outDegree',
     'degreeCentrality', 'inDegreeCentrality', 'outDegreeCentrality', 'betweenness', 'closeness', 'clustering',

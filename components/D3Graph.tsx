@@ -193,6 +193,9 @@ export default function D3Graph({
     getShouldShowArrowhead,
     legendCategories,
     legendMetricScale,
+    legendMetricScales,
+    legendNodeMembership,
+    legendEdgeMembership,
     getNodeColor,
     getEdgeColor,
     getEdgeOpacity,
@@ -201,6 +204,7 @@ export default function D3Graph({
     edges,
     communityMap,
     networkMetrics,
+    nodeSizeBase,
     nodeColorBase,
     uniformNodeColor,
     uniformEdgeColor,
@@ -246,12 +250,13 @@ export default function D3Graph({
         isolatedLegendItem,
         isolatedCommunityId,
         displayMap: communityDisplay.displayMap,
+        legendNodeMembership,
       },
       targetFilter,
       isolatedCommunityOverride,
       isolatedLegendOverride,
     ),
-    [nodes, bipartite, hiddenItems, isolatedLegendItem, isolatedCommunityId, communityDisplay.displayMap],
+    [nodes, bipartite, hiddenItems, isolatedLegendItem, isolatedCommunityId, communityDisplay.displayMap, legendNodeMembership],
   );
   const fittedNodeIds = useMemo(
     () => focusedEdgeNodeIds.size > 0 ? Array.from(focusedEdgeNodeIds) : getVisibleNodeIds(),
@@ -305,6 +310,8 @@ export default function D3Graph({
     getEdgeOpacity,
     netMap,
     displayMap: communityDisplay.displayMap,
+    legendNodeMembership,
+    legendEdgeMembership,
     maxRaw,
     maxSec,
     clickedNode,
@@ -469,7 +476,7 @@ export default function D3Graph({
         onElementSingleClick={handleElementSingleClick}
         onElementDoubleClick={handleElementDoubleClick}
         onCommunitySingleClick={handleCommunitySingleClick}
-        onCommunityDoubleClick={handleCommunityDoubleClick}
+        onCommunityDoubleClick={(id) => id.startsWith('community:') ? handleCommunityDoubleClick(id) : handleElementDoubleClick(id)}
         onCommunityHover={setHoveredCommunityId}
         showNodeLabels={showNodeLabels}
         setShowNodeLabels={setShowNodeLabels}
@@ -478,6 +485,7 @@ export default function D3Graph({
         setShowArrowheads={setShowArrowheads}
         legendCategories={legendCategories}
         legendMetricScale={legendMetricScale}
+        legendMetricScales={legendMetricScales}
         isLegendMinimized={isLegendMinimized}
         setIsLegendMinimized={setIsLegendMinimized}
       />

@@ -9,7 +9,10 @@ export interface LegendCategoryItem {
   id: string;
   color: string;
   nodes?: string[];
+  nodeIds?: string[];
+  edgeIds?: string[];
   allIds: string[];
+  colorKey?: string;
 }
 
 export interface LegendCategories {

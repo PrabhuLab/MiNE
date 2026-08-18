@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ChevronUp, ChevronDown } from 'lucide-react';
 import type { LegendMetricScale } from '@/services/graphStyles/types';
 import type { ElementLegendItem, LegendCategories, LegendCategoryItem } from './legend/types';
+import { useStore } from '@/store/useStore';
 
 export type { ElementLegendItem, LegendCategories, LegendCategoryItem } from './legend/types';
 
@@ -26,8 +27,9 @@ export interface GraphLegendProps {
   directed: boolean;
   showArrowheads: boolean;
   setShowArrowheads: (val: boolean) => void;
-  legendCategories: LegendCategories | null;
+  legendCategories: LegendCategories[];
   legendMetricScale?: LegendMetricScale | null;
+  legendMetricScales?: LegendMetricScale[];
   isLegendMinimized: boolean;
   setIsLegendMinimized: (val: boolean) => void;
 }
@@ -53,10 +55,14 @@ export default function GraphLegend({
   setShowArrowheads,
   legendCategories,
   legendMetricScale,
+  legendMetricScales = [],
   isLegendMinimized,
   setIsLegendMinimized,
 }: GraphLegendProps) {
   const clickTimers = useRef<{ [key: string]: NodeJS.Timeout }>({});
+  const [editingColorId, setEditingColorId] = useState<string | null>(null);
+  const setLegendColor = useStore((state) => state.setLegendColor);
+  useEffect(() => () => Object.values(clickTimers.current).forEach(clearTimeout), []);
 
   const handleElementItemClick = (e: React.MouseEvent, item: ElementLegendItem) => {
     e.stopPropagation();
@@ -115,9 +121,9 @@ export default function GraphLegend({
   };
 
   // Generate CSS linear-gradient for continuous metric scale
-  const gradientCss = React.useMemo(() => {
-    if (!legendMetricScale) return '';
-    const { min, max, scale } = legendMetricScale;
+  const gradientCss = React.useCallback((metricScale: LegendMetricScale) => {
+    if (!metricScale.scale) return 'transparent';
+    const { min, max, scale } = metricScale;
     const steps = 10;
     const stops: string[] = [];
     for (let i = 0; i <= steps; i++) {
@@ -125,10 +131,11 @@ export default function GraphLegend({
       stops.push(scale(val));
     }
     return `linear-gradient(to right, ${stops.join(', ')})`;
-  }, [legendMetricScale]);
+  }, []);
 
   return (
     <div
+      id="graph-legend"
       className={`absolute top-6 left-6 border shadow-sm flex flex-col transition-colors z-10 ${
         isDarkMode
           ? 'bg-[#141414]/90 border-[#333] text-[#E4E3E0]'
@@ -273,36 +280,48 @@ export default function GraphLegend({
           </div>
 
           {/* Continuous Metric Scale Legend */}
-          {legendMetricScale ? (
-            <div className="pt-1">
-              <div className="opacity-50 uppercase font-bold mb-1.5">
-                {legendMetricScale.title}
+          {(legendMetricScales.length ? legendMetricScales : legendMetricScale ? [legendMetricScale] : []).map((metricScale) => (
+            <div className="group/scale pt-1" key={`${metricScale.visual || 'color'}:${metricScale.title}`}>
+              <div className="flex items-center justify-between opacity-50 uppercase font-bold mb-1.5">
+                <span>{metricScale.title}</span>
+                {metricScale.colorKeys && metricScale.colors ? <div className="flex gap-1 opacity-0 transition-opacity group-hover/scale:opacity-100">
+                  <input aria-label={`${metricScale.title} minimum color`} type="color" value={metricScale.colors.min} onClick={(event) => event.stopPropagation()} onInput={(event) => setLegendColor(metricScale.colorKeys!.min, event.currentTarget.value)} className="h-4 w-4 cursor-pointer border-0 p-0" />
+                  <input aria-label={`${metricScale.title} maximum color`} type="color" value={metricScale.colors.max} onClick={(event) => event.stopPropagation()} onInput={(event) => setLegendColor(metricScale.colorKeys!.max, event.currentTarget.value)} className="h-4 w-4 cursor-pointer border-0 p-0" />
+                </div> : null}
               </div>
-              <div
-                className="w-full h-3 rounded-sm border border-black/10 dark:border-white/20 mb-1"
-                style={{ background: gradientCss }}
-              />
-              <div className="flex justify-between text-[9px] font-mono opacity-80">
-                <span>{legendMetricScale.ticks[0]?.toFixed(2)}</span>
-                <span>{legendMetricScale.ticks[1]?.toFixed(2)}</span>
-                <span>{legendMetricScale.ticks[2]?.toFixed(2)}</span>
-              </div>
+              {metricScale.description ? <div className="mb-1.5 text-[9px] font-mono opacity-65">{metricScale.description}</div> : null}
+              {(metricScale.visual || 'color') === 'color' ? (
+                metricScale.scale ? <div className="w-full h-3 rounded-sm border border-black/10 dark:border-white/20 mb-1" style={{ background: gradientCss(metricScale) }} /> : null
+              ) : metricScale.visual === 'size' ? (
+                <div className="mb-1 flex h-7 items-end justify-between px-1" aria-label={`${metricScale.title} size scale`}>
+                  {[7, 13, 20].map((diameter) => <span key={diameter} className="inline-block rounded-full border border-current bg-current/20" style={{ width: diameter, height: diameter }} />)}
+                </div>
+              ) : (
+                <div className="mb-1 flex h-7 flex-col justify-between py-1" aria-label={`${metricScale.title} width scale`}>
+                  {[1, 3, 6].map((width) => <span key={width} className="block w-full bg-current" style={{ height: width }} />)}
+                </div>
+              )}
+              {metricScale.ticks.length ? <div className="flex justify-between text-[9px] font-mono opacity-80">
+                <span>{metricScale.ticks[0]?.toFixed(2)}</span><span>{metricScale.ticks[1]?.toFixed(2)}</span><span>{metricScale.ticks[2]?.toFixed(2)}</span>
+              </div> : null}
             </div>
-          ) : legendCategories ? (
-            <div>
+          ))}
+          {legendCategories.map((category) => (
+            <div key={category.title}>
               <div className="opacity-50 uppercase font-bold mb-1 flex items-center justify-between">
-                <span>{legendCategories.title}</span>
+                <span>{category.title}</span>
               </div>
               <div className="space-y-1 max-h-[160px] overflow-y-auto pr-1">
-                {legendCategories.items.map((item, i) => {
+                {category.items.map((item, i) => {
                   const isIsolated = isolatedCommunityId === item.id || isolatedLegendItem === item.id;
                   const isHidden = hiddenItems.has(item.id);
-                  const isOtherIsolated = isolatedCommunityId !== null && isolatedCommunityId !== item.id;
+                  const activeIsolation = isolatedLegendItem || isolatedCommunityId;
+                  const isOtherIsolated = activeIsolation !== null && activeIsolation !== item.id;
 
                   return (
                     <div
                       key={i}
-                      className={`flex items-center space-x-2 cursor-pointer p-1 -mx-1 rounded-sm transition-all ${
+                      className={`group/legend-row flex items-center space-x-2 cursor-pointer p-1 -mx-1 rounded-sm transition-all ${
                         isIsolated
                           ? 'bg-[#b4ff39]/20 font-bold border border-[#b4ff39]'
                           : isHidden
@@ -313,7 +332,9 @@ export default function GraphLegend({
                       }`}
                       onClick={(e) => handleCategoryClick(e, item)}
                       onMouseEnter={() => onCommunityHover && onCommunityHover(item.id)}
-                      onMouseLeave={() => onCommunityHover && onCommunityHover(null)}
+                      onMouseLeave={() => {
+                        if (editingColorId !== item.id) onCommunityHover?.(null);
+                      }}
                       title="Single-click to toggle show/hide, double-click to isolate"
                     >
                       <div
@@ -321,12 +342,23 @@ export default function GraphLegend({
                         style={{ backgroundColor: item.color }}
                       ></div>
                       <span className="flex-grow select-none truncate">{item.label}</span>
+                      {item.colorKey ? <input
+                        aria-label={`Change ${item.label} color`}
+                        type="color"
+                        value={item.color}
+                        onClick={(event) => event.stopPropagation()}
+                        onPointerDown={(event) => { event.stopPropagation(); setEditingColorId(item.id); onCommunityHover?.(item.id); }}
+                        onFocus={() => { setEditingColorId(item.id); onCommunityHover?.(item.id); }}
+                        onBlur={() => { setEditingColorId(null); onCommunityHover?.(null); }}
+                        onInput={(event) => setLegendColor(item.colorKey!, event.currentTarget.value)}
+                        className="h-4 w-4 flex-shrink-0 cursor-pointer border-0 p-0 opacity-0 transition-opacity group-hover/legend-row:opacity-100"
+                      /> : null}
                     </div>
                   );
                 })}
               </div>
             </div>
-          ) : null}
+          ))}
         </div>
       )}
     </div>

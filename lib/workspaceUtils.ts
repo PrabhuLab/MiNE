@@ -188,7 +188,7 @@ export function computeTableDataNodes(validNodes: any[], networkMetrics: any[], 
   let data = validNodes.map(node => {
     const net = netMap.get(node.id) || {};
     const mod = modMap.get(node.id) || {};
-    const comm = mod.community || net.louvain || communityMap[node.id] || node.community || "";
+    const comm = mod.community ?? net.louvain ?? communityMap[node.id] ?? node.community ?? "";
     return { ...node, net, mod, comm };
   });
 

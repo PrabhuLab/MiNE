@@ -99,7 +99,7 @@ export function useSharedPhysics({
     // Build shared D3 links array from Graphology edges
     const d3Links: any[] = [];
     graph.forEachEdge((edgeId: string, attrs: any, source: string, target: string) => {
-      d3Links.push({ source, target, weight: attrs.rawEdge?.weight_raw || 1, rawEdge: attrs.rawEdge });
+      d3Links.push({ source, target, weight: attrs.rawEdge?.weight_raw ?? 1, rawEdge: attrs.rawEdge });
     });
 
     d3LinksRef.current = d3Links;

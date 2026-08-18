@@ -1,5 +1,4 @@
-import { TopologyType, ColumnMappingState, ParsedDataState } from '../types';
-import { explicitPartitionRole } from '@/services/graphPresentation/visibility';
+import type { TopologyType, ColumnMappingState, ParsedDataState } from '../types';
 
 export interface GraphNode {
   id: string;
@@ -17,6 +16,16 @@ export interface GraphEdge {
   weight_secondary: number;
   [key: string]: any;
 }
+
+/** Metadata uploads are patches: blank/missing sentinel values never erase topology semantics. */
+const hasMetadataValue = (value: unknown): boolean => {
+  if (value === undefined || value === null) return false;
+  const normalized = String(value).trim();
+  return normalized !== '' && !/^(?:n\/?a|null|undefined)$/i.test(normalized);
+};
+
+const metadataValue = (row: any[], index: number): unknown =>
+  index >= 0 && hasMetadataValue(row[index]) ? row[index] : undefined;
 
 export function constructGraph(
   parsedData: ParsedDataState,
@@ -39,10 +48,8 @@ export function constructGraph(
     weightSecCol,
     nodeIdCol,
     nodeLabelCol,
-    nodeTypeCol,
     nodePartitionCol,
     nodeCommunityCol,
-    nodeAbundCol,
     rowHeadersCol,
     colHeadersRow,
     dataStartRow,
@@ -56,31 +63,23 @@ export function constructGraph(
 
     parsedData.rawNodes.forEach((n: any, index: number) => {
       const id = String(n[nodeIdCol || 'id'] ?? n.id ?? `node_${index}`);
-      const mappedType = nodeTypeCol ? n[nodeTypeCol] : n.type;
-      const rawPartition = nodePartitionCol ? n[nodePartitionCol] : n.partition;
-      let mappedPartition: string | undefined = undefined;
-      if (topology === 'Bipartite') {
-        const role = explicitPartitionRole(rawPartition);
-        mappedPartition = role !== null ? (role ? 'B' : 'A') : (rawPartition ? String(rawPartition) : 'A');
-      } else if (rawPartition !== undefined && rawPartition !== '') {
-        mappedPartition = String(rawPartition);
-      }
+      const mappedPartition = nodePartitionCol ? n[nodePartitionCol] : n.partition;
+      const mappedCommunity = nodeCommunityCol ? n[nodeCommunityCol] : n.community;
       nodesMap.set(id, {
         ...n,
         id,
-        name: n[nodeLabelCol || 'name'] || n['name'] || id,
-        label: n[nodeLabelCol || 'label'] || n.label || n.name || id,
-        abundance: parseFloat(n[nodeAbundCol || 'abundance'] || n['abundance']) || 10,
-        ...(mappedType !== undefined && mappedType !== '' ? { type: mappedType } : {}),
-        ...(mappedPartition !== undefined && mappedPartition !== '' ? { partition: mappedPartition } : {}),
-        community: n[nodeCommunityCol || 'community'] || n['community'] || '',
+        name: n[nodeLabelCol || 'name'] ?? n.name ?? id,
+        label: n[nodeLabelCol || 'label'] ?? n.label ?? n.name ?? id,
+        abundance: Number.isFinite(Number(n.abundance)) ? Number(n.abundance) : 10,
+        ...(mappedPartition !== undefined && mappedPartition !== null && mappedPartition !== '' ? { partition: mappedPartition } : {}),
+        ...(mappedCommunity !== undefined && mappedCommunity !== null && mappedCommunity !== '' ? { community: mappedCommunity } : {}),
       });
     });
 
     parsedData.rawEdges.forEach((e: any) => {
-      const sourceId = e[sourceCol || 'source'] || e['source'];
-      const targetId = e[targetCol || 'target'] || e['target'];
-      if (!sourceId || !targetId) return;
+      const sourceId = e[sourceCol || 'source'] ?? e.source;
+      const targetId = e[targetCol || 'target'] ?? e.target;
+      if (sourceId === undefined || sourceId === null || sourceId === '' || targetId === undefined || targetId === null || targetId === '') return;
 
       const edgeId = isDirected
         ? `${sourceId}->${targetId}`
@@ -93,8 +92,8 @@ export function constructGraph(
           ...e,
           source: sourceId,
           target: targetId,
-          weight_raw: parseFloat(e[weightRawCol || 'weight'] || e['weight']) || 1,
-          weight_secondary: parseFloat(e[weightSecCol || 'weight'] || e['weight']) || 1,
+          weight_raw: Number.isFinite(Number(e[weightRawCol || 'weight'] ?? e.weight)) ? Number(e[weightRawCol || 'weight'] ?? e.weight) : 1,
+          weight_secondary: Number.isFinite(Number(e[weightSecCol || 'weight'] ?? e.weight)) ? Number(e[weightSecCol || 'weight'] ?? e.weight) : 1,
         });
       }
     });
@@ -315,9 +314,12 @@ export function constructGraph(
       if (sIdx !== -1 && tIdx !== -1) {
         for (let i = 1; i < edgeData.length; i++) {
           const row = edgeData[i];
-          const sId = row[sIdx];
-          const tId = row[tIdx];
-          if (!sId || !tId || sId === tId) continue;
+          const rawSource = metadataValue(row, sIdx);
+          const rawTarget = metadataValue(row, tIdx);
+          if (rawSource === undefined || rawTarget === undefined) continue;
+          const sId = String(rawSource).trim();
+          const tId = String(rawTarget).trim();
+          if (sId === tId) continue;
 
           const wRaw = wrIdx !== -1 ? parseFloat(row[wrIdx]) : 1;
           const wSec = wsIdx !== -1 ? parseFloat(row[wsIdx]) : wRaw;
@@ -374,42 +376,29 @@ export function constructGraph(
       const wsIdx = eHeaders.indexOf(weightSecCol);
 
       if (sIdx !== -1 && tIdx !== -1) {
+        const edgeById = new Map(edges.map((edge) => [
+          isDirected ? `${edge.source}->${edge.target}` : edge.source < edge.target ? `${edge.source}_${edge.target}` : `${edge.target}_${edge.source}`,
+          edge,
+        ]));
         for (let i = 1; i < edgeData.length; i++) {
           const row = edgeData[i];
-          const sId = row[sIdx];
-          const tId = row[tIdx];
-          if (!sId || !tId || sId === tId) continue;
+          const rawSource = metadataValue(row, sIdx);
+          const rawTarget = metadataValue(row, tIdx);
+          if (rawSource === undefined || rawTarget === undefined) continue;
+          const sId = String(rawSource).trim();
+          const tId = String(rawTarget).trim();
+          if (sId === tId) continue;
 
           const edgeId = isDirected ? `${sId}->${tId}` : sId < tId ? `${sId}_${tId}` : `${tId}_${sId}`;
-          if (edgeSet.has(edgeId)) {
-            const existingEdge = edges.find(e => {
-              const eId = isDirected ? `${e.source}->${e.target}` : e.source < e.target ? `${e.source}_${e.target}` : `${e.target}_${e.source}`;
-              return eId === edgeId;
-            });
-            if (existingEdge) {
+          const existingEdge = edgeById.get(edgeId);
+          if (existingEdge) {
               if (wrIdx !== -1 && !isNaN(parseFloat(row[wrIdx]))) existingEdge.weight_raw = parseFloat(row[wrIdx]);
               if (wsIdx !== -1 && !isNaN(parseFloat(row[wsIdx]))) existingEdge.weight_secondary = parseFloat(row[wsIdx]);
               for (let j = 0; j < eHeaders.length; j++) {
-                if (j !== sIdx && j !== tIdx && j !== wrIdx && j !== wsIdx && row[j] !== undefined && row[j] !== '') {
+                if (j !== sIdx && j !== tIdx && j !== wrIdx && j !== wsIdx && hasMetadataValue(row[j])) {
                   existingEdge[eHeaders[j]] = row[j];
                 }
               }
-            }
-          } else {
-            const wRaw = wrIdx !== -1 ? parseFloat(row[wrIdx]) : 1;
-            const wSec = wsIdx !== -1 ? parseFloat(row[wsIdx]) : wRaw;
-            const finalWR = !isNaN(wRaw) ? wRaw : 1;
-            const finalWS = !isNaN(wSec) ? wSec : finalWR;
-            edgeSet.add(edgeId);
-            const extraEdgeProps: Record<string, any> = {};
-            for (let j = 0; j < eHeaders.length; j++) {
-              if (j !== sIdx && j !== tIdx && j !== wrIdx && j !== wsIdx && row[j] !== undefined && row[j] !== '') {
-                extraEdgeProps[eHeaders[j]] = row[j];
-              }
-            }
-            edges.push({ source: sId, target: tId, weight_raw: finalWR, weight_secondary: finalWS, ...extraEdgeProps });
-            if (!nodesMap.has(sId)) nodesMap.set(sId, { id: sId, name: sId, abundance: 10 });
-            if (!nodesMap.has(tId)) nodesMap.set(tId, { id: tId, name: tId, abundance: 10 });
           }
         }
       }
@@ -420,64 +409,54 @@ export function constructGraph(
       const nHeaders = nodeData[0] || [];
       const idIdx = nHeaders.indexOf(nodeIdCol);
       const lblIdx = nHeaders.indexOf(nodeLabelCol);
-      const typIdx = nHeaders.indexOf(nodeTypeCol);
       const partitionIdx = nHeaders.indexOf(nodePartitionCol);
       const commIdx = nHeaders.indexOf(nodeCommunityCol);
-      const abnIdx = nHeaders.indexOf(nodeAbundCol);
 
       if (idIdx !== -1) {
         for (let i = 1; i < nodeData.length; i++) {
           const row = nodeData[i];
-          const id = row[idIdx];
-          if (!id) continue;
-          const name = lblIdx !== -1 && row[lblIdx] ? row[lblIdx] : id;
-          const type = typIdx !== -1 ? row[typIdx] : undefined;
-          const partition = partitionIdx !== -1 ? row[partitionIdx] : undefined;
-          const comm = commIdx !== -1 && row[commIdx] ? row[commIdx] : undefined;
-          const abund = abnIdx !== -1 ? parseFloat(row[abnIdx]) : 10;
-
-          let resolvedPartition = partition;
-          if (topology === 'Bipartite' && partition !== undefined) {
-            const role = explicitPartitionRole(partition);
-            if (role !== null) resolvedPartition = role ? 'B' : 'A';
-          }
+          const rawId = metadataValue(row, idIdx);
+          if (rawId === undefined) continue;
+          const id = String(rawId).trim();
+          const label = metadataValue(row, lblIdx);
+          const partition = metadataValue(row, partitionIdx);
+          const comm = metadataValue(row, commIdx);
 
           if (nodesMap.has(id)) {
             const existing = nodesMap.get(id)!;
             const extraProps: any = {};
             for (let j = 0; j < nHeaders.length; j++) {
-              if (j !== idIdx && j !== lblIdx && j !== typIdx && j !== partitionIdx && j !== commIdx && j !== abnIdx) {
-                if (row[j] !== undefined && row[j] !== '') {
+              if (j !== idIdx && j !== lblIdx && j !== partitionIdx && j !== commIdx) {
+                if (hasMetadataValue(row[j])) {
                   extraProps[nHeaders[j]] = row[j];
                 }
               }
             }
             nodesMap.set(id, {
               ...existing,
-              name: lblIdx !== -1 && row[lblIdx] ? name : existing.name,
-              type: type || existing.type,
-              partition: resolvedPartition ?? existing.partition ?? (topology === 'Bipartite' ? 'A' : undefined),
-              community: comm || existing.community,
-              abundance: isNaN(abund) ? existing.abundance : abund,
               ...extraProps,
+              ...(label !== undefined ? { name: String(label), label: String(label) } : {}),
+              ...(partition !== undefined ? { partition } : {}),
+              ...(comm !== undefined ? { community: comm } : {}),
             });
-          } else {
+          } else if (isFormatEdgeList) {
             const extraProps: any = {};
             for (let j = 0; j < nHeaders.length; j++) {
-              if (j !== idIdx && j !== lblIdx && j !== typIdx && j !== partitionIdx && j !== commIdx && j !== abnIdx) {
-                if (row[j] !== undefined && row[j] !== '') {
+              if (j !== idIdx && j !== lblIdx && j !== partitionIdx && j !== commIdx) {
+                if (hasMetadataValue(row[j])) {
                   extraProps[nHeaders[j]] = row[j];
                 }
               }
             }
+            const displayLabel = label !== undefined ? String(label) : id;
             nodesMap.set(id, {
               id,
-              name,
-              type,
-              partition: resolvedPartition ?? (topology === 'Bipartite' ? 'A' : undefined),
-              community: comm,
-              abundance: isNaN(abund) ? 10 : abund,
+              name: displayLabel,
+              label: displayLabel,
+              abundance: 10,
               ...extraProps,
+              ...(partition !== undefined ? { partition } : topology === 'Bipartite' ? { partition: 'A' } : {}),
+              ...(comm !== undefined ? { community: comm } : {}),
             });
           }
         }

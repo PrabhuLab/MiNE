@@ -59,6 +59,8 @@ interface UseGraphSimulationProps {
   getEdgeOpacity: (edge: any) => number;
   netMap: Map<string, any>;
   displayMap: Record<string, number>;
+  legendNodeMembership: Map<string, Set<string>>;
+  legendEdgeMembership: Map<string, Set<string>>;
   maxRaw: number;
   maxSec: number;
   clickedNode: RawNode | null;
@@ -118,6 +120,8 @@ export function useGraphSimulation({
   getEdgeOpacity,
   netMap,
   displayMap,
+  legendNodeMembership,
+  legendEdgeMembership,
   clickedNode,
   setClickedNode,
   clickedEdge,
@@ -425,6 +429,8 @@ export function useGraphSimulation({
       focusedEdgeNodeSet,
       showNodeLabels,
       nodeOpacity,
+      legendNodeMembership,
+      legendEdgeMembership,
     };
     const nodePresentation = new Map(graphNodes.map((node: any) => [
       String(node.id),
@@ -716,6 +722,8 @@ export function useGraphSimulation({
     getEdgeColor,
     getEdgeOpacity,
     displayMap,
+    legendNodeMembership,
+    legendEdgeMembership,
     clickedNode,
     clickedEdge,
     focusedEdgeNodeSet,

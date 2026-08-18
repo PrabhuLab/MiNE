@@ -2,7 +2,7 @@ import type { ChangeEvent, RefObject } from 'react';
 import type Graph from 'graphology';
 import type Sigma from 'sigma';
 import { resetCommunityColorCache } from '@/lib/communityUtils';
-import { downloadBlobAsFile, downloadStringAsFile, exportImage, exportSvg } from '@/lib/exportUtils';
+import { downloadBlobAsFile, downloadStringAsFile, exportElementAsImage, exportImage, exportSvg } from '@/lib/exportUtils';
 import {
   buildAllInOne,
   buildCsvZip,
@@ -10,6 +10,9 @@ import {
   createMetricsBundle,
   writeGexf,
   writeGraphML,
+  inferCustomEdgeAttributes,
+  inferCustomNodeAttributes,
+  mergeCustomAttributeMetadata,
   type WorkspaceSettingsDocument,
 } from '@/lib/graphIO';
 import { useStore, type RawEdge, type RawNode, type WorkspaceFilters } from '@/store/useStore';
@@ -58,6 +61,7 @@ export function useWorkspaceIO(options: WorkspaceIOOptions) {
         showArrowheads: state.showArrowheads,
         communityMap: options.communityMap,
         customAttributes: state.customAttributes,
+        legendColorOverrides: state.legendColorOverrides,
       },
       visibility: {
         hiddenLegendItems: state.hiddenLegendItems,
@@ -95,7 +99,7 @@ export function useWorkspaceIO(options: WorkspaceIOOptions) {
           visibility: {},
           calculations: { selected: {} },
         };
-        const nextFilters = settings.filters || useStore.getState().filters;
+        const nextFilters = { ...useStore.getState().filters, ...(settings.filters || {}) };
         useStore.setState({
           projectName: settings.projectName || options.projectName,
           directed: settings.graphMode?.directed ?? options.directed,
@@ -104,7 +108,11 @@ export function useWorkspaceIO(options: WorkspaceIOOptions) {
           rendererEngine: settings.rendererEngine || 'auto',
           filters: nextFilters,
           communityMap: settings.appearance?.communityMap || {},
-          customAttributes: settings.appearance?.customAttributes || useStore.getState().customAttributes,
+          customAttributes: mergeCustomAttributeMetadata(
+            [...inferCustomNodeAttributes(options.rawNodes), ...inferCustomEdgeAttributes(options.rawEdges)],
+            settings.appearance?.customAttributes || useStore.getState().customAttributes,
+          ),
+          legendColorOverrides: settings.appearance?.legendColorOverrides || {},
           showNodeLabels: settings.appearance?.showNodeLabels ?? useStore.getState().showNodeLabels,
           showArrowheads: settings.appearance?.showArrowheads ?? useStore.getState().showArrowheads,
           hiddenLegendItems: settings.visibility?.hiddenLegendItems || [],
@@ -126,6 +134,16 @@ export function useWorkspaceIO(options: WorkspaceIOOptions) {
     options.closeExportMenu();
     if (format === 'svg') {
       exportSvg(document.getElementById('network-graph-svg') as SVGSVGElement | null, `${options.projectName}.svg`);
+      return;
+    }
+    if (format === 'legend') {
+      try {
+        await exportElementAsImage(document.getElementById('graph-legend'), `${options.projectName}_legend.png`, options.isDarkMode);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error('Legend image export failed:', error);
+        window.alert(`Legend image export failed: ${message}`);
+      }
       return;
     }
     if (format === 'png' || format === 'jpeg') {

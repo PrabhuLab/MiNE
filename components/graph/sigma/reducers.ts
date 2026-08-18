@@ -16,6 +16,7 @@ export function createSigmaNodeReducer(styleRefs: MutableRefObject<any>) {
       searchMatchSet,
       isSecondaryMap,
       focusedEdgeNodeSet,
+      legendNodeMembership,
     } = styleRefs.current;
 
     const displayIndex = displayMap[nodeKey] ?? -1;
@@ -42,6 +43,9 @@ export function createSigmaNodeReducer(styleRefs: MutableRefObject<any>) {
 
     const type = data.rawNode?.type;
     if (type && hiddenItems.has(`type:${type}`)) return hideNode();
+    for (const hiddenId of hiddenItems as Set<string>) {
+      if (hiddenId.startsWith('attribute:') && legendNodeMembership.get(hiddenId)?.has(nodeKey)) return hideNode();
+    }
     if (isolatedLegendItem === 'element:standard' && isSecondary) return hideNode();
     if (isolatedLegendItem === 'element:bipartite' && !isSecondary) return hideNode();
     if (isolatedLegendItem?.startsWith('type:') && type !== isolatedLegendItem.replace('type:', '')) {
@@ -50,6 +54,9 @@ export function createSigmaNodeReducer(styleRefs: MutableRefObject<any>) {
     if (isolatedLegendItem?.startsWith('community:') && String(displayIndex) !== isolatedLegendItem.replace('community:', '')) {
       return hideNode();
     }
+    if (isolatedLegendItem?.startsWith('attribute:')
+      && legendNodeMembership.get(isolatedLegendItem)?.size
+      && !legendNodeMembership.get(isolatedLegendItem)?.has(nodeKey)) return hideNode();
 
     let dimmed = false;
     let focused = false;
@@ -60,11 +67,21 @@ export function createSigmaNodeReducer(styleRefs: MutableRefObject<any>) {
       focused = true;
       result.highlighted = true;
     }
-    const activeCommunity = hoveredCommunityId || selectedCommunityId || isolatedCommunityId
+    const activeCommunity = (hoveredCommunityId?.startsWith('community:') ? hoveredCommunityId : null) || selectedCommunityId || isolatedCommunityId
       || (isolatedLegendItem?.startsWith('community:') ? isolatedLegendItem : null);
     if (activeCommunity) {
       if (String(displayIndex) === activeCommunity.replace('community:', '')) communityMember = true;
       else dimmed = true;
+    }
+    const hoveredAttribute = hoveredCommunityId?.startsWith('attribute:') ? hoveredCommunityId : null;
+    if (hoveredAttribute) {
+      const members = legendNodeMembership.get(hoveredAttribute);
+      if (members?.size) {
+        if (members.has(nodeKey)) {
+          focused = true;
+          result.highlighted = true;
+        } else dimmed = true;
+      }
     }
 
     const selectedNode = clickedNodeRef.current;
@@ -112,6 +129,8 @@ export function createSigmaEdgeReducer(graph: Graph, styleRefs: MutableRefObject
       focusedEdgeNodeSet,
       isSecondaryMap,
       getShouldShowArrowhead,
+      legendNodeMembership,
+      legendEdgeMembership,
     } = styleRefs.current;
     const [source, target] = graph.extremities(edgeKey);
     const rawEdge = graph.getEdgeAttribute(edgeKey, 'rawEdge') || { source, target };
@@ -123,6 +142,13 @@ export function createSigmaEdgeReducer(graph: Graph, styleRefs: MutableRefObject
       head: directed && getShouldShowArrowhead(rawEdge) ? 'arrow' : 'none',
     };
     if (hiddenItems.has('element:edges')) return { ...result, visibility: 'hidden' };
+    const rawEdgeId = String(rawEdge.key ?? `${source}->${target}`);
+    for (const hiddenId of hiddenItems as Set<string>) {
+      if (hiddenId.startsWith('attribute:') && legendEdgeMembership.get(hiddenId)?.has(rawEdgeId)) return { ...result, visibility: 'hidden' };
+    }
+    if (isolatedLegendItem?.startsWith('attribute:')
+      && legendEdgeMembership.get(isolatedLegendItem)?.size
+      && !legendEdgeMembership.get(isolatedLegendItem)?.has(rawEdgeId)) return { ...result, visibility: 'hidden' };
 
     const nodeHidden = (nodeKey: string) => {
       const attrs = graph.getNodeAttributes(nodeKey);
@@ -139,6 +165,9 @@ export function createSigmaEdgeReducer(graph: Graph, styleRefs: MutableRefObject
         || (isolatedLegendItem === 'element:bipartite' && !secondary)
         || Boolean(isolatedLegendItem?.startsWith('type:') && type !== isolatedLegendItem.replace('type:', ''))
         || Boolean(isolatedLegendItem?.startsWith('community:') && String(displayIndex) !== isolatedLegendItem.replace('community:', ''))
+        || Boolean(isolatedLegendItem?.startsWith('attribute:')
+          && legendNodeMembership.get(isolatedLegendItem)?.size
+          && !legendNodeMembership.get(isolatedLegendItem)?.has(nodeKey))
         || (focusedEdgeNodeSet.size > 0 && !focusedEdgeNodeSet.has(nodeKey))
       );
     };
@@ -158,7 +187,7 @@ export function createSigmaEdgeReducer(graph: Graph, styleRefs: MutableRefObject
       if ((source === selectedSource && target === selectedTarget) || (!directed && source === selectedTarget && target === selectedSource)) focused = true;
       else dimmed = true;
     } else {
-      const activeCommunity = hoveredCommunityId || selectedCommunityId || isolatedCommunityId
+      const activeCommunity = (hoveredCommunityId?.startsWith('community:') ? hoveredCommunityId : null) || selectedCommunityId || isolatedCommunityId
         || (isolatedLegendItem?.startsWith('community:') ? isolatedLegendItem : null);
       if (activeCommunity) {
         const community = activeCommunity.replace('community:', '');

@@ -1,0 +1,4 @@
+Mode #,Mode Name,Primary,Abiotic,Water,Partition
+p1,Stellar,Yes,Yes,No,N/A
+p2,Interstellar,No,Yes,No,
+not-in-topology,Ignored,Yes,No,Yes,A

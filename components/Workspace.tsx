@@ -172,13 +172,22 @@ export default function Workspace() {
         const [min, max] = customSizeDomain;
         if (Number.isFinite(value)) baseVal = max === min ? 5 : 1 + ((value - min) / (max - min)) * 9;
       }
+      else {
+        const metric = metricMap.get(String(node.id));
+        const rawValue = Number(metric?.[base] ?? node[base]);
+        const multiplier = base === 'pagerank' ? 500
+          : base === 'eigenvector' ? 50
+          : base === 'clustering' ? 20
+          : 100;
+        if (Number.isFinite(rawValue)) baseVal = rawValue * multiplier;
+      }
 
       const isSecondary = isSecondaryNode(node, bipartite);
       const mult = isSecondary ? (appliedFilters.bipartiteNodeSize || 2) : (appliedFilters.nodeSize || 3);
 
       return mult * Math.max(Math.log(baseVal + 2), 1) + 2;
     },
-    [appliedFilters.nodeSizeBase, appliedFilters.bipartiteNodeSize, appliedFilters.nodeSize, bipartite, degreeMap, selectedCustomAttribute, customSizeDomain]
+    [appliedFilters.nodeSizeBase, appliedFilters.bipartiteNodeSize, appliedFilters.nodeSize, bipartite, degreeMap, metricMap, selectedCustomAttribute, customSizeDomain]
   );
 
   const edgeSizeValue = useCallback((candidate: RawEdge): number | null => {
@@ -408,6 +417,7 @@ export default function Workspace() {
                   {!useSigma && <button onClick={() => handleExport('svg')} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>Export as SVG</button>}
                   <button onClick={() => handleExport('png')} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>Export as PNG</button>
                   <button onClick={() => handleExport('jpeg')} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>Export as JPG</button>
+                  <button onClick={() => handleExport('legend')} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>Export Legend as Image</button>
                   <div className={`h-px w-full ${isDarkMode ? 'bg-[#333]' : 'bg-[#eee]'}`}></div>
                   <button onClick={() => handleExport('json')} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>Graphology JSON</button>
                   <button onClick={() => handleExport('graphml')} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>GraphML</button>

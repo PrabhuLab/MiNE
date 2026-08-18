@@ -65,6 +65,7 @@ export default function SigmaGraph({
   const containerRef = useRef<HTMLDivElement>(null);
   const sigmaRef = useRef<Sigma | null>(null);
   const styledSigmaRef = useRef<Sigma | null>(null);
+  const lastIndexationSignatureRef = useRef('');
   const hasInitialFitRef = useRef(false);
 
   const [clickedNode, setClickedNode] = useState<RawNode | null>(null);
@@ -173,6 +174,9 @@ export default function SigmaGraph({
     netMap,
     legendCategories,
     legendMetricScale,
+    legendMetricScales,
+    legendNodeMembership,
+    legendEdgeMembership,
     getNodeColor,
     getEdgeColor,
     getEdgeOpacity,
@@ -182,6 +186,7 @@ export default function SigmaGraph({
     edges,
     communityMap,
     networkMetrics,
+    nodeSizeBase,
     nodeColorBase,
     uniformNodeColor,
     uniformEdgeColor,
@@ -241,6 +246,8 @@ export default function SigmaGraph({
     searchMatchSet,
     isSecondaryMap,
     focusedEdgeNodeSet,
+    legendNodeMembership,
+    legendEdgeMembership,
   });
 
   useEffect(() => {
@@ -265,6 +272,8 @@ export default function SigmaGraph({
       searchMatchSet,
       isSecondaryMap,
       focusedEdgeNodeSet,
+      legendNodeMembership,
+      legendEdgeMembership,
     };
   }, [
     getNodeColor,
@@ -286,6 +295,8 @@ export default function SigmaGraph({
     searchMatchSet,
     isSecondaryMap,
     focusedEdgeNodeSet,
+    legendNodeMembership,
+    legendEdgeMembership,
   ]);
 
   const getVisibleNodeIds = useCallback(
@@ -301,9 +312,10 @@ export default function SigmaGraph({
         isolatedLegendItem,
         isolatedCommunityId,
         displayMap,
+        legendNodeMembership,
       }, communityMap, targetFilter, isoCommOverride, isoLegOverride);
     },
-    [graph, bipartite, hiddenItems, isolatedLegendItem, isolatedCommunityId, displayMap, communityMap]
+    [graph, bipartite, hiddenItems, isolatedLegendItem, isolatedCommunityId, displayMap, communityMap, legendNodeMembership]
   );
 
   const handleZoomFit = useCallback(() => {
@@ -480,6 +492,16 @@ export default function SigmaGraph({
     // extent on this effect's first run for a new renderer.
     if (styledSigmaRef.current !== sigma) {
       styledSigmaRef.current = sigma;
+      lastIndexationSignatureRef.current = JSON.stringify({
+        clickedNode: clickedNode?.id ?? null,
+        clickedEdge: clickedEdge ? `${clickedEdge.source}->${clickedEdge.target}` : null,
+        selectedElement,
+        focus: focusRequest?.requestId ?? null,
+        isolatedLegendItem,
+        selectedCommunityId,
+        isolatedCommunityId,
+        showArrowheads,
+      });
       return;
     }
 
@@ -491,6 +513,18 @@ export default function SigmaGraph({
       // setSetting performs the one required scheduled reprocessing itself.
       sigma.setSetting('renderLabels', shouldRenderLabels);
     } else {
+      const indexationSignature = JSON.stringify({
+        clickedNode: clickedNode?.id ?? null,
+        clickedEdge: clickedEdge ? `${clickedEdge.source}->${clickedEdge.target}` : null,
+        selectedElement,
+        focus: focusRequest?.requestId ?? null,
+        isolatedLegendItem,
+        selectedCommunityId,
+        isolatedCommunityId,
+        showArrowheads,
+      });
+      const needsIndexation = lastIndexationSignatureRef.current !== indexationSignature;
+      lastIndexationSignatureRef.current = indexationSignature;
       // Re-run reducers and rebuild the label grid without clearing the frozen
       // extent. This is one scheduled request for each logical UI change.
       sigma.scheduleRefresh({
@@ -502,7 +536,7 @@ export default function SigmaGraph({
         // programs. They must be re-indexed rather than repainted in-place.
         // Hidden nodes remain valid transparent slots in the node reducer, so
         // element isolation does not reintroduce the old zero-index ghost.
-        skipIndexation: false,
+        skipIndexation: !needsIndexation,
       });
     }
   }, [
@@ -518,9 +552,6 @@ export default function SigmaGraph({
     hoveredCommunityId,
     showArrowheads,
     showNodeLabels,
-    nodeOpacity,
-    edgeOpacity,
-    isDarkMode,
     displayMap,
     shouldRenderLabels,
     graph,
@@ -648,7 +679,7 @@ export default function SigmaGraph({
         onElementSingleClick={handleElementSingleClick}
         onElementDoubleClick={handleElementDoubleClick}
         onCommunitySingleClick={handleCommunitySingleClick}
-        onCommunityDoubleClick={handleCommunityDoubleClick}
+        onCommunityDoubleClick={(id) => id.startsWith('community:') ? handleCommunityDoubleClick(id) : handleElementDoubleClick(id)}
         onCommunityHover={setHoveredCommunityId}
         showNodeLabels={showNodeLabels}
         setShowNodeLabels={setShowNodeLabels}
@@ -657,6 +688,7 @@ export default function SigmaGraph({
         setShowArrowheads={setShowArrowheads}
         legendCategories={legendCategories}
         legendMetricScale={legendMetricScale}
+        legendMetricScales={legendMetricScales}
         isLegendMinimized={isLegendMinimized}
         setIsLegendMinimized={setIsLegendMinimized}
       />

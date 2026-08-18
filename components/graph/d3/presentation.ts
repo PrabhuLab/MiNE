@@ -17,6 +17,8 @@ export interface D3PresentationContext {
   focusedEdgeNodeSet: Set<string>;
   showNodeLabels: boolean;
   nodeOpacity: number;
+  legendNodeMembership: Map<string, Set<string>>;
+  legendEdgeMembership: Map<string, Set<string>>;
 }
 
 export interface D3NodePresentation {
@@ -37,7 +39,8 @@ export interface D3EdgePresentation {
 }
 
 export function activeCommunityId(context: D3PresentationContext): string | null {
-  return context.hoveredCommunityId
+  const hoveredCommunity = context.hoveredCommunityId?.startsWith('community:') ? context.hoveredCommunityId : null;
+  return hoveredCommunity
     || context.selectedCommunityId
     || context.isolatedCommunityId
     || (context.isolatedLegendItem?.startsWith('community:') ? context.isolatedLegendItem : null);
@@ -45,7 +48,7 @@ export function activeCommunityId(context: D3PresentationContext): string | null
 
 export function isD3NodeLegendVisible(
   node: RawNode,
-  context: Pick<D3PresentationContext, 'bipartite' | 'hiddenItems' | 'isolatedLegendItem' | 'displayMap'>,
+  context: Pick<D3PresentationContext, 'bipartite' | 'hiddenItems' | 'isolatedLegendItem' | 'displayMap' | 'legendNodeMembership'>,
   isolatedLegendOverride?: string | null,
 ): boolean {
   const secondary = isSecondaryNode(node, context.bipartite);
@@ -58,16 +61,22 @@ export function isD3NodeLegendVisible(
   if (context.hiddenItems.has('element:bipartite') && secondary) return false;
   if (context.hiddenItems.has(`community:${displayIndex}`)) return false;
   if (node.type && context.hiddenItems.has(`type:${node.type}`)) return false;
+  for (const hiddenId of context.hiddenItems) {
+    if (hiddenId.startsWith('attribute:') && context.legendNodeMembership.get(hiddenId)?.has(String(node.id))) return false;
+  }
   if (isolatedLegend === 'element:standard' && secondary) return false;
   if (isolatedLegend === 'element:bipartite' && !secondary) return false;
   if (isolatedLegend?.startsWith('type:') && node.type !== isolatedLegend.replace('type:', '')) return false;
   if (isolatedLegend?.startsWith('community:') && String(displayIndex) !== isolatedLegend.replace('community:', '')) return false;
+  if (isolatedLegend?.startsWith('attribute:')
+    && context.legendNodeMembership.get(isolatedLegend)?.size
+    && !context.legendNodeMembership.get(isolatedLegend)?.has(String(node.id))) return false;
   return true;
 }
 
 export function collectVisibleD3NodeIds(
   nodes: RawNode[],
-  context: Pick<D3PresentationContext, 'bipartite' | 'hiddenItems' | 'isolatedLegendItem' | 'isolatedCommunityId' | 'displayMap'>,
+  context: Pick<D3PresentationContext, 'bipartite' | 'hiddenItems' | 'isolatedLegendItem' | 'isolatedCommunityId' | 'displayMap' | 'legendNodeMembership'>,
   targetFilter?: string | null,
   isolatedCommunityOverride?: string | null,
   isolatedLegendOverride?: string | null,
@@ -84,6 +93,7 @@ export function collectVisibleD3NodeIds(
       return String(context.displayMap[node.id] ?? -1) === targetFilter.replace('community:', '');
     }
     if (targetFilter?.startsWith('type:')) return node.type === targetFilter.replace('type:', '');
+    if (targetFilter?.startsWith('attribute:')) return context.legendNodeMembership.get(targetFilter)?.has(String(node.id)) ?? false;
     if (targetFilter === 'element:bipartite') return isSecondaryNode(node, context.bipartite);
     if (targetFilter === 'element:standard') return !isSecondaryNode(node, context.bipartite);
     return true;
@@ -106,6 +116,14 @@ export function getD3NodePresentation(node: RawNode, context: D3PresentationCont
   if (activeCommunity) {
     communityMember = String(context.displayMap[node.id] ?? -1) === activeCommunity.replace('community:', '');
     if (!communityMember) dimmed = true;
+  }
+  const hoveredAttribute = context.hoveredCommunityId?.startsWith('attribute:') ? context.hoveredCommunityId : null;
+  if (hoveredAttribute) {
+    const members = context.legendNodeMembership.get(hoveredAttribute);
+    if (members?.size) {
+      if (members.has(String(node.id))) focused = true;
+      else dimmed = true;
+    }
   }
   if (context.clickedNodeId) {
     if (node.id === context.clickedNodeId) focused = true;
@@ -140,6 +158,17 @@ export function getD3EdgePresentation(
   nodePresentation: Map<string, D3NodePresentation>,
 ): D3EdgePresentation {
   if (context.hiddenItems.has('element:edges')) {
+    return { hidden: true, dimmed: false, focused: false, opacity: 0 };
+  }
+  const edgeId = String(rawEdge.key ?? `${source}->${target}`);
+  for (const hiddenId of context.hiddenItems) {
+    if (hiddenId.startsWith('attribute:') && context.legendEdgeMembership.get(hiddenId)?.has(edgeId)) {
+      return { hidden: true, dimmed: false, focused: false, opacity: 0 };
+    }
+  }
+  if (context.isolatedLegendItem?.startsWith('attribute:')
+    && context.legendEdgeMembership.get(context.isolatedLegendItem)?.size
+    && !context.legendEdgeMembership.get(context.isolatedLegendItem)?.has(edgeId)) {
     return { hidden: true, dimmed: false, focused: false, opacity: 0 };
   }
   if (nodePresentation.get(source)?.hidden || nodePresentation.get(target)?.hidden) {

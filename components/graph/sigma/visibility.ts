@@ -9,6 +9,7 @@ export interface SigmaVisibilityContext {
   isolatedLegendItem: string | null;
   isolatedCommunityId: string | null;
   displayMap: Record<string, number>;
+  legendNodeMembership: Map<string, Set<string>>;
 }
 
 export function isSigmaNodeVisible(
@@ -28,12 +29,18 @@ export function isSigmaNodeVisible(
   if (context.hiddenItems.has('element:bipartite') && secondary) return false;
   if (context.hiddenItems.has(`community:${displayIndex}`)) return false;
   if (rawNode?.type && context.hiddenItems.has(`type:${rawNode.type}`)) return false;
+  for (const hiddenId of context.hiddenItems) {
+    if (hiddenId.startsWith('attribute:') && context.legendNodeMembership.get(hiddenId)?.has(nodeKey)) return false;
+  }
   if (isolatedCommunity && String(displayIndex) !== isolatedCommunity.replace('community:', '')) return false;
 
   if (isolatedLegend === 'element:standard' && secondary) return false;
   if (isolatedLegend === 'element:bipartite' && !secondary) return false;
   if (isolatedLegend?.startsWith('type:') && rawNode?.type !== isolatedLegend.replace('type:', '')) return false;
   if (isolatedLegend?.startsWith('community:') && String(displayIndex) !== isolatedLegend.replace('community:', '')) return false;
+  if (isolatedLegend?.startsWith('attribute:')
+    && context.legendNodeMembership.get(isolatedLegend)?.size
+    && !context.legendNodeMembership.get(isolatedLegend)?.has(nodeKey)) return false;
   return true;
 }
 
@@ -54,6 +61,8 @@ export function collectVisibleSigmaNodeIds(
       if (displayIndex !== target && communityMap[nodeId] !== target) return;
     } else if (targetFilter?.startsWith('type:')) {
       if (attrs.rawNode?.type !== targetFilter.replace('type:', '')) return;
+    } else if (targetFilter?.startsWith('attribute:')) {
+      if (!context.legendNodeMembership.get(targetFilter)?.has(nodeId)) return;
     } else if (targetFilter === 'element:bipartite' && !isSecondaryNode(attrs.rawNode, context.bipartite)) {
       return;
     } else if (targetFilter === 'element:standard' && isSecondaryNode(attrs.rawNode, context.bipartite)) {

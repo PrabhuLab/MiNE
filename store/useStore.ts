@@ -30,6 +30,13 @@ export interface CustomAttributeMetadata {
   scope: 'node' | 'edge';
   detectedType: CustomAttributeType;
   selectedType: CustomAttributeType;
+  source?: string;
+  active?: boolean;
+  shown?: boolean;
+  color?: string;
+  edgeNodeTarget?: 'none' | 'source' | 'target';
+  combine?: boolean;
+  drivesCommunity?: boolean;
   ordinalOrder?: string[];
 }
 
@@ -73,6 +80,7 @@ export interface WorkspaceFilters {
   customAttributeScope: 'node' | 'edge';
   customNodeAttribute: string;
   customEdgeAttribute: string;
+  communityAttribute: string;
 }
 
 interface AppState {
@@ -93,6 +101,8 @@ interface AppState {
 
   communityMap: Record<string, string>; // nodeId -> color
   setCommunityMap: (map: Record<string, string>) => void;
+  legendColorOverrides: Record<string, string>;
+  setLegendColor: (key: string, color: string) => void;
   
   selectedElement: string | null;
   setSelectedElement: (val: string | null) => void;
@@ -188,12 +198,17 @@ export const useStore = create<AppState>((set) => ({
     customAttributeScope: 'node',
     customNodeAttribute: '',
     customEdgeAttribute: '',
+    communityAttribute: '',
   },
   setFilter: (key, value) => 
     set((state) => ({ filters: { ...state.filters, [key]: value } })),
 
   communityMap: {},
   setCommunityMap: (map) => set({ communityMap: map }),
+  legendColorOverrides: {},
+  setLegendColor: (key, color) => set((state) => ({
+    legendColorOverrides: { ...state.legendColorOverrides, [key]: color },
+  })),
   
   clearStore: () => set({
     projectName: 'NEW_PROJECT_NAME',
@@ -204,6 +219,7 @@ export const useStore = create<AppState>((set) => ({
     customAttributes: [],
     importedMetrics: null,
     communityMap: {},
+    legendColorOverrides: {},
     selectedElement: null,
     selectedCommunityId: null,
     isolatedCommunityId: null,
@@ -239,6 +255,7 @@ export const useStore = create<AppState>((set) => ({
       customAttributeScope: 'node',
       customNodeAttribute: '',
       customEdgeAttribute: '',
+      communityAttribute: '',
     }
   })
 }));

@@ -21,6 +21,69 @@ export const downloadBlobAsFile = (blob: Blob, filename: string) => {
   URL.revokeObjectURL(url);
 };
 
+export const exportElementAsImage = async (element: HTMLElement | null, filename: string, isDarkMode = false) => {
+  if (!element) return;
+  const { default: html2canvas } = await import('html2canvas');
+  const canvas = await html2canvas(element, {
+    backgroundColor: isDarkMode ? '#141414' : '#ffffff',
+    scale: Math.max(2, window.devicePixelRatio || 1),
+    logging: false,
+    useCORS: true,
+    allowTaint: false,
+    onclone: (documentClone) => {
+      const legendClone = documentClone.getElementById(element.id);
+      legendClone?.querySelectorAll('input[type="color"]').forEach((input) => input.remove());
+      if (!legendClone) return;
+
+      // Tailwind 4 uses oklab/color-mix for several computed colors, which
+      // html2canvas 1.x cannot parse. Resolve every painted color through the
+      // browser first and inline a plain RGBA value on the cloned tree.
+      const converter = document.createElement('canvas');
+      converter.width = 1;
+      converter.height = 1;
+      const converterContext = converter.getContext('2d', { willReadFrequently: true });
+      const toRgba = (value: string) => {
+        if (!converterContext || !value) return value;
+        converterContext.clearRect(0, 0, 1, 1);
+        converterContext.fillStyle = '#000000';
+        converterContext.fillStyle = value;
+        converterContext.fillRect(0, 0, 1, 1);
+        const [red, green, blue, alpha] = converterContext.getImageData(0, 0, 1, 1).data;
+        return `rgba(${red}, ${green}, ${blue}, ${alpha / 255})`;
+      };
+      const colorProperties = [
+        'color', 'backgroundColor', 'borderTopColor', 'borderRightColor',
+        'borderBottomColor', 'borderLeftColor', 'outlineColor',
+        'textDecorationColor', 'fill', 'stroke',
+      ] as const;
+      const originalNodes = [element, ...Array.from(element.querySelectorAll<HTMLElement | SVGElement>('*'))];
+      const clonedNodes = [legendClone, ...Array.from(legendClone.querySelectorAll<HTMLElement | SVGElement>('*'))];
+      originalNodes.forEach((originalNode, index) => {
+        const clonedNode = clonedNodes[index];
+        if (!clonedNode) return;
+        const computed = window.getComputedStyle(originalNode);
+        colorProperties.forEach((property) => {
+          const value = computed[property];
+          if (value) clonedNode.style.setProperty(property.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`), toRgba(value), 'important');
+        });
+        clonedNode.style.setProperty('box-shadow', 'none', 'important');
+        if (computed.backgroundImage.includes('oklab') || computed.backgroundImage.includes('color-mix')) {
+          clonedNode.style.setProperty('background-image', 'none', 'important');
+        }
+      });
+    },
+  });
+  const blob = await new Promise<Blob | null>((resolve, reject) => {
+    try {
+      canvas.toBlob(resolve, 'image/png');
+    } catch (error) {
+      reject(error);
+    }
+  });
+  if (!blob) throw new Error('The legend could not be encoded as a PNG image.');
+  downloadBlobAsFile(blob, filename);
+};
+
 export const exportSvg = (svgElement: SVGSVGElement | null, filename: string) => {
   if (!svgElement) return;
   const serializer = new XMLSerializer();
