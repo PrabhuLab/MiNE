@@ -7,7 +7,8 @@ MiNE is an interactive network visualization and analysis workspace for scientif
 - **Browser computation:** Graphology runs analysis in the client; browser community detection supports Louvain.
 - **Cloud computation:** the Python service performs curated igraph community, metric, and static-layout operations.
 - **Independent rendering:** D3 or Sigma can render either computation mode from the same persistent Graphology model. Live Physics uses the shared D3 force simulation with either renderer.
-- **Inclusive routing policy:** Cloud is mandatory at **7,000 or more raw nodes OR 15,000 or more raw edges**. Routing always uses imported raw counts, so filtering cannot switch engines.
+- **Large-graph routing policy:** Cloud is recommended at **7,000 or more raw nodes OR 15,000 or more raw edges**, but Browser remains selectable and is the sequential fallback for supported Cloud calculations. Large-graph classification always uses imported raw counts, so filtering cannot change it.
+- Initial Louvain runs automatically only below the large-graph cutoffs. At or above either cutoff, it remains available as an explicit calculation in Cloud or Browser.
 - Communities, selected metrics, and layouts run only from their explicit action buttons. Live Update applies visual/filter/physics edits and never starts analysis.
 - The Cloud layout panel includes MiNE's local D3 Force option plus Auto, Fruchterman–Reingold, DrL, Kamada–Kawai, Bipartite, Sugiyama, and Circle when compatible.
 - Cloud communities include Louvain, Leiden, Infomap, Label Propagation, and Walktrap when reported by the backend capability endpoint. Browser mode retains Louvain only.
@@ -41,7 +42,7 @@ cp .env.local.example .env.local
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). The frontend can run without the Cloud service for graphs below the cutoffs.
+Open [http://localhost:3000](http://localhost:3000). The frontend can run without the Cloud service at any graph size, although large Browser calculations may be slower.
 
 ### Cloud backend
 

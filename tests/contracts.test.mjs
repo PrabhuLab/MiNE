@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { effectiveComputationEngine, effectiveRenderer, requiresCloud } from '../services/engines/policy.ts';
+import { effectiveComputationEngine, effectiveRenderer, isLargeGraph } from '../services/engines/policy.ts';
 import { buildAttributeRegistry, edgeColorDescriptors, edgeWeightDescriptors, nodeColorDescriptors, nodeSizeDescriptors } from '../services/attributes/registry.ts';
 import { communityResultStyleSelection } from '../services/communities/types.ts';
-import { automaticLouvainOnce, resetAutomaticLouvainForTests, validSavedLouvainKey } from '../services/communities/automatic.ts';
+import { automaticLouvainOnce, resetAutomaticLouvainForTests, shouldRunAutomaticLouvain, validSavedLouvainKey } from '../services/communities/automatic.ts';
 import { migrateComputationPreference, migrateRendererPreference, migrateWorkspaceFilters } from '../services/graphIO/migrations.ts';
 import { computeGraphLegendVisibility, computeLegendVisibility, legendItemId } from '../services/graphPresentation/legendVisibility.ts';
 import { liveNumericValue } from '../services/graphStyles/liveUpdate.ts';
@@ -13,12 +13,13 @@ import { degreeByNode, logarithmicNodeSize } from '../services/graphStyles/size.
 import { computeActiveNetwork, computeTableDataEdges, computeTableDataNodes } from '../lib/workspaceUtils.ts';
 import { detectCustomAttributeType } from '../services/graphIO/customAttributes.ts';
 
-test('inclusive engine boundaries always override a Browser preference', () => {
+test('large-graph boundaries prefer Cloud for auto routing without disabling Browser', () => {
   assert.equal(effectiveComputationEngine(6_999, 14_999, 'browser'), 'browser');
-  assert.equal(effectiveComputationEngine(7_000, 14_999, 'browser'), 'cloud');
-  assert.equal(effectiveComputationEngine(6_999, 15_000, 'browser'), 'cloud');
-  assert.equal(effectiveComputationEngine(7_000, 15_000, 'browser'), 'cloud');
-  assert.equal(requiresCloud(7_000, 0), true);
+  assert.equal(effectiveComputationEngine(7_000, 14_999, 'browser'), 'browser');
+  assert.equal(effectiveComputationEngine(6_999, 15_000, 'browser'), 'browser');
+  assert.equal(effectiveComputationEngine(7_000, 15_000, 'auto'), 'cloud');
+  assert.equal(effectiveComputationEngine(7_000, 15_000, 'cloud'), 'cloud');
+  assert.equal(isLargeGraph(7_000, 0), true);
 });
 
 test('filtering does not affect a raw-count engine decision', () => {
@@ -26,7 +27,8 @@ test('filtering does not affect a raw-count engine decision', () => {
   const edges = [{ source: '0', target: '1', weight_raw: 1 }];
   const active = computeActiveNetwork(nodes, edges, { removedNodes: '0', edgeFilter: null });
   assert.equal(active.validNodes.length, 0);
-  assert.equal(effectiveComputationEngine(nodes.length, edges.length, 'browser'), 'cloud');
+  assert.equal(isLargeGraph(nodes.length, edges.length), true);
+  assert.equal(effectiveComputationEngine(nodes.length, edges.length, 'browser'), 'browser');
 });
 
 test('rendering is independent from the resolved computation engine', () => {
@@ -156,6 +158,13 @@ test('automatic Louvain is de-duplicated and valid saved results are reused', as
     graphRevision: 'g', filterRevision: 'f', nodeIds: ['a', 'b'],
     nodes: { a: { community_louvain: 'A' }, b: { community_louvain: 'B' } },
   }), 'community_louvain');
+});
+
+test('automatic Louvain is skipped at either inclusive raw-count cutoff', () => {
+  assert.equal(shouldRunAutomaticLouvain(6_999, 14_999), true);
+  assert.equal(shouldRunAutomaticLouvain(7_000, 14_999), false);
+  assert.equal(shouldRunAutomaticLouvain(6_999, 15_000), false);
+  assert.equal(shouldRunAutomaticLouvain(7_000, 15_000), false);
 });
 
 test('stale calculations require a prior result and an applied topology revision change', () => {

@@ -10,7 +10,7 @@ test('cloud routing respects centralized thresholds and explicit engine choice',
   assert.equal(shouldUseCloud(CLOUD_NODE_THRESHOLD, 0, 'auto'), true);
   assert.equal(shouldUseCloud(1, CLOUD_EDGE_THRESHOLD, 'auto'), true);
   assert.equal(shouldUseCloud(1, 0, 'cloud'), true);
-  assert.equal(shouldUseCloud(CLOUD_NODE_THRESHOLD, CLOUD_EDGE_THRESHOLD, 'browser'), true);
+  assert.equal(shouldUseCloud(CLOUD_NODE_THRESHOLD, CLOUD_EDGE_THRESHOLD, 'browser'), false);
   assert.equal(resolveComputeEngine(3, 2, 'auto'), 'browser');
   assert.equal(resolveComputeEngine(3, 2, 'cloud'), 'cloud');
   assert.equal(resolveComputeEngine(CLOUD_NODE_THRESHOLD, 0, 'auto'), 'cloud');

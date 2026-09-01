@@ -5,6 +5,7 @@ import { useEffect } from 'react';
 import { useStore } from '@/store/useStore';
 import { Sun, Moon } from 'lucide-react';
 import { ComputationEngineControl } from '@/components/workspace/ComputationEngineControl';
+import { MiNEWordmark } from '@/components/MiNEWordmark';
 
 export default function Header() {
   useEffect(() => {
@@ -22,7 +23,7 @@ export default function Header() {
   return (
     <header className={`h-14 border-b flex items-center px-6 justify-between shrink-0 transition-colors ${isDarkMode ? 'bg-[#141414] border-[#333] text-[#E4E3E0]' : 'bg-[#E4E3E0] border-[#141414] text-[#141414]'}`}>
       <div className="flex items-center space-x-4">
-        <Link href="/" className="font-black text-xl tracking-tighter">MiNE</Link>
+        <Link href="/" aria-label="MiNE home"><MiNEWordmark className="text-xl" /></Link>
         <span className={`text-[10px] px-2 py-0.5 ${isDarkMode ? 'bg-[#E4E3E0] text-[#141414]' : 'bg-black text-white'}`}>V1.0.0.-PROTOTYPE</span>
         <div className={`h-4 w-px opacity-20 ${isDarkMode ? 'bg-white' : 'bg-black'}`}></div>
         <nav className="text-xs flex space-x-4 font-medium hidden sm:flex">

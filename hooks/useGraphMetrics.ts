@@ -11,7 +11,7 @@ import { resolveComputeEngine } from '@/services/cloud/config';
 import { computeCommunityRouted, type RoutedCommunityResult } from '@/services/communities/router';
 import { communityResultStyleSelection, DEFAULT_COMMUNITY_SETTINGS, type CommunityComputationResult, type CommunitySettings } from '@/services/communities/types';
 import { resultMetadata } from '@/services/attributes/registry';
-import { automaticLouvainOnce, validSavedLouvainKey } from '@/services/communities/automatic';
+import { automaticLouvainOnce, shouldRunAutomaticLouvain, validSavedLouvainKey } from '@/services/communities/automatic';
 import { staleCalculationIds } from '@/services/metrics/validity';
 
 interface GraphMetricAccessors {
@@ -336,6 +336,13 @@ export function useGraphMetrics(
       return;
     }
 
+    // Use imported raw counts so applying filters cannot unexpectedly trigger
+    // an expensive initial browser calculation for an originally large graph.
+    if (!shouldRunAutomaticLouvain(rawNodes.length, rawEdges.length)) {
+      automaticCommitRef.current = automaticKey;
+      return;
+    }
+
     const settings: CommunitySettings = {
       ...DEFAULT_COMMUNITY_SETTINGS,
       seed: Number(appliedFilters?.louvainSeed) || DEFAULT_COMMUNITY_SETTINGS.seed,
@@ -369,7 +376,7 @@ export function useGraphMetrics(
       if (!disposed) setMetricsLoading(false);
     });
     return () => { disposed = true; };
-  }, [appliedFilters?.louvainSeed, appliedFilters?.metricWeightAttribute, appliedFilters?.resolution, bipartite, commitCommunityResult, directed, effectiveEngine, filterRevision, graphGeneration, graphRevision, importedMetrics, restoredVisualization, setFilter, topology, validEdges, validNodes]);
+  }, [appliedFilters?.louvainSeed, appliedFilters?.metricWeightAttribute, appliedFilters?.resolution, bipartite, commitCommunityResult, directed, effectiveEngine, filterRevision, graphGeneration, graphRevision, importedMetrics, rawEdges.length, rawNodes.length, restoredVisualization, setFilter, topology, validEdges, validNodes]);
 
   useEffect(() => {
     requestGenerationRef.current += 1;

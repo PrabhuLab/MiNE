@@ -1,6 +1,12 @@
 import type { MetricValidity } from '@/services/metrics/types';
+import { isLargeGraph } from '../engines/policy.ts';
 
 const requests = new Map<string, Promise<unknown>>();
+
+/** Initial Louvain is intentionally skipped for graphs likely to block a browser fallback. */
+export function shouldRunAutomaticLouvain(rawNodeCount: number, rawEdgeCount: number): boolean {
+  return !isLargeGraph(rawNodeCount, rawEdgeCount);
+}
 
 /** Strict-Mode-safe request de-duplication scoped to one loaded graph instance. */
 export function automaticLouvainOnce<T>(key: string, create: () => Promise<T>): Promise<T> {

@@ -2,6 +2,7 @@
 import Link from 'next/link';
 import { useStore } from '@/store/useStore';
 import Header from '@/components/Header';
+import { MiNEWordmark } from '@/components/MiNEWordmark';
 
 export default function Home() {
   const isDarkMode = useStore(state => state.isDarkMode);
@@ -13,7 +14,7 @@ export default function Home() {
         <div className="max-w-2xl text-center mt-[-40px]">
           <div className="flex justify-center mb-6">
             <div className={`border p-4 shadow-none ${isDarkMode ? 'border-[#333] bg-[#141414]' : 'border-[#141414] bg-white'}`}>
-               <span className="font-mono font-bold text-2xl tracking-tighter">MiNE</span>
+               <MiNEWordmark className="text-2xl" />
             </div>
           </div>
           
