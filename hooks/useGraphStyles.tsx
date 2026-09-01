@@ -579,8 +579,14 @@ export function useGraphStyles({
     legendColorOverrides[`scale:${key}:min`] || defaults[0],
     legendColorOverrides[`scale:${key}:max`] || defaults[1],
   ] as [string, string], [legendColorOverrides]);
-  const rawColors = edgeScaleColors('edge:weight_raw', ['#deebf7', '#08519c']);
-  const secondaryColors = edgeScaleColors('edge:weight_secondary', ['#fee6ce', '#a63603']);
+  const rawColors = useMemo(
+    () => edgeScaleColors('edge:weight_raw', ['#deebf7', '#08519c']),
+    [edgeScaleColors],
+  );
+  const secondaryColors = useMemo(
+    () => edgeScaleColors('edge:weight_secondary', ['#fee6ce', '#a63603']),
+    [edgeScaleColors],
+  );
   const rawColorScale = useMemo(() => d3.scaleSequential(d3.interpolateRgb(...rawColors)).domain([0, maxRaw]), [maxRaw, rawColors]);
   const secColorScale = useMemo(() => d3.scaleSequential(d3.interpolateRgb(...secondaryColors)).domain([0, maxSec]), [maxSec, secondaryColors]);
   const getNodeMetricValue = useCallback((nodeId: string, metric: string): number | null => {
@@ -607,7 +613,10 @@ export function useGraphStyles({
     return { min, max: max === min ? min + 1 : max };
   }, [edgeColorNodeMetric, getNodeMetricValue, nodes]);
   const nodeEdgeMetricKey = `edge:node:${edgeColorNodeMetric}`;
-  const nodeEdgeMetricColors = edgeScaleColors(nodeEdgeMetricKey, ['#440154', '#fde725']);
+  const nodeEdgeMetricColors = useMemo(
+    () => edgeScaleColors(nodeEdgeMetricKey, ['#440154', '#fde725']),
+    [edgeScaleColors, nodeEdgeMetricKey],
+  );
   const nodeMetricColorScale = useMemo(() => d3.scaleSequential(d3.interpolateRgb(...nodeEdgeMetricColors)).domain([nodeMetricExtent.min, nodeMetricExtent.max]), [nodeEdgeMetricColors, nodeMetricExtent]);
   const selectedEdgeColorAttribute = edgeColorBase.startsWith('edge:') ? edgeColorBase.slice('edge:'.length) : '';
   const selectedEdgeColorMetadata = customAttributes.find((item) => item.scope === 'edge' && item.name === selectedEdgeColorAttribute);
@@ -617,7 +626,10 @@ export function useGraphStyles({
     return { min, max: max === min ? min + 1 : max };
   }, [edges, selectedEdgeColorAttribute]);
   const customEdgeScaleKey = `edge:${selectedEdgeColorAttribute}`;
-  const customEdgeColors = edgeScaleColors(customEdgeScaleKey, ['#440154', '#fde725']);
+  const customEdgeColors = useMemo(
+    () => edgeScaleColors(customEdgeScaleKey, ['#440154', '#fde725']),
+    [customEdgeScaleKey, edgeScaleColors],
+  );
   const customEdgeColorScale = useMemo(() => d3.scaleSequential(d3.interpolateRgb(...customEdgeColors)).domain([customEdgeColorExtent.min, customEdgeColorExtent.max]), [customEdgeColorExtent, customEdgeColors]);
 
   const getEdgeColor = useCallback(

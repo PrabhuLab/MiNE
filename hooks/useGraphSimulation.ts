@@ -149,14 +149,18 @@ export function useGraphSimulation({
   const edgeGroupRef = useRef<d3.Selection<SVGPathElement, any, SVGGElement, unknown> | null>(null);
   const tickDrawRef = useRef<(() => void) | null>(null);
   const lastTopologyKeyRef = useRef<string | null>(null);
+  const currentTransformRef = useRef<d3.ZoomTransform>(d3.zoomIdentity);
   const onDoubleClickRef = useRef(onElementDoubleClick);
   useEffect(() => { onDoubleClickRef.current = onElementDoubleClick; }, [onElementDoubleClick]);
   const pendingFitRef = useRef<{ nodeIds: string[]; duration: number } | null>(null);
 
 
   const fitD3NodeSet = useCallback((nodeIds: string[], duration = 450, isAutoReapply = false) => {
+    const fitRequest = isAutoReapply
+      ? pendingFitRef.current
+      : { nodeIds: [...nodeIds], duration };
     if (!isAutoReapply) {
-      pendingFitRef.current = { nodeIds, duration };
+      pendingFitRef.current = fitRequest;
     }
     if (!svgRef.current || !containerRef.current || !zoomBehaviorRef.current || !zoomGroupRef.current) return;
     const width = containerRef.current.clientWidth;
@@ -166,10 +170,21 @@ export function useGraphSimulation({
     const svg = d3.select(svgRef.current);
     const zoomBehavior = zoomBehaviorRef.current;
     const applyTransform = (transform: d3.ZoomTransform) => {
+      // A new camera command supersedes any transition still targeting this SVG.
+      // Pending fits survive interruption by a React rebuild and are cleared by
+      // either successful completion or the start of a manual gesture.
+      svg.interrupt();
       if (duration <= 0) {
         svg.call(zoomBehavior.transform, transform);
+        if (fitRequest && pendingFitRef.current === fitRequest) pendingFitRef.current = null;
       } else {
-        svg.transition().duration(duration).call(zoomBehavior.transform, transform);
+        svg
+          .transition()
+          .duration(duration)
+          .on('end.camera-fit', () => {
+            if (fitRequest && pendingFitRef.current === fitRequest) pendingFitRef.current = null;
+          })
+          .call(zoomBehavior.transform, transform);
       }
     };
 
@@ -242,10 +257,14 @@ export function useGraphSimulation({
     const svg = d3.select(svgRef.current);
     const width = containerRef.current.clientWidth || 800;
     const height = containerRef.current.clientHeight || 600;
-    const previousTransform = d3.zoomTransform(svgRef.current);
+    const previousTransform = currentTransformRef.current;
     const topologyKey = renderTopologyKey;
     const shouldFitTopology = lastTopologyKeyRef.current !== topologyKey;
 
+    // Stop callbacks from an old fit transition before replacing the group it
+    // closes over. Otherwise D3's internal __zoom state can advance while the
+    // newly rendered group remains at an older transform.
+    svg.interrupt();
     svg.selectAll('*').remove();
 
     if (directed) {
@@ -275,7 +294,14 @@ export function useGraphSimulation({
       .extent([[0, 0], [width, height]])
       .scaleExtent([0.02, 100])
       .filter((event) => event.type === 'wheel' || event.type === 'touchstart' || event.button === 0)
+      .on('start', (event) => {
+        if (event.sourceEvent) {
+          pendingFitRef.current = null;
+          svg.interrupt();
+        }
+      })
       .on('zoom', (e) => {
+        currentTransformRef.current = e.transform;
         zoomGroup.attr('transform', e.transform);
       });
 
@@ -665,7 +691,6 @@ export function useGraphSimulation({
     tickDraw();
     if (pendingFitRef.current) {
       const pending = pendingFitRef.current;
-      pendingFitRef.current = null;
       fitD3NodeSet(pending.nodeIds, pending.duration, true);
     } else if (shouldFitTopology) {
       fitD3NodeSet(fitNodeIds.length > 0 ? fitNodeIds : graphNodes.map((node: any) => node.id), 0, true);
@@ -674,6 +699,11 @@ export function useGraphSimulation({
     }
     lastTopologyKeyRef.current = topologyKey;
     setIsCalculatingLayout(false);
+
+    return () => {
+      svg.interrupt();
+      svg.on('.zoom', null);
+    };
 
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, [
