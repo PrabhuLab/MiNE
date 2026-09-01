@@ -25,7 +25,7 @@ function createGraph(request: Pick<MetricsRequest, 'nodes' | 'edges' | 'directed
     const target = String(edge.target);
     if (!graph.hasNode(source) || !graph.hasNode(target) || source === target || graph.hasEdge(source, target)) return;
     const weightSource = request.weightAttribute || 'weight_raw';
-    const weight = finiteWeight(edge[weightSource] ?? edge.weight_raw ?? edge.weight, 1);
+    const weight = weightSource === '__unweighted' ? 1 : finiteWeight(edge[weightSource] ?? edge.weight_raw ?? edge.weight, 1);
     graph.addEdgeWithKey(String(edge.key ?? `${source}${request.directed ? '->' : '--'}${target}`), source, target, { ...edge, weight });
   });
   return graph;

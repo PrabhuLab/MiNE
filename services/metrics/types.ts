@@ -6,6 +6,8 @@ export interface MetricValidity {
   filterRevision: string;
   layoutRevision?: number;
   calculatedAt: string;
+  engine?: 'cloud' | 'browser';
+  fallbackFrom?: 'cloud';
 }
 
 export interface MetricsSelection {
@@ -44,6 +46,7 @@ export interface MetricsRequest {
   graphRevision: string;
   filterRevision: string;
   layoutRevision?: number;
+  signal?: AbortSignal;
 }
 
 export interface LouvainMetricsResult {

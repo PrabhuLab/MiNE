@@ -65,7 +65,6 @@ export function registerSigmaInteractions({
     const items: { label: string; value: string | number }[] = [];
     if (rawNode?.type) items.push({ label: 'Type', value: rawNode.type });
     items.push({ label: 'Community', value: displayIndex >= 0 ? displayIndex : 'N/A' });
-    items.push({ label: 'Abundance', value: rawNode?.abundance ?? 'N/A' });
     items.push({ label: 'Degree', value: graph.degree(nodeKey) });
     setTooltip({
       x: event.event.x,
@@ -84,7 +83,7 @@ export function registerSigmaInteractions({
       return;
     }
     const rawNode = graph.getNodeAttribute(nodeKey, 'rawNode');
-    setClickedNode(rawNode || { id: nodeKey, name: nodeKey, abundance: 0 });
+    setClickedNode(rawNode || { id: nodeKey, name: nodeKey });
     setClickedDegree(graph.degree(nodeKey));
     setClickedEdge(null);
   });

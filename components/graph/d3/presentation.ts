@@ -1,5 +1,6 @@
 import type { RawEdge, RawNode } from '@/store/useStore';
 import { isSecondaryNode } from '@/services/graphPresentation/visibility';
+import type { LegendVisibilityResult } from '@/services/graphPresentation/legendVisibility';
 
 export interface D3PresentationContext {
   bipartite: boolean;
@@ -19,6 +20,7 @@ export interface D3PresentationContext {
   nodeOpacity: number;
   legendNodeMembership: Map<string, Set<string>>;
   legendEdgeMembership: Map<string, Set<string>>;
+  legendVisibility: LegendVisibilityResult;
 }
 
 export interface D3NodePresentation {
@@ -101,7 +103,7 @@ export function collectVisibleD3NodeIds(
 }
 
 export function getD3NodePresentation(node: RawNode, context: D3PresentationContext): D3NodePresentation {
-  if (!isD3NodeLegendVisible(node, context)) {
+  if (!context.legendVisibility.isNodeVisible(node.id)) {
     return { hidden: true, dimmed: false, focused: false, neighbor: false, communityMember: false, opacity: 0, labelVisible: false };
   }
   if (context.focusedEdgeNodeSet.size > 0 && !context.focusedEdgeNodeSet.has(node.id)) {
@@ -117,9 +119,10 @@ export function getD3NodePresentation(node: RawNode, context: D3PresentationCont
     communityMember = String(context.displayMap[node.id] ?? -1) === activeCommunity.replace('community:', '');
     if (!communityMember) dimmed = true;
   }
-  const hoveredAttribute = context.hoveredCommunityId?.startsWith('attribute:') ? context.hoveredCommunityId : null;
-  if (hoveredAttribute) {
-    const members = context.legendNodeMembership.get(hoveredAttribute);
+  const activeAttribute = (context.hoveredCommunityId?.startsWith('attribute:') ? context.hoveredCommunityId : null)
+    || (context.isolatedLegendItem?.startsWith('attribute:') ? context.isolatedLegendItem : null);
+  if (activeAttribute) {
+    const members = context.legendNodeMembership.get(activeAttribute);
     if (members?.size) {
       if (members.has(String(node.id))) focused = true;
       else dimmed = true;
@@ -157,21 +160,11 @@ export function getD3EdgePresentation(
   context: D3PresentationContext,
   nodePresentation: Map<string, D3NodePresentation>,
 ): D3EdgePresentation {
-  if (context.hiddenItems.has('element:edges')) {
-    return { hidden: true, dimmed: false, focused: false, opacity: 0 };
-  }
   const edgeId = String(rawEdge.key ?? `${source}->${target}`);
-  for (const hiddenId of context.hiddenItems) {
-    if (hiddenId.startsWith('attribute:') && context.legendEdgeMembership.get(hiddenId)?.has(edgeId)) {
-      return { hidden: true, dimmed: false, focused: false, opacity: 0 };
-    }
-  }
-  if (context.isolatedLegendItem?.startsWith('attribute:')
-    && context.legendEdgeMembership.get(context.isolatedLegendItem)?.size
-    && !context.legendEdgeMembership.get(context.isolatedLegendItem)?.has(edgeId)) {
+  if (!context.legendVisibility.isEdgeVisible(edgeId)) {
     return { hidden: true, dimmed: false, focused: false, opacity: 0 };
   }
-  if (nodePresentation.get(source)?.hidden || nodePresentation.get(target)?.hidden) {
+  if (context.isolatedLegendItem !== 'element:edges' && (nodePresentation.get(source)?.hidden || nodePresentation.get(target)?.hidden)) {
     return { hidden: true, dimmed: false, focused: false, opacity: 0 };
   }
 
@@ -194,6 +187,13 @@ export function getD3EdgePresentation(
       const targetCommunity = String(context.displayMap[target] ?? -1);
       if (sourceCommunity === community && targetCommunity === community) focused = true;
       else if (sourceCommunity !== community && targetCommunity !== community) dimmed = true;
+    }
+    const activeAttribute = (context.hoveredCommunityId?.startsWith('attribute:') ? context.hoveredCommunityId : null)
+      || (context.isolatedLegendItem?.startsWith('attribute:') ? context.isolatedLegendItem : null);
+    const members = activeAttribute ? context.legendNodeMembership.get(activeAttribute) : null;
+    if (members?.size) {
+      if (members.has(source) || members.has(target)) focused = true;
+      else dimmed = true;
     }
   }
 

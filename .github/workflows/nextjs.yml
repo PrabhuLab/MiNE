@@ -28,6 +28,8 @@ jobs:
   # Build job
   build:
     runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_MINE_IGRAPH_API_URL: ${{ vars.MINE_IGRAPH_API_URL }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

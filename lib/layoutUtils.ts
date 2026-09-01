@@ -15,15 +15,18 @@ export function computeForceDirectedLayout(
   if (!nodes || nodes.length === 0) return positions;
 
   const count = nodes.length;
-  const radius = Math.min(800, Math.max(200, count * 8));
+  const span = Math.min(1600, Math.max(300, Math.sqrt(count) * 28));
+  const coordinate = (id: string, salt: number) => {
+    let hash = 2166136261 ^ salt;
+    for (let index = 0; index < id.length; index += 1) hash = Math.imul(hash ^ id.charCodeAt(index), 16777619);
+    return ((hash >>> 0) / 4294967295 - 0.5) * span;
+  };
 
-  const graphNodes = nodes.map((n, i) => {
-    const angle = (i / Math.max(1, count)) * 2 * Math.PI;
-    const r = radius * (0.1 + 0.9 * Math.random());
+  const graphNodes = nodes.map((n) => {
     return {
       id: n.id,
-      x: n.x ?? r * Math.cos(angle),
-      y: n.y ?? r * Math.sin(angle),
+      x: Number.isFinite(Number(n.x)) ? Number(n.x) : coordinate(String(n.id), 0x9e3779b9),
+      y: Number.isFinite(Number(n.y)) ? Number(n.y) : coordinate(String(n.id), 0x85ebca6b),
     };
   });
 
@@ -34,7 +37,7 @@ export function computeForceDirectedLayout(
   }));
 
   const linkDist = Math.max(30, Math.min(100, 1000 / Math.sqrt(count || 1)));
-  const ticks = count > 3000 ? 40 : count > 1000 ? 60 : count > 500 ? 120 : 250;
+  const ticks = count > 3000 ? 80 : count > 1000 ? 100 : count > 500 ? 140 : 250;
 
   const manyBody = d3.forceManyBody().strength(forceStrength || -100);
   if (count > 800) {

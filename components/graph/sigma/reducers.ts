@@ -17,6 +17,7 @@ export function createSigmaNodeReducer(styleRefs: MutableRefObject<any>) {
       isSecondaryMap,
       focusedEdgeNodeSet,
       legendNodeMembership,
+      legendVisibility,
     } = styleRefs.current;
 
     const displayIndex = displayMap[nodeKey] ?? -1;
@@ -36,27 +37,7 @@ export function createSigmaNodeReducer(styleRefs: MutableRefObject<any>) {
       opacity: 0,
     });
 
-    if (result.visibility === 'hidden') return hideNode();
-    if (hiddenItems.has('element:standard') && !isSecondary) return hideNode();
-    if (hiddenItems.has('element:bipartite') && isSecondary) return hideNode();
-    if (hiddenItems.has(`community:${displayIndex}`)) return hideNode();
-
-    const type = data.rawNode?.type;
-    if (type && hiddenItems.has(`type:${type}`)) return hideNode();
-    for (const hiddenId of hiddenItems as Set<string>) {
-      if (hiddenId.startsWith('attribute:') && legendNodeMembership.get(hiddenId)?.has(nodeKey)) return hideNode();
-    }
-    if (isolatedLegendItem === 'element:standard' && isSecondary) return hideNode();
-    if (isolatedLegendItem === 'element:bipartite' && !isSecondary) return hideNode();
-    if (isolatedLegendItem?.startsWith('type:') && type !== isolatedLegendItem.replace('type:', '')) {
-      return hideNode();
-    }
-    if (isolatedLegendItem?.startsWith('community:') && String(displayIndex) !== isolatedLegendItem.replace('community:', '')) {
-      return hideNode();
-    }
-    if (isolatedLegendItem?.startsWith('attribute:')
-      && legendNodeMembership.get(isolatedLegendItem)?.size
-      && !legendNodeMembership.get(isolatedLegendItem)?.has(nodeKey)) return hideNode();
+    if (result.visibility === 'hidden' || !legendVisibility.isNodeVisible(nodeKey)) return hideNode();
 
     let dimmed = false;
     let focused = false;
@@ -73,9 +54,10 @@ export function createSigmaNodeReducer(styleRefs: MutableRefObject<any>) {
       if (String(displayIndex) === activeCommunity.replace('community:', '')) communityMember = true;
       else dimmed = true;
     }
-    const hoveredAttribute = hoveredCommunityId?.startsWith('attribute:') ? hoveredCommunityId : null;
-    if (hoveredAttribute) {
-      const members = legendNodeMembership.get(hoveredAttribute);
+    const activeAttribute = (hoveredCommunityId?.startsWith('attribute:') ? hoveredCommunityId : null)
+      || (isolatedLegendItem?.startsWith('attribute:') ? isolatedLegendItem : null);
+    if (activeAttribute) {
+      const members = legendNodeMembership.get(activeAttribute);
       if (members?.size) {
         if (members.has(nodeKey)) {
           focused = true;
@@ -131,6 +113,7 @@ export function createSigmaEdgeReducer(graph: Graph, styleRefs: MutableRefObject
       getShouldShowArrowhead,
       legendNodeMembership,
       legendEdgeMembership,
+      legendVisibility,
     } = styleRefs.current;
     const [source, target] = graph.extremities(edgeKey);
     const rawEdge = graph.getEdgeAttribute(edgeKey, 'rawEdge') || { source, target };
@@ -141,37 +124,8 @@ export function createSigmaEdgeReducer(graph: Graph, styleRefs: MutableRefObject
       curvature: directed ? Number(data.curvature ?? 0.3) : 0,
       head: directed && getShouldShowArrowhead(rawEdge) ? 'arrow' : 'none',
     };
-    if (hiddenItems.has('element:edges')) return { ...result, visibility: 'hidden' };
     const rawEdgeId = String(rawEdge.key ?? `${source}->${target}`);
-    for (const hiddenId of hiddenItems as Set<string>) {
-      if (hiddenId.startsWith('attribute:') && legendEdgeMembership.get(hiddenId)?.has(rawEdgeId)) return { ...result, visibility: 'hidden' };
-    }
-    if (isolatedLegendItem?.startsWith('attribute:')
-      && legendEdgeMembership.get(isolatedLegendItem)?.size
-      && !legendEdgeMembership.get(isolatedLegendItem)?.has(rawEdgeId)) return { ...result, visibility: 'hidden' };
-
-    const nodeHidden = (nodeKey: string) => {
-      const attrs = graph.getNodeAttributes(nodeKey);
-      const rawNode = attrs.rawNode;
-      const displayIndex = displayMap[nodeKey] ?? -1;
-      const secondary = isSecondaryMap.get(nodeKey);
-      const type = rawNode?.type;
-      return (
-        (hiddenItems.has('element:standard') && !secondary)
-        || (hiddenItems.has('element:bipartite') && secondary)
-        || hiddenItems.has(`community:${displayIndex}`)
-        || Boolean(type && hiddenItems.has(`type:${type}`))
-        || (isolatedLegendItem === 'element:standard' && secondary)
-        || (isolatedLegendItem === 'element:bipartite' && !secondary)
-        || Boolean(isolatedLegendItem?.startsWith('type:') && type !== isolatedLegendItem.replace('type:', ''))
-        || Boolean(isolatedLegendItem?.startsWith('community:') && String(displayIndex) !== isolatedLegendItem.replace('community:', ''))
-        || Boolean(isolatedLegendItem?.startsWith('attribute:')
-          && legendNodeMembership.get(isolatedLegendItem)?.size
-          && !legendNodeMembership.get(isolatedLegendItem)?.has(nodeKey))
-        || (focusedEdgeNodeSet.size > 0 && !focusedEdgeNodeSet.has(nodeKey))
-      );
-    };
-    if (nodeHidden(source) || nodeHidden(target)) return { ...result, visibility: 'hidden' };
+    if (!legendVisibility.isEdgeVisible(rawEdgeId)) return { ...result, visibility: 'hidden' };
     if (focusedEdgeNodeSet.size > 0 && (!focusedEdgeNodeSet.has(source) || !focusedEdgeNodeSet.has(target))) {
       return { ...result, visibility: 'hidden' };
     }
@@ -195,6 +149,13 @@ export function createSigmaEdgeReducer(graph: Graph, styleRefs: MutableRefObject
         const targetCommunity = String(displayMap[target] ?? -1);
         if (sourceCommunity === community && targetCommunity === community) focused = true;
         else if (sourceCommunity !== community && targetCommunity !== community) dimmed = true;
+      }
+      const activeAttribute = (hoveredCommunityId?.startsWith('attribute:') ? hoveredCommunityId : null)
+        || (isolatedLegendItem?.startsWith('attribute:') ? isolatedLegendItem : null);
+      const members = activeAttribute ? legendNodeMembership.get(activeAttribute) : null;
+      if (members?.size) {
+        if (members.has(source) || members.has(target)) focused = true;
+        else dimmed = true;
       }
     }
 

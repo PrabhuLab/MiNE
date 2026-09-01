@@ -18,6 +18,7 @@ import {
   WORKSPACE_SETTINGS_FORMAT,
   type ParsedNetwork,
 } from '@/services/graphIO/types';
+import { weightChannelMetadata } from '@/services/attributes/weights';
 
 export {
   GRAPH_IO_VERSION,
@@ -52,7 +53,9 @@ export function graphFromRaw(
   const graph = new (Graph as any)({ type: directed ? 'directed' : 'undirected', multi: false, allowSelfLoops: true });
   graph.setAttribute('directed', directed);
   graph.setAttribute('bipartite', bipartite);
-  graph.setAttribute('weighted', edges.some((edge) => numeric(edge.weight_raw, 1) !== 1 || numeric(edge.weight_secondary, 1) !== 1));
+  const weightChannels = weightChannelMetadata(edges);
+  graph.setAttribute('weighted', edges.some((edge) => numeric(edge.weight_raw, 1) !== 1 || (edge.weight_secondary !== undefined && numeric(edge.weight_secondary, 1) !== 1)));
+  graph.setAttribute('weightChannels', weightChannels);
   graph.setAttribute('partitionAttribute', 'partition');
 
   const partitionValueSet = new Set<string>();
@@ -83,7 +86,8 @@ export function graphFromRaw(
     delete attributes.id;
     attributes.label = node.label ?? node.name ?? id;
     attributes.name = node.name ?? node.label ?? id;
-    attributes.abundance = numeric(node.abundance, 10);
+    if (node.abundance !== undefined && Number.isFinite(Number(node.abundance))) attributes.abundance = Number(node.abundance);
+    else delete attributes.abundance;
     if (bipartite) {
       if (!meaningful(attributes.partition)) {
         if (node.bipartite !== undefined && typeof node.bipartite !== 'object') {
@@ -115,15 +119,10 @@ export function graphFromRaw(
     delete attributes.source;
     delete attributes.target;
     const rawWeight = edge.weight_raw ?? edge.weight ?? edge.raw_weight ?? edge.absolute ?? edge.count;
-    const secondaryWeight = edge.weight_secondary
-      ?? edge.secondary_weight
-      ?? edge.conditional
-      ?? edge.percentage
-      ?? edge.percent
-      ?? edge.pct
-      ?? edge.log1p;
+    const secondaryWeight = edge.weight_secondary;
     attributes.weight_raw = numeric(rawWeight, 1);
-    attributes.weight_secondary = numeric(secondaryWeight, attributes.weight_raw);
+    if (secondaryWeight !== undefined && Number.isFinite(Number(secondaryWeight))) attributes.weight_secondary = Number(secondaryWeight);
+    else delete attributes.weight_secondary;
     attributes.weight = attributes.weight_raw;
     graph.addEdgeWithKey(String(edge.key ?? `e${index}`), source, target, attributes);
   });
@@ -168,13 +167,17 @@ export function canonicalExportGraph(
 }
 
 export function graphToRaw(graph: Graph): { nodes: RawNode[]; edges: RawEdge[] } {
-  const nodes: RawNode[] = graph.mapNodes((id, attrs) => ({
-    ...cleanAttributes(attrs),
-    id: String(id),
-    name: String(attrs.name ?? attrs.label ?? id),
-    label: String(attrs.label ?? attrs.name ?? id),
-    abundance: numeric(attrs.abundance ?? attrs.size, 10),
-  })) as RawNode[];
+  const nodes: RawNode[] = graph.mapNodes((id, attrs) => {
+    const attributes = cleanAttributes(attrs);
+    delete attributes.size;
+    return {
+      ...attributes,
+      id: String(id),
+      name: String(attrs.name ?? attrs.label ?? id),
+      label: String(attrs.label ?? attrs.name ?? id),
+      ...(attrs.abundance !== undefined && Number.isFinite(Number(attrs.abundance)) ? { abundance: Number(attrs.abundance) } : {}),
+    };
+  }) as RawNode[];
 
   const edges: RawEdge[] = graph.mapEdges((key, attrs, source, target) => ({
     ...cleanAttributes(attrs),
@@ -182,7 +185,9 @@ export function graphToRaw(graph: Graph): { nodes: RawNode[]; edges: RawEdge[] }
     source: String(source),
     target: String(target),
     weight_raw: numeric(attrs.weight_raw ?? attrs.weight, 1),
-    weight_secondary: numeric(attrs.weight_secondary ?? attrs.weight_raw ?? attrs.weight, 1),
+    ...(attrs.weight_secondary !== undefined && Number.isFinite(Number(attrs.weight_secondary))
+      ? { weight_secondary: Number(attrs.weight_secondary) }
+      : {}),
   })) as RawEdge[];
 
   return { nodes, edges };
@@ -277,6 +282,13 @@ function normalizeParsedGraph(graph: Graph, metadata: Record<string, any> = {}):
   graph.setAttribute('directed', directed);
   graph.setAttribute('bipartite', bipartite);
   graph.setAttribute('weighted', weighted);
+  const rawMetadata = graph.getAttribute('metricsMetadata');
+  let parsedMetricsMetadata: Record<string, any> = {};
+  if (typeof rawMetadata === 'string') {
+    try { parsedMetricsMetadata = JSON.parse(rawMetadata); } catch { /* preserve valid graph even if metadata is opaque */ }
+  } else if (rawMetadata && typeof rawMetadata === 'object') {
+    parsedMetricsMetadata = rawMetadata;
+  }
   const metricNames = new Set([
     'community', 'deltaQ', 'k_i_in', 'nodeDegree', 'communityDegree', 'degree', 'inDegree', 'outDegree',
     'degreeCentrality', 'inDegreeCentrality', 'outDegreeCentrality', 'betweenness', 'closeness', 'clustering',
@@ -284,7 +296,12 @@ function normalizeParsedGraph(graph: Graph, metadata: Record<string, any> = {}):
     'hub', 'authority', 'louvain', 'edgeBetweenness', 'disparity',
     'simmelianStrength', 'chiSquare', 'gSquare',
   ]);
-  const metrics: ImportedMetricsBundle = { graph: {}, nodes: {}, edges: {}, metadata: {} };
+  if (Array.isArray(parsedMetricsMetadata.attributeDescriptors)) {
+    parsedMetricsMetadata.attributeDescriptors.forEach((descriptor: any) => {
+      if (descriptor?.name && (descriptor.origin === 'metric' || descriptor.origin === 'community')) metricNames.add(String(descriptor.name));
+    });
+  }
+  const metrics: ImportedMetricsBundle = { graph: {}, nodes: {}, edges: {}, metadata: parsedMetricsMetadata };
   graph.forEachNode((node, attrs) => {
     const values = Object.fromEntries(Object.entries(attrs).filter(([key]) => metricNames.has(key)));
     if (Object.keys(values).length) metrics.nodes[node] = values;
@@ -296,10 +313,6 @@ function normalizeParsedGraph(graph: Graph, metadata: Record<string, any> = {}):
   Object.entries(graph.getAttributes()).forEach(([key, value]) => {
     if (!['directed', 'bipartite', 'weighted', 'partitionAttribute', 'metricsMetadata'].includes(key)) metrics.graph[key] = value;
   });
-  const rawMetadata = graph.getAttribute('metricsMetadata');
-  if (typeof rawMetadata === 'string') {
-    try { metrics.metadata = JSON.parse(rawMetadata); } catch { /* preserve valid graph even if metadata is opaque */ }
-  }
   const hasMetrics = Object.keys(metrics.graph).length || Object.keys(metrics.nodes).length || Object.keys(metrics.edges).length || Object.keys(metrics.metadata).length;
   return { graph, directed, bipartite, weighted, metrics: hasMetrics ? metrics : null, workspace: null };
 }
@@ -310,7 +323,7 @@ function parseJSONDocument(data: any): ParsedNetwork {
   }
 
   if (data?.format === NETWORK_WORKSPACE_FORMAT) {
-    if (data.version !== GRAPH_IO_VERSION) throw new Error(`Unsupported All-in-One JSON version: ${data.version}`);
+    if (![1, GRAPH_IO_VERSION].includes(Number(data.version))) throw new Error(`Unsupported All-in-One JSON version: ${data.version}`);
     const graph = graphFromSerialized(data.graph);
     const parsed = normalizeParsedGraph(graph, data.workspace?.graphMode || {});
     parsed.metrics = data.metrics || { ...EMPTY_METRICS };
@@ -398,6 +411,7 @@ export async function buildCsvZip(graph: Graph, metrics: ImportedMetricsBundle):
     directed: graph.type === 'directed',
     bipartite: Boolean(graph.getAttribute('bipartite')),
     weighted: Boolean(graph.getAttribute('weighted')),
+    weightChannels: graph.getAttribute('weightChannels') || { primary: true, secondary: raw.edges.some((edge) => edge.weight_secondary !== undefined) },
     graph: graph.getAttributes(),
     metrics: { graph: metrics.graph, metadata: metrics.metadata },
   }, null, 2));

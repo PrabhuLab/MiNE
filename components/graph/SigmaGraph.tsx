@@ -15,23 +15,25 @@ import { useGraphStyles } from '@/hooks/useGraphStyles';
 import { SIGMA_PRIMITIVES } from '@/components/graph/sigma/primitives';
 import { SIGMA_STYLES } from '@/components/graph/sigma/styles';
 import { fitSigmaNodeSet } from '@/components/graph/sigma/camera';
-import { collectVisibleSigmaNodeIds, isSecondaryNode } from '@/components/graph/sigma/visibility';
+import { isSecondaryNode } from '@/components/graph/sigma/visibility';
 import { shouldRenderSigmaLabels } from '@/components/graph/sigma/labels';
 import type { SigmaGraphProps } from '@/components/graph/sigma/types';
 import { createSigmaEdgeReducer, createSigmaNodeReducer } from '@/components/graph/sigma/reducers';
 import { registerSigmaInteractions } from '@/components/graph/sigma/interactions';
 import { createElementLegendItems } from '@/components/graph/legend/elementItems';
+import { computeGraphLegendVisibility } from '@/services/graphPresentation/legendVisibility';
 
 export default function SigmaGraph({
   graph,
   isReady = false,
+  staticLayoutRevision = 0,
   nodes,
   edges,
   communityMap,
   networkMetrics = [],
   nodeSizeMult,
   bipartiteNodeSizeMult = 2,
-  nodeSizeBase = 'abundance',
+  nodeSizeBase = 'degree',
   nodeColorBase = 'custom',
   uniformNodeColor = '#cccccc',
   uniformEdgeColor = '#cccccc',
@@ -67,13 +69,13 @@ export default function SigmaGraph({
   const styledSigmaRef = useRef<Sigma | null>(null);
   const lastIndexationSignatureRef = useRef('');
   const hasInitialFitRef = useRef(false);
+  const sigmaConstructionStartedRef = useRef(0);
 
   const [clickedNode, setClickedNode] = useState<RawNode | null>(null);
   const [clickedDegree, setClickedDegree] = useState<number>(0);
   const [clickedEdge, setClickedEdge] = useState<RawEdge | null>(null);
   const [isCalculatingLayout, setIsCalculatingLayout] = useState(false);
   const [tooltip, setTooltip] = useState<TooltipData | null>(null);
-  const [isLegendMinimized, setIsLegendMinimized] = useState(false);
 
   const {
     hiddenLegendItems,
@@ -90,6 +92,8 @@ export default function SigmaGraph({
     setShowArrowheads,
     showNodeLabels,
     setShowNodeLabels,
+    isLegendMinimized,
+    setIsLegendMinimized,
   } = useStore();
 
   const hiddenItems = useMemo(() => new Set(hiddenLegendItems), [hiddenLegendItems]);
@@ -220,6 +224,22 @@ export default function SigmaGraph({
   );
 
   const displayMap = communityDisplay.displayMap;
+  const edgeVisibilityRecords = useMemo(() => edges.map((edge) => ({
+    id: String(edge.key ?? `${edge.source}->${edge.target}`),
+    source: String(edge.source),
+    target: String(edge.target),
+  })), [edges]);
+  const legendVisibility = useMemo(() => computeGraphLegendVisibility({
+    nodes,
+    edges: edgeVisibilityRecords,
+    bipartite,
+    isSecondaryNode: (node) => isSecondaryNode(node as RawNode, bipartite),
+    displayMap,
+    hiddenItemIds: hiddenItems,
+    isolatedItemId: isolatedLegendItem || isolatedCommunityId,
+    nodeMembership: legendNodeMembership,
+    edgeMembership: legendEdgeMembership,
+  }), [bipartite, displayMap, edgeVisibilityRecords, hiddenItems, isolatedCommunityId, isolatedLegendItem, legendEdgeMembership, legendNodeMembership, nodes]);
   const focusedEdgeNodeSet = useMemo(() => {
     if (focusRequest?.type !== 'edge') return new Set<string>();
     return new Set([focusRequest.source, focusRequest.target].filter((id): id is string => Boolean(id)));
@@ -248,6 +268,7 @@ export default function SigmaGraph({
     focusedEdgeNodeSet,
     legendNodeMembership,
     legendEdgeMembership,
+    legendVisibility,
   });
 
   useEffect(() => {
@@ -274,6 +295,7 @@ export default function SigmaGraph({
       focusedEdgeNodeSet,
       legendNodeMembership,
       legendEdgeMembership,
+      legendVisibility,
     };
   }, [
     getNodeColor,
@@ -297,6 +319,7 @@ export default function SigmaGraph({
     focusedEdgeNodeSet,
     legendNodeMembership,
     legendEdgeMembership,
+    legendVisibility,
   ]);
 
   const getVisibleNodeIds = useCallback(
@@ -306,16 +329,31 @@ export default function SigmaGraph({
       isoLegOverride?: string | null,
       hiddenOverride?: Set<string>,
     ) => {
-      return collectVisibleSigmaNodeIds(graph, {
+      const isolatedCommunity = isoCommOverride !== undefined ? isoCommOverride : isolatedCommunityId;
+      const isolatedLegend = isoLegOverride !== undefined ? isoLegOverride : isolatedLegendItem;
+      const visibility = computeGraphLegendVisibility({
+        nodes,
+        edges: edgeVisibilityRecords,
         bipartite,
-        hiddenItems: hiddenOverride ?? hiddenItems,
-        isolatedLegendItem,
-        isolatedCommunityId,
+        isSecondaryNode: (node) => isSecondaryNode(node as RawNode, bipartite),
         displayMap,
-        legendNodeMembership,
-      }, communityMap, targetFilter, isoCommOverride, isoLegOverride);
+        hiddenItemIds: hiddenOverride ?? hiddenItems,
+        isolatedItemId: isolatedLegend || isolatedCommunity,
+        nodeMembership: legendNodeMembership,
+        edgeMembership: legendEdgeMembership,
+      });
+      return Array.from(visibility.visibleNodeIds).filter((nodeId) => {
+        if (!targetFilter) return true;
+        const node = nodes.find((candidate) => String(candidate.id) === nodeId);
+        if (targetFilter.startsWith('community:')) return String(displayMap[nodeId] ?? -1) === targetFilter.slice('community:'.length);
+        if (targetFilter.startsWith('type:')) return String(node?.type) === targetFilter.slice('type:'.length);
+        if (targetFilter.startsWith('attribute:')) return legendNodeMembership.get(targetFilter)?.has(nodeId) ?? visibility.visibleNodeIds.has(nodeId);
+        if (targetFilter === 'element:bipartite') return Boolean(node && isSecondaryNode(node, bipartite));
+        if (targetFilter === 'element:standard') return Boolean(node && !isSecondaryNode(node, bipartite));
+        return true;
+      });
     },
-    [graph, bipartite, hiddenItems, isolatedLegendItem, isolatedCommunityId, displayMap, communityMap, legendNodeMembership]
+    [bipartite, hiddenItems, isolatedLegendItem, isolatedCommunityId, displayMap, legendNodeMembership, legendEdgeMembership, nodes, edgeVisibilityRecords]
   );
 
   const handleZoomFit = useCallback(() => {
@@ -329,23 +367,22 @@ export default function SigmaGraph({
     setIsolatedCommunityId(null);
     setSelectedCommunityId(null);
     setIsolatedLegendItem(null);
-    setHiddenLegendItems([]);
     setHoveredCommunityId(null);
     setClickedNode(null);
     setClickedEdge(null);
     onClearSelection?.();
 
-    const visibleIds = getVisibleNodeIds(null, null, null, new Set());
+    const visibleIds = getVisibleNodeIds(null, null, null, hiddenItems);
     fitSigmaNodeSet(sigmaRef.current, graph, containerRef.current, visibleIds);
   }, [
     graph,
     setIsolatedCommunityId,
     setSelectedCommunityId,
     setIsolatedLegendItem,
-    setHiddenLegendItems,
     setHoveredCommunityId,
     onClearSelection,
     getVisibleNodeIds,
+    hiddenItems,
   ]);
 
   const handleCommunityDoubleClick = useCallback(
@@ -366,7 +403,7 @@ export default function SigmaGraph({
         });
         setIsolatedCommunityId(commId);
         setSelectedCommunityId(commId);
-        const targetIds = getVisibleNodeIds(commId, commId, isolatedLegendItem, revealedItems);
+        const targetIds = getVisibleNodeIds(null, commId, isolatedLegendItem, revealedItems);
         fitSigmaNodeSet(sigmaRef.current, graph, containerRef.current, targetIds);
       }
     },
@@ -389,7 +426,7 @@ export default function SigmaGraph({
           return next;
         });
         setIsolatedLegendItem(id);
-        const targetIds = getVisibleNodeIds(id, isolatedCommunityId, id, revealedItems);
+        const targetIds = getVisibleNodeIds(null, isolatedCommunityId, id, revealedItems);
         fitSigmaNodeSet(sigmaRef.current, graph, containerRef.current, targetIds);
       }
     },
@@ -402,6 +439,7 @@ export default function SigmaGraph({
     // is constructed. Waiting for the shared graph's static layout prevents an
     // empty/stale snapshot from also poisoning the automatic label grid.
     if (!isReady || !containerRef.current || !graph) return;
+    sigmaConstructionStartedRef.current = performance.now();
     hasInitialFitRef.current = false;
 
     if (sigmaRef.current) {
@@ -458,7 +496,7 @@ export default function SigmaGraph({
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isReady, graph, directed, bipartite, beginDrag, movePinnedNode, endDrag]);
+  }, [isReady, staticLayoutRevision, graph, directed, bipartite, beginDrag, movePinnedNode, endDrag]);
 
   // The shared Graphology graph is populated and statically laid out in a
   // parent effect. Fit once only after that readiness signal reaches this
@@ -472,13 +510,14 @@ export default function SigmaGraph({
       hasInitialFitRef.current = true;
       const visibleIds = getVisibleNodeIds();
       fitSigmaNodeSet(sigma, graph, containerRef.current, visibleIds, 0);
+      console.info(JSON.stringify({ event: 'mine_sigma_first_render', nodes: graph.order, edges: graph.size, sigmaFirstRenderMs: Number((performance.now() - sigmaConstructionStartedRef.current).toFixed(3)), staticLayoutRevision }));
     };
 
     sigma.once('afterRender', fitAfterFirstRender);
     return () => {
       sigma.off('afterRender', fitAfterFirstRender);
     };
-  }, [isReady, graph, getVisibleNodeIds]);
+  }, [isReady, staticLayoutRevision, graph, getVisibleNodeIds]);
 
   // UI/context styling changes get one reducer reprocessing request. Position
   // updates continue through Sigma's normal Graphology lifecycle only.

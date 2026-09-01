@@ -76,3 +76,27 @@ test('optional node and edge metadata enrich every matrix/list structure without
     assert.equal(graph.edges.find((edge) => edge.source === 'a' && edge.target === 'b')?.confidence, 'high', `${format} edge metadata`);
   }
 });
+
+test('secondary weights remain absent unless the input explicitly supplies them', () => {
+  const adjacency = constructGraph(
+    { matrix: [['id', 'a', 'b'], ['a', 0, 2], ['b', 2, 0]] },
+    'Single Weighted Adjacency Matrix',
+    baseMapping,
+    false,
+    'Unipartite',
+    true,
+  );
+  assert.equal(adjacency.edges.every((edge) => edge.weight_secondary === undefined), true);
+
+  const dual = constructGraph({
+    counts: [['id', 'a', 'b'], ['a', 0, 2], ['b', 2, 0]],
+    percentages: [['id', 'a', 'b'], ['a', 0, 0.5], ['b', 0.5, 0]],
+  }, 'Dual Adjacency Matrix', baseMapping, false, 'Unipartite', true);
+  assert.equal(dual.edges.every((edge) => edge.weight_secondary === 0.5), true);
+
+  const edgeList = constructGraph({ edges: [['source', 'target', 'primary', 'secondary'], ['a', 'b', 4, 0.25]] }, 'Weighted Edge List', {
+    ...baseMapping,
+    sourceCol: 'source', targetCol: 'target', weightRawCol: 'primary', weightSecCol: 'secondary',
+  }, false, 'Unipartite', true);
+  assert.equal(edgeList.edges[0].weight_secondary, 0.25);
+});

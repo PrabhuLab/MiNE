@@ -1,58 +1,76 @@
-# Interactive Network Visualization Workspace
+# MiNE — Mineral Network Explorer
 
-A powerful, browser-based network analysis and visualization tool built with Next.js, D3.js, and Graphology. Designed for scientific research (such as Mineral Element Co-occurrence Networks), this application allows users to upload raw matrix/edge-list data, dynamically filter connections, run community detection algorithms, and interact with complex topologies in real-time.
+MiNE is an interactive network visualization and analysis workspace for scientific data. It imports matrix, list, and graph-exchange formats into one canonical Graphology model, preserves supported metadata, and provides a consistent Browser/Cloud workflow.
 
-## ✨ Features
+## Architecture and behavior
 
-- **Smart Upload Wizard**: Easily import network data via CSV or JSON. Supports multiple formats including Adjacency Matrices, Edge Lists, Bipartite, Unipartite, Directed, and Undirected graphs.
-- **Real-Time Physics Engine**: Interactive D3.js force-directed graph rendering. Drag nodes, pan, zoom, and toggle live physics/frozen layouts.
-- **Scientific Graph Analysis**: 
-  - Integrated **Louvain Community Detection** (via Graphology) for identifying modular structures.
-  - Accurate weight accumulation for undirected networks.
-  - Calculation of in/out degrees and Modularity contribution metrics (Delta Q).
-- **Dynamic Filtering**: Use intuitive UI sliders to filter out weak connections using both Absolute and Relative weight thresholds, or manually remove specific nodes.
-- **"Gephi-Lite" Interface**: Seamlessly toggle between the visual **Graph** view and the spreadsheet-style **Data** view to inspect network metrics.
-- **Performance Optimized**: Intelligent rendering limits SVG arrowheads and text labels on massive graphs to maintain high browser frame rates.
-- **Dark/Light Mode**: Fully responsive UI with automated theme switching.
+- **Browser computation:** Graphology runs analysis in the client; browser community detection supports Louvain.
+- **Cloud computation:** the Python service performs curated igraph community, metric, and static-layout operations.
+- **Independent rendering:** D3 or Sigma can render either computation mode from the same persistent Graphology model. Live Physics uses the shared D3 force simulation with either renderer.
+- **Inclusive routing policy:** Cloud is mandatory at **7,000 or more raw nodes OR 15,000 or more raw edges**. Routing always uses imported raw counts, so filtering cannot switch engines.
+- Communities, selected metrics, and layouts run only from their explicit action buttons. Live Update applies visual/filter/physics edits and never starts analysis.
+- The Cloud layout panel includes MiNE's local D3 Force option plus Auto, Fruchterman–Reingold, DrL, Kamada–Kawai, Bipartite, Sugiyama, and Circle when compatible.
+- Cloud communities include Louvain, Leiden, Infomap, Label Propagation, and Walktrap when reported by the backend capability endpoint. Browser mode retains Louvain only.
 
-## 🛠️ Tech Stack
+## Universal Matrix Parsing
 
-- **Framework**: [Next.js](https://nextjs.org/) (React)
-- **Styling**: [Tailwind CSS](https://tailwindcss.com/)
-- **State Management**: [Zustand](https://github.com/pmndrs/zustand)
-- **Graph Visualization**: [D3.js](https://d3js.org/)
-- **Graph Mathematics**: [Graphology](https://graphology.github.io/) & [graphology-communities-louvain](https://github.com/graphology/graphology-communities-louvain)
-- **Data Parsing**: [PapaParse](https://www.papaparse.com/) (CSV)
+MiNE supports:
 
-## 🚀 Getting Started (Local Development)
+- adjacency and weighted adjacency matrices;
+- incidence matrices;
+- dual-adjacency matrices with genuine Primary and Secondary weight channels;
+- adjacency lists and directed/undirected edge lists;
+- optional paired node and edge metadata CSV files;
+- Graphology JSON and MiNE All-in-One JSON;
+- GraphML and GEXF;
+- canonical `nodes.csv` + `edges.csv` pairs and CSV ZIP exports.
 
-### Prerequisites
-Make sure you have [Node.js](https://nodejs.org/) installed on your machine.
+Secondary Weight remains absent unless it was explicitly supplied by the source. An uploaded field named `abundance` is preserved as ordinary numeric metadata; degree is the built-in topology size field.
 
-### Installation
+## Local development
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/YOUR_USERNAME/YOUR_REPOSITORY.git
-   cd YOUR_REPOSITORY
-   ```
+### Frontend
 
-2. Install the dependencies:
-   ```bash
-   npm install
-   ```
+Node.js 20 or newer is recommended.
 
-3. Run the development server:
-   ```bash
-   npm run dev
-   ```
+```bash
+git clone https://github.com/PrabhuLab/MiNE.git
+cd MiNE
+npm install
+cp .env.local.example .env.local
+npm run dev
+```
 
-4. Open [http://localhost:3000](http://localhost:3000) in your browser to see the application.
+Open [http://localhost:3000](http://localhost:3000). The frontend can run without the Cloud service for graphs below the cutoffs.
 
-## 📂 Supported Data Formats
+### Cloud backend
 
-The built-in Smart Upload Wizard can parse a variety of CSV layouts, including:
-- **Standard JSON**: Pre-formatted node/edge arrays.
-- **Edge Lists**: `Source`, `Target`, `Weight` (Supports Bipartite and Unipartite).
-- **Adjacency Matrices**: NxN grid of node relationships.
-- **Dual Adjacency Matrices**: Using both raw counts and percentage matrices simultaneously.
+The backend requires Python 3.12.
+
+```bash
+cd backend
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -e '.[test]'
+pytest
+uvicorn app.main:app --host 0.0.0.0 --port 8080 --workers 1
+```
+
+Set `NEXT_PUBLIC_MINE_IGRAPH_API_URL=http://127.0.0.1:8080` in `.env.local`, then restart the frontend. Deployment and resource-limit notes are in [backend/README.md](backend/README.md).
+
+## Verification
+
+```bash
+npm test
+npm run lint
+npm run build
+backend/.venv/bin/python -m pytest -q
+```
+
+## Citation
+
+If you use MiNE, cite:
+
+> Don Ngo and Anirudh Prabhu. *MiNE: Mineral Network Explorer*. Version 1.0.0, 2026. https://github.com/PrabhuLab/MiNE
+
+Machine-readable citation metadata, author ORCIDs, and the release date are available in [CITATION.cff](CITATION.cff).

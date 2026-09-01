@@ -34,9 +34,9 @@ export default function Home() {
         </div>
         
         <div className={`mt-20 grid grid-cols-1 md:grid-cols-3 gap-0 border max-w-4xl w-full ${isDarkMode ? 'border-[#333] bg-[#141414] text-[#E4E3E0]' : 'border-[#141414] bg-white text-[#141414]'}`}>
-          <FeatureCard isDarkMode={isDarkMode} title="Universal Matrix Parsing" desc="Upload Unipartite or Bipartite incidence matrices directly. Our pipeline maps them to standard node/edge lists automatically." borderRight={true} />
-          <FeatureCard isDarkMode={isDarkMode} title="Real-Time Data Filtering" desc="Dynamically prune edges and cut off nodes via visual sliders without losing your raw dataset." borderRight={true} />
-          <FeatureCard isDarkMode={isDarkMode} title="Live Louvain Communities" desc="Recalculate modularity classes on the fly using Graphology as you filter the viewport." />
+          <FeatureCard isDarkMode={isDarkMode} title="Universal Matrix Parsing" desc="Import adjacency, incidence, dual-adjacency, list, JSON, GraphML, and GEXF data into one normalized graph model while preserving supported metadata." borderRight={true} />
+          <FeatureCard isDarkMode={isDarkMode} title="Interactive Filtering" desc="Filter one edge-derived range at a time and inspect the active and filtered portions without changing the raw network." borderRight={true} />
+          <FeatureCard isDarkMode={isDarkMode} title="Louvain Community Detection" desc="Run Louvain in the browser or curated igraph community algorithms in Cloud mode, then color nodes and edges by the result." />
         </div>
       </div>
     </div>

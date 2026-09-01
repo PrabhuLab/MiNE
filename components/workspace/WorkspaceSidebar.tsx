@@ -6,8 +6,8 @@ import { SimulationControls } from './SimulationControls';
 import { SearchControls } from './SearchControls';
 import { CustomizationControls } from './CustomizationControls';
 import { CalculationControls } from './CalculationControls';
-import { FilterControls } from './FilterControls';
 import type { MetricGraphContext, MetricsSelection } from '@/services/metrics/types';
+import type { CommunitySettings } from '@/services/communities/types';
 
 interface WorkspaceSidebarProps {
   isSidebarCollapsed: boolean;
@@ -16,22 +16,16 @@ interface WorkspaceSidebarProps {
   metricsToRun: MetricsSelection;
   setMetricsToRun: React.Dispatch<React.SetStateAction<MetricsSelection>>;
   runSelectedMetrics: (metricIds?: string[]) => void;
+  runCommunity: (settings: CommunitySettings) => void;
   metricsLoading: boolean;
   metricContext: MetricGraphContext;
   staleMetricIds: string[];
   metricWarnings: Record<string, string>;
-  layoutControls: React.ReactNode;
-  hasType: boolean;
-  hasAbundance: boolean;
-  hasSecondaryWeight: boolean;
-  validNodes: any[];
-  networkMetrics: any[];
+  layoutControls?: React.ReactNode;
   rawNodes: any[];
-  validEdges: any[];
   rawEdges: any[];
-  removedNodesString: string;
-  removedNodesCount: number;
   setAppliedFilters: (val: any) => void;
+  appliedFilters: any;
 }
 
 export const WorkspaceSidebar = ({
@@ -41,22 +35,16 @@ export const WorkspaceSidebar = ({
   metricsToRun,
   setMetricsToRun,
   runSelectedMetrics,
+  runCommunity,
   metricsLoading,
   metricContext,
   staleMetricIds,
   metricWarnings,
   layoutControls,
-  hasType,
-  hasAbundance,
-  hasSecondaryWeight,
-  validNodes,
-  networkMetrics,
   rawNodes,
-  validEdges,
   rawEdges,
-  removedNodesString,
-  removedNodesCount,
-  setAppliedFilters
+  setAppliedFilters,
+  appliedFilters,
 }: WorkspaceSidebarProps) => {
   const { isDarkMode, setIsDarkMode } = useStore();
 
@@ -82,7 +70,7 @@ export const WorkspaceSidebar = ({
   }
 
   return (
-    <aside className={`w-72 border-r flex flex-col p-6 space-y-6 shrink-0 overflow-y-auto transition-colors ${isDarkMode ? 'border-[#333] bg-[#000]' : 'border-[#141414] bg-[#E4E3E0]'}`}>
+    <aside className={`mine-scroll-container w-72 border-r flex flex-col p-6 space-y-6 shrink-0 transition-colors ${isDarkMode ? 'border-[#333] bg-[#000]' : 'border-[#141414] bg-[#E4E3E0]'}`}>
       <div className="flex items-center justify-between">
         <h2 className="text-xs font-bold uppercase tracking-widest">Controls</h2>
         <div className="flex items-center space-x-2">
@@ -107,7 +95,7 @@ export const WorkspaceSidebar = ({
         </div>
       </div>
 
-      <SimulationControls setAppliedFilters={setAppliedFilters} />
+      <SimulationControls setAppliedFilters={setAppliedFilters} appliedFilters={appliedFilters} rawNodes={rawNodes} />
          
       <div className={`h-px w-full my-4 ${isDarkMode ? 'bg-[#333]' : 'bg-[#ccc]'}`}></div>
 
@@ -115,12 +103,7 @@ export const WorkspaceSidebar = ({
          
       <div className={`h-px w-full my-4 ${isDarkMode ? 'bg-[#333]' : 'bg-[#ccc]'}`}></div>
 
-      <CustomizationControls 
-        networkMetrics={networkMetrics}
-        hasType={hasType}
-        hasAbundance={hasAbundance}
-        hasSecondaryWeight={hasSecondaryWeight}
-      />
+      <CustomizationControls />
          
       <div className={`h-px w-full my-4 ${isDarkMode ? 'bg-[#333]' : 'bg-[#ccc]'}`}></div>
 
@@ -128,24 +111,15 @@ export const WorkspaceSidebar = ({
         metricsToRun={metricsToRun}
         setMetricsToRun={setMetricsToRun}
         runSelectedMetrics={runSelectedMetrics}
+        runCommunity={runCommunity}
         metricsLoading={metricsLoading}
         metricContext={metricContext}
         staleMetricIds={staleMetricIds}
         metricWarnings={metricWarnings}
         rawEdges={rawEdges}
+        nodeCount={rawNodes.length}
+        edgeCount={rawEdges.length}
         layoutControls={layoutControls}
-      />
-         
-      <div className={`h-px w-full my-4 ${isDarkMode ? 'bg-[#333]' : 'bg-[#ccc]'}`}></div>
-
-      <FilterControls 
-        hasSecondaryWeight={hasSecondaryWeight}
-        validNodes={validNodes}
-        rawNodes={rawNodes}
-        validEdges={validEdges}
-        rawEdges={rawEdges}
-        removedNodesString={removedNodesString}
-        removedNodesCount={removedNodesCount}
       />
     </aside>
   );

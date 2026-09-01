@@ -76,14 +76,6 @@ export default function NodeDetailsSidebar({
               </span>
             </div>
             <div className="flex justify-between text-[10px]">
-              <span className="opacity-50 uppercase font-bold">ABUNDANCE</span>
-              <span className="font-mono font-bold">
-                {typeof clickedNode.abundance === 'number'
-                  ? clickedNode.abundance.toFixed(3)
-                  : clickedNode.abundance || 0}
-              </span>
-            </div>
-            <div className="flex justify-between text-[10px]">
               <span className="opacity-50 uppercase font-bold">DEGREE (Abs)</span>
               <span className="font-mono font-bold">{clickedDegree}</span>
             </div>
@@ -108,7 +100,6 @@ export default function NodeDetailsSidebar({
                     'id',
                     'name',
                     'label',
-                    'abundance',
                     'community',
                     'x',
                     'y',
@@ -215,6 +206,14 @@ export default function NodeDetailsSidebar({
                 </span>
               </div>
             )}
+            {Object.entries(net || {})
+              .filter(([key]) => !['id', 'degree', 'degreeCentrality', 'inDegreeCentrality', 'outDegreeCentrality', 'betweenness', 'closeness', 'clustering', 'pagerank', 'eigenvector'].includes(key))
+              .map(([key, value]) => (
+                <div key={`metric-${key}`} className="flex justify-between text-[10px]">
+                  <span className="max-w-[90px] truncate font-bold uppercase opacity-50" title={key}>{key}</span>
+                  <span className="max-w-[100px] truncate text-right font-mono font-bold" title={String(value)}>{String(value)}</span>
+                </div>
+              ))}
           </div>
         </div>
       </div>
@@ -277,12 +276,12 @@ export default function NodeDetailsSidebar({
             </div>
             <div className="flex justify-between text-[10px]">
               <span className="opacity-50 uppercase font-bold">RAW WT</span>
-              <span className="font-mono font-bold">{clickedEdge.weight_raw || '-'}</span>
+              <span className="font-mono font-bold">{clickedEdge.weight_raw ?? '-'}</span>
             </div>
-            <div className="flex justify-between text-[10px]">
+            {clickedEdge.weight_secondary !== undefined && <div className="flex justify-between text-[10px]">
               <span className="opacity-50 uppercase font-bold">SEC WT</span>
-              <span className="font-mono font-bold">{clickedEdge.weight_secondary || '-'}</span>
-            </div>
+              <span className="font-mono font-bold">{clickedEdge.weight_secondary}</span>
+            </div>}
             {Object.keys(clickedEdge)
               .filter(
                 (k) =>

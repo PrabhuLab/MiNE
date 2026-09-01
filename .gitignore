@@ -1,10 +1,12 @@
 node_modules/
 .next/
+out/
 coverage/
 .DS_Store
 *.log
 .env*
 !.env.example
+!.env.local.example
 tsconfig.tsbuildinfo
 tsconfig.tsbuildinfo
 *.tsbuildinfo

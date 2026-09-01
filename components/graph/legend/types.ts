@@ -2,6 +2,8 @@ export interface ElementLegendItem {
   id: string;
   label: string;
   Icon: React.ComponentType;
+  color?: string;
+  colorKey?: string;
 }
 
 export interface LegendCategoryItem {

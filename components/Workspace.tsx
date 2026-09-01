@@ -1,7 +1,5 @@
 'use client';
 
-/* eslint-disable react-hooks/set-state-in-effect */
-
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { useStore, RawNode, RawEdge } from '@/store/useStore';
@@ -18,8 +16,11 @@ import { useSharedPhysics } from '@/hooks/useSharedPhysics';
 import { useWorkspaceSelection } from '@/hooks/useWorkspaceSelection';
 import { useWorkspaceIO } from '@/hooks/useWorkspaceIO';
 import { useGraphLayouts } from '@/hooks/useGraphLayouts';
-import { METRIC_REGISTRY } from '@/services/metrics/registry';
 import { numericExtent } from '@/lib/utils';
+import { resolveComputeEngine } from '@/services/cloud/config';
+import { degreeByNode, logarithmicNodeSize } from '@/services/graphStyles/size';
+import { effectiveRenderer } from '@/services/engines/policy';
+import { WorkspaceStatusCards } from '@/components/workspace/WorkspaceStatusCards';
 
 // Dynamically import D3Graph & SigmaGraph so they only run on the client due to canvas/SVG dependencies
 const D3Graph = dynamic(() => import('./D3Graph'), { ssr: false });
@@ -32,16 +33,13 @@ import { isSecondaryNode } from '@/services/graphPresentation/visibility';
 import { LayoutControls } from '@/components/workspace/LayoutControls';
 
 export default function Workspace() {
-  const { rawNodes, rawEdges, filters, communityMap, customAttributes, directed, bipartite, isDarkMode, selectedElement, setSelectedElement, projectName, rendererEngine, setRendererEngine } = useStore();
+  const { rawNodes, rawEdges, filters, communityMap, customAttributes, directed, bipartite, computeEngine, rendererEngine, isDarkMode, selectedElement, setSelectedElement, projectName } = useStore();
 
   const {
     appliedFilters,
     setAppliedFilters,
     validNodes,
     validEdges,
-    hasType,
-    hasAbundance,
-    hasSecondaryWeight
   } = useGraphFilters();
 
   const [isSwitchingRenderer, setIsSwitchingRenderer] = useState(false);
@@ -57,20 +55,9 @@ export default function Workspace() {
     getLayoutRevision: () => metricsLayoutRevisionRef.current,
   }), [validNodes]);
 
-  const useSigma = rendererEngine === 'sigma' || (rendererEngine === 'auto' && (validNodes.length >= 1000 || validEdges.length >= 3000));
-  const topologyKey = useMemo(
-    () => `${directed ? 'd' : 'u'}:${validNodes.map((node) => node.id).join('\u001f')}:${validEdges.map((edge) => `${edge.source}\u001e${edge.target}`).join('\u001f')}`,
-    [directed, validNodes, validEdges]
-  );
-
-  const handleSwitchRenderer = useCallback((engine: 'd3' | 'sigma') => {
-    if (rendererEngine === engine) return;
-    setIsSwitchingRenderer(true);
-    setRendererEngine(engine);
-    setTimeout(() => {
-      setIsSwitchingRenderer(false);
-    }, 200);
-  }, [rendererEngine, setRendererEngine]);
+  const effectiveEngine = resolveComputeEngine(rawNodes.length, rawEdges.length, computeEngine);
+  const activeRenderer = effectiveRenderer(rendererEngine, effectiveEngine);
+  const useSigma = activeRenderer === 'sigma';
 
   const {
     networkMetrics,
@@ -81,20 +68,19 @@ export default function Workspace() {
     metricWarnings,
     metricContext,
     staleMetricIds,
+    graphRevision,
     metricsToRun,
     setMetricsToRun,
     metricsLoading,
     runSelectedMetrics,
+    runCommunity,
     invalidateLayoutMetrics,
   } = useGraphMetrics(validNodes, validEdges, appliedFilters, rawNodes, metricAccessors);
-
-  const {
-    searchQuery,
-    sortConfig,
-    setSortConfig,
-    tableData,
-    tableDataEdges
-  } = useDataTableSort(validNodes, validEdges, networkMetrics, nodeMetrics);
+  const edgeMetricMap = useMemo(() => new Map(edgeMetrics.map((metric: any) => [String(metric.key), metric])), [edgeMetrics]);
+  const presentationEdges = useMemo(() => validEdges.map((edge) => {
+    const key = String(edge.key ?? `${edge.source}->${edge.target}`);
+    return { ...edge, ...(edgeMetricMap.get(key) || edgeMetricMap.get(`${edge.source}->${edge.target}`) || {}) };
+  }), [edgeMetricMap, validEdges]);
 
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const {
@@ -117,9 +103,11 @@ export default function Workspace() {
     getEdgeColor,
     getEdgeOpacity,
     getShouldShowArrowhead,
+    legendNodeMembership,
+    legendEdgeMembership,
   } = useGraphStyles({
     nodes: validNodes,
-    edges: validEdges,
+    edges: presentationEdges,
     communityMap,
     networkMetrics,
     nodeColorBase: appliedFilters.nodeColorBase || 'custom',
@@ -143,32 +131,38 @@ export default function Workspace() {
     clickedEdgeRef,
   });
 
-  const degreeMap = useMemo(() => {
-    const map: Record<string, number> = {};
-    validEdges.forEach((e) => {
-      map[e.source] = (map[e.source] || 0) + 1;
-      map[e.target] = (map[e.target] || 0) + 1;
-    });
-    return map;
-  }, [validEdges]);
-  const metricMap = useMemo(() => new Map(networkMetrics.map((metric: any) => [String(metric.id), metric])), [networkMetrics]);
-  const visibleNodeMap = useMemo(() => new Map(validNodes.map((node) => [String(node.id), node])), [validNodes]);
+  const {
+    searchQuery,
+    sortConfig,
+    setSortConfig,
+    tableData,
+    tableDataEdges,
+  } = useDataTableSort(validNodes, validEdges, networkMetrics, nodeMetrics, edgeMetrics, legendNodeMembership, legendEdgeMembership);
 
-  const selectedCustomAttribute = customAttributes.find((attribute) => attribute.scope === 'node' && attribute.name === appliedFilters.customNodeAttribute);
+  const degreeMap = useMemo(() => degreeByNode(validNodes, validEdges), [validEdges, validNodes]);
+  const metricMap = useMemo(() => new Map(networkMetrics.map((metric: any) => [String(metric.id), metric])), [networkMetrics]);
+  const selectedCustomAttribute = customAttributes.find((attribute) => attribute.scope === 'node' && attribute.name === appliedFilters.customNodeSizeAttribute);
+  const customNodeSizeValues = useMemo(() => {
+    if (!selectedCustomAttribute || ['discrete', 'continuous'].includes(selectedCustomAttribute.selectedType)) return null;
+    const values = Array.from(new Set(validNodes.map((node) => metricMap.get(String(node.id))?.[selectedCustomAttribute.name] ?? node[selectedCustomAttribute.name])
+      .filter((value) => value !== undefined && value !== null && String(value).trim() !== '').map(String))).sort();
+    return new Map(values.map((value, index) => [value, index + 1]));
+  }, [metricMap, selectedCustomAttribute, validNodes]);
   const customSizeDomain = useMemo(() => {
-    if (!selectedCustomAttribute || !['discrete', 'continuous'].includes(selectedCustomAttribute.selectedType)) return null;
-    return numericExtent(validNodes.map((node) => Number(node[selectedCustomAttribute.name])));
-  }, [selectedCustomAttribute, validNodes]);
+    if (!selectedCustomAttribute) return null;
+    if (customNodeSizeValues) return [1, Math.max(1, customNodeSizeValues.size)] as [number, number];
+    return numericExtent(validNodes.map((node) => Number(metricMap.get(String(node.id))?.[selectedCustomAttribute.name] ?? node[selectedCustomAttribute.name])));
+  }, [customNodeSizeValues, metricMap, selectedCustomAttribute, validNodes]);
 
   const getNodeSize = useCallback(
     (node: RawNode) => {
-      let baseVal = 10;
-      const base = appliedFilters.nodeSizeBase || 'abundance';
+      let baseVal = 0;
+      const base = appliedFilters.nodeSizeBase || 'degree';
       if (base === 'uniform') baseVal = 5;
-      else if (base === 'abundance') baseVal = node.abundance ?? 10;
-      else if (base === 'degree') baseVal = (degreeMap[node.id] || 0) * 5;
+      else if (base === 'degree') baseVal = degreeMap[node.id] || 0;
       else if (base === 'custom' && selectedCustomAttribute && customSizeDomain) {
-        const value = Number(node[selectedCustomAttribute.name]);
+        const rawValue = metricMap.get(String(node.id))?.[selectedCustomAttribute.name] ?? node[selectedCustomAttribute.name];
+        const value = customNodeSizeValues ? customNodeSizeValues.get(String(rawValue)) ?? Number.NaN : Number(rawValue);
         const [min, max] = customSizeDomain;
         if (Number.isFinite(value)) baseVal = max === min ? 5 : 1 + ((value - min) / (max - min)) * 9;
       }
@@ -185,41 +179,38 @@ export default function Workspace() {
       const isSecondary = isSecondaryNode(node, bipartite);
       const mult = isSecondary ? (appliedFilters.bipartiteNodeSize || 2) : (appliedFilters.nodeSize || 3);
 
-      return mult * Math.max(Math.log(baseVal + 2), 1) + 2;
+      return logarithmicNodeSize(baseVal, mult);
     },
-    [appliedFilters.nodeSizeBase, appliedFilters.bipartiteNodeSize, appliedFilters.nodeSize, bipartite, degreeMap, metricMap, selectedCustomAttribute, customSizeDomain]
+    [appliedFilters.nodeSizeBase, appliedFilters.bipartiteNodeSize, appliedFilters.nodeSize, bipartite, customNodeSizeValues, degreeMap, metricMap, selectedCustomAttribute, customSizeDomain]
   );
 
+  const selectedEdgeWeightAttribute = appliedFilters.edgeWeightBase?.startsWith('edge:') ? appliedFilters.edgeWeightBase.slice(5) : '';
+  const selectedEdgeWeightMetadata = customAttributes.find((attribute) => attribute.scope === 'edge' && attribute.name === selectedEdgeWeightAttribute);
+  const categoricalEdgeWeightValues = useMemo(() => {
+    if (!selectedEdgeWeightMetadata || ['discrete', 'continuous'].includes(selectedEdgeWeightMetadata.selectedType)) return null;
+    const values = Array.from(new Set(presentationEdges.map((edge) => edge[selectedEdgeWeightAttribute]).filter((value) => value !== undefined && value !== null && String(value).trim() !== '').map(String))).sort();
+    return new Map(values.map((value, index) => [value, index + 1]));
+  }, [presentationEdges, selectedEdgeWeightAttribute, selectedEdgeWeightMetadata]);
   const edgeSizeValue = useCallback((candidate: RawEdge): number | null => {
     const base = appliedFilters.edgeWeightBase || 'weight_raw';
     if (base === 'uniform') return null;
     if (base === 'weight_raw') return Number(candidate.weight_raw);
     if (base === 'weight_secondary') return Number(candidate.weight_secondary);
-    if (base.startsWith('edge:')) return Number(candidate[base.slice('edge:'.length)]);
+    if (base.startsWith('edge:')) {
+      const rawValue = candidate[base.slice('edge:'.length)];
+      return categoricalEdgeWeightValues ? categoricalEdgeWeightValues.get(String(rawValue)) ?? Number.NaN : Number(rawValue);
+    }
 
-    const prefix = base.startsWith('metric:') ? 'metric:' : base.startsWith('node:') ? 'node:' : '';
-    if (!prefix) return Number.NaN;
-    const source = base.slice(prefix.length);
-    const nodeValue = (nodeId: string) => {
-      const node = visibleNodeMap.get(nodeId);
-      const metric = metricMap.get(nodeId);
-      if (source === 'abundance') return Number(node?.abundance);
-      if (source === 'degree') return Number(degreeMap[nodeId] || 0);
-      if (source === 'inDegree' || source === 'outDegree') return Number(metric?.[source] || 0);
-      return Number(metric?.[source] ?? node?.[source]);
-    };
-    const sourceValue = nodeValue(String(candidate.source));
-    const targetValue = nodeValue(String(candidate.target));
-    if (Number.isFinite(sourceValue) && Number.isFinite(targetValue)) return (sourceValue + targetValue) / 2;
-    return Number.isFinite(sourceValue) ? sourceValue : targetValue;
-  }, [appliedFilters.edgeWeightBase, degreeMap, metricMap, visibleNodeMap]);
+    if (base.startsWith('metric:')) return Number(candidate[base.slice('metric:'.length)]);
+    return Number.NaN;
+  }, [appliedFilters.edgeWeightBase, categoricalEdgeWeightValues]);
 
   const edgeSizeDomain = useMemo(() => {
-    const extent = numericExtent(validEdges.map((edge) => edgeSizeValue(edge) ?? Number.NaN));
+    const extent = numericExtent(presentationEdges.map((edge) => edgeSizeValue(edge) ?? Number.NaN));
     if (!extent) return null;
     const [min, max] = extent;
     return [min, max === min ? min + 1 : max] as const;
-  }, [edgeSizeValue, validEdges]);
+  }, [edgeSizeValue, presentationEdges]);
 
   const getEdgeSize = useCallback((edge: RawEdge) => {
     const value = edgeSizeValue(edge);
@@ -230,13 +221,16 @@ export default function Workspace() {
   }, [appliedFilters.edgeWeight, edgeSizeDomain, edgeSizeValue]);
 
   // Unified persistent Graphology instance (using D3 static layout pre-rendering)
-  const { graph, isReady, layoutRevision, runRefreshLayout, notifyLayoutChange } = useSharedGraph({
+  const { graph, isReady, layoutRevision, staticLayoutRevision, topologyKey, positioningError, cloudRouted, runRefreshLayout, notifyLayoutChange, applyExternalPositions } = useSharedGraph({
     nodes: validNodes,
-    edges: validEdges,
+    edges: presentationEdges,
     directed,
     bipartite,
     forceStrength: appliedFilters.forceStrength || -100,
     livePhysics: appliedFilters.livePhysics,
+    graphRevision,
+    computeEngine: effectiveEngine,
+    weightAttribute: appliedFilters.metricWeightAttribute || 'weight_raw',
     isDarkMode,
     getNodeColor,
     getNodeSize,
@@ -250,21 +244,24 @@ export default function Workspace() {
     metricsGraphRef.current = graph;
     metricsLayoutRevisionRef.current = layoutRevision;
   }, [graph, layoutRevision]);
-
-  const selectedLayoutMetricIds = useMemo(() => METRIC_REGISTRY.filter((metric) => metric.scope === 'layout' && metricsToRun[metric.id]).map((metric) => metric.id), [metricsToRun]);
-  const handleLayoutStopped = useCallback(() => {
-    if (selectedLayoutMetricIds.length) runSelectedMetrics(selectedLayoutMetricIds);
-  }, [runSelectedMetrics, selectedLayoutMetricIds]);
   const layoutController = useGraphLayouts({
     graph,
     nodes: validNodes,
     edges: validEdges,
     topologyKey,
     livePhysics: appliedFilters.livePhysics,
-    setLivePhysics: (enabled) => useStore.getState().setFilter('livePhysics', enabled),
+    setLivePhysics: (enabled) => {
+      useStore.getState().setFilter('livePhysics', enabled);
+      setAppliedFilters((current: typeof appliedFilters) => ({ ...current, livePhysics: enabled }));
+    },
     notifyLayoutChange,
     onLayoutStarted: invalidateLayoutMetrics,
-    onLayoutStopped: handleLayoutStopped,
+    directed,
+    bipartite,
+    cloudRouted,
+    applyExternalPositions,
+    weightAttribute: appliedFilters.metricWeightAttribute || 'weight_raw',
+    forceStrength: appliedFilters.forceStrength || -100,
   });
 
   // Unified live D3-force simulation controller
@@ -288,29 +285,16 @@ export default function Workspace() {
     setIsSwitchingRenderer(true);
     runRefreshLayout();
     setRefreshKey((k) => k + 1);
-    runSelectedMetrics();
     setTimeout(() => {
       setIsSwitchingRenderer(false);
     }, 250);
-  }, [runRefreshLayout, runSelectedMetrics]);
+  }, [runRefreshLayout]);
 
-  useEffect(() => {
-    setIsSwitchingRenderer(true);
-    const timer = setTimeout(() => {
-      setIsSwitchingRenderer(false);
-    }, 200);
-    return () => clearTimeout(timer);
-  }, [rendererEngine]);
-
-  const { removedNodesString, removedNodesCount } = useMemo(() => {
+  const filteredOutNodes = useMemo(() => {
     const visibleNodeIds = new Set(validNodes.map(n => n.id));
-    const removedNodesList = rawNodes
+    return rawNodes
       .filter(n => !visibleNodeIds.has(n.id))
       .map(n => n.name || n.id);
-    return {
-      removedNodesString: removedNodesList.join(', '),
-      removedNodesCount: removedNodesList.length
-    };
   }, [rawNodes, validNodes]);
 
   const { handleImportWorkspace, handleExport } = useWorkspaceIO({
@@ -321,7 +305,6 @@ export default function Workspace() {
     bipartite,
     isDarkMode,
     projectName,
-    rendererEngine,
     useSigma,
     sigmaRendererRef,
     communityMap,
@@ -350,28 +333,22 @@ export default function Workspace() {
       {/* SIDEBAR CONTROL PANEL */}
       
       <WorkspaceSidebar 
-        networkMetrics={networkMetrics}
         isSidebarCollapsed={isSidebarCollapsed}
         setIsSidebarCollapsed={setIsSidebarCollapsed}
         handleImportWorkspace={handleImportWorkspace}
         metricsToRun={metricsToRun}
         setMetricsToRun={setMetricsToRun}
         runSelectedMetrics={runSelectedMetrics}
+        runCommunity={runCommunity}
         metricsLoading={metricsLoading}
         metricContext={metricContext}
         staleMetricIds={staleMetricIds}
         metricWarnings={metricWarnings}
-        layoutControls={<LayoutControls {...layoutController} />}
-        hasType={hasType}
-        hasAbundance={hasAbundance}
-        hasSecondaryWeight={hasSecondaryWeight}
-        validNodes={validNodes}
+        layoutControls={effectiveEngine === 'cloud' ? <LayoutControls {...layoutController} /> : undefined}
         rawNodes={rawNodes}
-        validEdges={validEdges}
         rawEdges={rawEdges}
-        removedNodesString={removedNodesString}
-        removedNodesCount={removedNodesCount}
         setAppliedFilters={setAppliedFilters}
+        appliedFilters={appliedFilters}
       />
 
       {/* MAIN VIEWPORT */}
@@ -432,6 +409,17 @@ export default function Workspace() {
           </div>
         </div>
 
+        <WorkspaceStatusCards
+          activeNodeCount={validNodes.length}
+          rawNodeCount={rawNodes.length}
+          activeEdgeCount={validEdges.length}
+          rawEdgeCount={rawEdges.length}
+          engine={effectiveEngine}
+          renderer={activeRenderer}
+          filteredOut={filteredOutNodes}
+          showFilteredOut={activeTab === 'graph'}
+        />
+
         {activeTab === 'data' && (
           <GraphMetricCarousel metrics={graphMetrics} />
         )}
@@ -444,17 +432,21 @@ export default function Workspace() {
                   <span>Switching Renderer Engine...</span>
                 </div>
               )}
+              {positioningError && (
+                <div className={`absolute inset-x-4 top-4 z-50 border px-4 py-3 font-mono text-xs ${isDarkMode ? 'bg-red-950 border-red-500 text-red-100' : 'bg-red-50 border-red-500 text-red-900'}`}>{positioningError}</div>
+              )}
               {useSigma ? (
                 <SigmaGraph 
                   graph={graph}
                   isReady={isReady}
+                  staticLayoutRevision={staticLayoutRevision}
                   nodes={validNodes} 
-                  edges={validEdges} 
+                  edges={presentationEdges} 
                   communityMap={communityMap}
                   networkMetrics={networkMetrics}
                   nodeSizeMult={appliedFilters.nodeSize || 3}
                   bipartiteNodeSizeMult={appliedFilters.bipartiteNodeSize || 2}
-                  nodeSizeBase={appliedFilters.nodeSizeBase || "abundance"}
+                  nodeSizeBase={appliedFilters.nodeSizeBase || "degree"}
                   nodeColorBase={appliedFilters.nodeColorBase || "custom"}
                   uniformNodeColor={appliedFilters.uniformNodeColor || "#cccccc"}
                   uniformEdgeColor={appliedFilters.uniformEdgeColor || (isDarkMode ? "#888888" : "#333333")}
@@ -478,23 +470,22 @@ export default function Workspace() {
                   searchQuery={searchQuery}
                   selectedElement={selectedElement}
                   focusRequest={graphFocusRequest}
-                  onSwitchRenderer={handleSwitchRenderer}
                   isRendererSwitching={isSwitchingRenderer}
                   beginDrag={beginDrag}
                   movePinnedNode={movePinnedNode}
                   endDrag={endDrag}
                   onRendererReady={(renderer) => { sigmaRendererRef.current = renderer; }}
                 />
-              ) : (
+              ) : isReady ? (
                 <D3Graph 
                   graph={graph}
                   nodes={validNodes} 
-                  edges={validEdges} 
+                  edges={presentationEdges} 
                   communityMap={communityMap}
                   networkMetrics={networkMetrics}
                   nodeSizeMult={appliedFilters.nodeSize || 3}
                   bipartiteNodeSizeMult={appliedFilters.bipartiteNodeSize || 2}
-                  nodeSizeBase={appliedFilters.nodeSizeBase || "abundance"}
+                  nodeSizeBase={appliedFilters.nodeSizeBase || "degree"}
                   nodeColorBase={appliedFilters.nodeColorBase || "custom"}
                   uniformNodeColor={appliedFilters.uniformNodeColor || "#cccccc"}
                   uniformEdgeColor={appliedFilters.uniformEdgeColor || (isDarkMode ? "#888888" : "#333333")}
@@ -519,7 +510,6 @@ export default function Workspace() {
                   searchQuery={searchQuery}
                   selectedElement={selectedElement}
                   focusRequest={graphFocusRequest}
-                  onSwitchRenderer={handleSwitchRenderer}
                   isRendererSwitching={isSwitchingRenderer}
                   registerD3TickListener={registerD3TickListener}
                   beginDrag={beginDrag}
@@ -529,7 +519,7 @@ export default function Workspace() {
                   d3LinksRef={d3LinksRef}
                   d3NodesMapRef={d3NodesMapRef}
                 />
-              )}
+              ) : null}
             </div>
             
             <div className={`flex-1 w-full h-full overflow-hidden ${activeTab === "data" ? "block" : "hidden"}`}>

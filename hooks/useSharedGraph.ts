@@ -1,10 +1,17 @@
 'use client';
 
+/* eslint-disable react-hooks/set-state-in-effect */
+
 import { useEffect, useCallback, useState, useMemo, useRef } from 'react';
 import Graph from 'graphology';
 import { RawNode, RawEdge } from '@/store/useStore';
 import { computeForceDirectedLayout } from '@/lib/layoutUtils';
 import { isSecondaryNode } from '@/services/graphPresentation/visibility';
+import { computeGraphRevisions } from '@/services/cloud/revision';
+import { shouldUseCloud, type ComputeEngine } from '@/services/cloud/config';
+import type { LayoutResult } from '@/services/layouts/types';
+
+export type PositionSource = 'imported' | 'local-static' | 'local-live' | 'cloud-static' | 'pending-cloud';
 
 interface UseSharedGraphProps {
   nodes: RawNode[];
@@ -13,6 +20,9 @@ interface UseSharedGraphProps {
   bipartite: boolean;
   forceStrength?: number;
   livePhysics?: boolean;
+  computeEngine?: ComputeEngine;
+  graphRevision?: string;
+  weightAttribute?: string;
   isDarkMode?: boolean;
   getNodeColor: (node: any) => string;
   getNodeSize: (node: any) => number;
@@ -23,225 +33,150 @@ interface UseSharedGraphProps {
   nodeOpacity?: number;
 }
 
-export function useSharedGraph({
-  nodes,
-  edges,
-  directed,
-  bipartite,
-  forceStrength = -100,
-  livePhysics = false,
-  isDarkMode,
-  getNodeColor,
-  getNodeSize,
-  getEdgeColor,
-  getEdgeSize,
-  getEdgeOpacity,
-  getShouldShowArrowhead,
-  nodeOpacity = 1,
-}: UseSharedGraphProps) {
-  const graph = useMemo(() => {
-    return new (Graph as any)({ type: directed ? 'directed' : 'undirected', multi: false });
-  }, [directed]);
+const finitePosition = (value: any): value is { x: number; y: number } => Number.isFinite(Number(value?.x)) && Number.isFinite(Number(value?.y));
 
-  const topologyKey = useMemo(
-    () => JSON.stringify([
-      directed,
-      nodes.map((node) => node.id),
-      edges.map((edge) => [edge.source, edge.target]),
-    ]),
-    [directed, nodes, edges]
-  );
+export function useSharedGraph({
+  nodes, edges, directed, bipartite, forceStrength = -100, livePhysics = false,
+  computeEngine = 'auto', graphRevision, weightAttribute = 'weight_raw', isDarkMode, getNodeColor, getNodeSize, getEdgeColor,
+  getEdgeSize, getEdgeOpacity, getShouldShowArrowhead, nodeOpacity = 1,
+}: UseSharedGraphProps) {
+  const graph: Graph = useMemo(() => new (Graph as any)({ type: directed ? 'directed' : 'undirected', multi: false }), [directed]);
+  const revisions = useMemo(() => computeGraphRevisions(nodes, edges, directed, true, weightAttribute), [nodes, edges, directed, weightAttribute]);
+  const topologyKey = revisions.graphRevision;
+  const cloudRouted = shouldUseCloud(nodes.length, edges.length, computeEngine);
   const [readyTopologyKey, setReadyTopologyKey] = useState<string | null>(null);
   const [layoutRevision, setLayoutRevision] = useState(0);
+  const [staticLayoutRevision, setStaticLayoutRevision] = useState(0);
+  const [positionSource, setPositionSource] = useState<PositionSource>('local-static');
+  const [positioningError, setPositioningError] = useState<string | null>(null);
   const lastStaticForceStrengthRef = useRef<number | null>(null);
-  const isReady = readyTopologyKey === topologyKey;
+  const positionCacheRef = useRef(new Map<string, { x: number; y: number }>());
+  const cacheGraphRevisionRef = useRef(graphRevision);
+  const topologyRevisionRef = useRef(topologyKey);
+  const committedTopologyRef = useRef<string | null>(null);
+  const isReady = readyTopologyKey === topologyKey && positionSource !== 'pending-cloud';
 
-  // Apply offline D3 force-directed static layout to Graphology graph
+  useEffect(() => {
+    topologyRevisionRef.current = topologyKey;
+    if (cacheGraphRevisionRef.current !== graphRevision) {
+      positionCacheRef.current.clear();
+      cacheGraphRevisionRef.current = graphRevision;
+    }
+  }, [graphRevision, topologyKey]);
+
+  const commitPositions = useCallback((source: PositionSource) => {
+    graph.forEachNode((id, attrs) => {
+      if (finitePosition(attrs)) positionCacheRef.current.set(id, { x: Number(attrs.x), y: Number(attrs.y) });
+    });
+    setPositionSource(source);
+    committedTopologyRef.current = topologyRevisionRef.current;
+    setReadyTopologyKey(topologyRevisionRef.current);
+    setLayoutRevision((revision) => revision + 1);
+    if (source === 'local-static' || source === 'cloud-static' || source === 'imported') setStaticLayoutRevision((revision) => revision + 1);
+  }, [graph]);
+
   const applyD3StaticLayout = useCallback((graphInst: Graph) => {
-    if (!graphInst) return;
     const posMap = computeForceDirectedLayout(nodes, edges, directed, forceStrength);
     graphInst.updateEachNodeAttributes((nodeId: string, attrs: any) => {
       const pos = posMap.get(nodeId);
       return pos ? { ...attrs, x: pos.x, y: pos.y } : attrs;
     }, { attributes: ['x', 'y'] });
-    // Notify renderers after Graphology has received the complete position
-    // batch; deferring also avoids a cascading React update inside the graph
-    // synchronization effect that performs an initial static layout.
-    setTimeout(() => setLayoutRevision((revision) => revision + 1), 0);
-  }, [nodes, edges, directed, forceStrength]);
+    setTimeout(() => commitPositions('local-static'), 0);
+  }, [nodes, edges, directed, forceStrength, commitPositions]);
 
-  // Initialize or update Graphology graph structure & static D3 layout
+  const applyExternalPositions = useCallback((result: LayoutResult, expectedRevision: string): void => {
+    if (topologyRevisionRef.current !== expectedRevision || result.filterRevision !== expectedRevision) return;
+    const ids = graph.nodes();
+    if (ids.length !== nodes.length || ids.some((id) => !finitePosition(result.positions[id]))) throw new Error('Cloud layout did not return one finite coordinate pair for every current node.');
+    const applyStarted = performance.now();
+    graph.updateEachNodeAttributes((nodeId: string, attrs: any) => {
+      const position = result.positions[nodeId];
+      return { ...attrs, x: position.x, y: position.y };
+    }, { attributes: ['x', 'y'] });
+    console.info(JSON.stringify({ event: 'mine_cloud_positions_applied', nodes: ids.length, frontendApplicationMs: Number((performance.now() - applyStarted).toFixed(3)) }));
+    commitPositions('cloud-static');
+  }, [commitPositions, graph, nodes.length]);
+
   useEffect(() => {
-    if (!graph) return;
-
     const strokeColor = isDarkMode ? '#ffffff' : '#141414';
-
-    // Synchronize Nodes
-    const existingNodes = new Set<string>(graph.nodes());
-    const targetNodes = new Set<string>(nodes.map((n) => n.id));
-
-    // Remove nodes no longer in target set
-    existingNodes.forEach((id) => {
+    const targetNodes = new Set(nodes.map((node) => String(node.id)));
+    graph.forEachNode((id, attrs) => {
       if (!targetNodes.has(id)) {
+        if (finitePosition(attrs)) positionCacheRef.current.set(id, { x: Number(attrs.x), y: Number(attrs.y) });
         graph.dropNode(id);
       }
     });
 
-    let needsLayout = false;
-
-    nodes.forEach((n) => {
-      const size = getNodeSize(n);
-      const color = getNodeColor(n);
-      const isSecondary = isSecondaryNode(n, bipartite);
-      const shape = isSecondary ? 'square' : 'circle';
-
-      if (!graph.hasNode(n.id)) {
-        needsLayout = true;
-        graph.addNode(n.id, {
-          ...n,
-          x: n.x,
-          y: n.y,
-          size,
-          color,
-          opacity: nodeOpacity,
-          borderColor: strokeColor,
-          labelColor: strokeColor,
-          label: n.name || n.label || n.id,
-          rawNode: n,
-          shape,
-        });
-      } else {
-        graph.mergeNodeAttributes(n.id, {
-          ...n,
-          size,
-          color,
-          opacity: nodeOpacity,
-          borderColor: strokeColor,
-          labelColor: strokeColor,
-          label: n.name || n.label || n.id,
-          rawNode: n,
-          shape,
-        });
-      }
+    let addedUnpositionedNode = false;
+    nodes.forEach((node) => {
+      const cached = positionCacheRef.current.get(String(node.id));
+      const supplied = finitePosition(node) ? { x: Number(node.x), y: Number(node.y) } : cached;
+      const presentation = {
+        ...node, ...(supplied || {}), size: getNodeSize(node), color: getNodeColor(node), opacity: nodeOpacity,
+        borderColor: strokeColor, labelColor: strokeColor, label: node.name || node.label || node.id, rawNode: node,
+        shape: isSecondaryNode(node, bipartite) ? 'square' : 'circle',
+      };
+      if (!graph.hasNode(node.id)) {
+        if (!supplied) addedUnpositionedNode = true;
+        graph.addNode(node.id, presentation);
+      } else graph.mergeNodeAttributes(node.id, presentation);
     });
 
-    // Synchronize Edges
-    const existingEdges = new Set<string>(graph.edges());
+    const existingEdges = new Set(graph.edges());
     const targetEdgeKeys = new Set<string>();
+    edges.forEach((edge) => {
+      if (!graph.hasNode(edge.source) || !graph.hasNode(edge.target)) return;
+      const existingKey = graph.hasEdge(edge.source, edge.target) ? graph.edge(edge.source, edge.target) : null;
+      const attrs = {
+        ...edge, size: getEdgeSize(edge), color: getEdgeColor(edge), opacity: getEdgeOpacity(edge),
+        path: directed ? 'curved' : 'straight', curvature: directed ? 0.3 : 0,
+        head: getShouldShowArrowhead(edge) ? 'arrow' : 'none', rawEdge: edge,
+      };
+      if (existingKey) { targetEdgeKeys.add(existingKey); graph.mergeEdgeAttributes(existingKey, attrs); }
+      else { try { targetEdgeKeys.add(graph.addEdge(edge.source, edge.target, attrs)); } catch { /* retain first simple edge */ } }
+    });
+    existingEdges.forEach((key) => { if (!targetEdgeKeys.has(key) && graph.hasEdge(key)) graph.dropEdge(key); });
+    const hasUnpositionedNode = addedUnpositionedNode || graph.someNode((_id, attrs) => !finitePosition(attrs));
 
-    edges.forEach((e) => {
-      if (graph.hasNode(e.source) && graph.hasNode(e.target)) {
-        const edgeKey = graph.hasEdge(e.source, e.target) ? graph.edge(e.source, e.target) : null;
-        const color = getEdgeColor(e);
-        const opacity = getEdgeOpacity(e);
-        const size = getEdgeSize(e);
-        const isArrow = getShouldShowArrowhead(e);
-        const path = directed ? 'curved' : 'straight';
-        const curvature = directed ? 0.3 : 0;
-
-        if (!edgeKey) {
-          try {
-            const newKey = graph.addEdge(e.source, e.target, {
-              ...e,
-              size,
-              color,
-              opacity,
-              path,
-              curvature,
-              head: isArrow ? 'arrow' : 'none',
-              rawEdge: e,
-            });
-            targetEdgeKeys.add(newKey);
-          } catch {
-            // Ignore parallel edge conflicts
-          }
-        } else {
-          targetEdgeKeys.add(edgeKey);
-          graph.mergeEdgeAttributes(edgeKey, {
-            ...e,
-            size,
-            color,
-            opacity,
-            path,
-            curvature,
-            head: isArrow ? 'arrow' : 'none',
-            rawEdge: e,
-          });
+    setPositioningError(null);
+    if (hasUnpositionedNode) {
+      setReadyTopologyKey(null);
+      // Rendering is independent from computation routing. Every unpositioned
+      // graph starts from MiNE's familiar local D3-force layout; Cloud layouts
+      // replace it only after the user explicitly applies one.
+      applyD3StaticLayout(graph);
+    } else {
+      setPositionSource((current) => current === 'cloud-static' ? current : 'imported');
+      const timeout = setTimeout(() => {
+        setReadyTopologyKey(topologyKey);
+        if (committedTopologyRef.current !== topologyKey) {
+          committedTopologyRef.current = topologyKey;
+          setStaticLayoutRevision((revision) => revision + 1);
         }
-      }
-    });
-
-    existingEdges.forEach((key) => {
-      if (!targetEdgeKeys.has(key) && graph.hasEdge(key)) {
-        graph.dropEdge(key);
-      }
-    });
-
-    // New/unpositioned topology gets one static layout. Explicit refreshes use
-    // runRefreshLayout below and must not leave a persistent layout trigger.
-    if (needsLayout) {
-      applyD3StaticLayout(graph);
+      }, 0);
+      return () => clearTimeout(timeout);
     }
+  }, [graph, nodes, edges, directed, bipartite, isDarkMode, getNodeColor, getNodeSize, getEdgeColor, getEdgeSize, getEdgeOpacity, getShouldShowArrowhead, nodeOpacity, applyD3StaticLayout, topologyKey]);
 
-    // Schedule readiness notification to avoid cascading render in current tick
-    const timeout = setTimeout(() => setReadyTopologyKey(topologyKey), 0);
-    return () => clearTimeout(timeout);
-  }, [
-    graph,
-    nodes,
-    edges,
-    directed,
-    bipartite,
-    isDarkMode,
-    getNodeColor,
-    getNodeSize,
-    getEdgeColor,
-    getEdgeSize,
-    getEdgeOpacity,
-    getShouldShowArrowhead,
-    nodeOpacity,
-    applyD3StaticLayout,
-    topologyKey,
-  ]);
-
-  // Static graphs still respond to repulsion changes. Debouncing avoids
-  // repeatedly running the offline force solver while a live slider is being
-  // dragged. When Live Update is off, `forceStrength` does not change here
-  // until Apply Changes copies the pending filters into appliedFilters.
   useEffect(() => {
-    if (!graph || !isReady) return;
-
+    if (!isReady) return;
     const repulsion = typeof forceStrength === 'number' ? forceStrength : -100;
-    if (livePhysics) {
-      lastStaticForceStrengthRef.current = repulsion;
-      return;
-    }
-    if (lastStaticForceStrengthRef.current === null) {
-      lastStaticForceStrengthRef.current = repulsion;
-      return;
-    }
+    if (livePhysics) { lastStaticForceStrengthRef.current = repulsion; return; }
+    if (lastStaticForceStrengthRef.current === null) { lastStaticForceStrengthRef.current = repulsion; return; }
     if (lastStaticForceStrengthRef.current === repulsion) return;
-
-    const timer = setTimeout(() => {
-      applyD3StaticLayout(graph);
-      lastStaticForceStrengthRef.current = repulsion;
-    }, 180);
+    const timer = setTimeout(() => { applyD3StaticLayout(graph); lastStaticForceStrengthRef.current = repulsion; }, 180);
     return () => clearTimeout(timer);
   }, [graph, isReady, livePhysics, forceStrength, applyD3StaticLayout]);
 
   const runRefreshLayout = useCallback(() => {
-    if (graph) {
-      applyD3StaticLayout(graph);
-    }
-  }, [graph, applyD3StaticLayout]);
+    setReadyTopologyKey(null);
+    applyD3StaticLayout(graph);
+  }, [applyD3StaticLayout, graph]);
 
-  const notifyLayoutChange = useCallback(() => setLayoutRevision((revision) => revision + 1), []);
+  const notifyLayoutChange = useCallback(() => { setPositionSource('local-live'); setLayoutRevision((revision) => revision + 1); }, []);
 
   return {
-    graph,
-    isReady,
-    layoutRevision,
-    runRefreshLayout,
-    notifyLayoutChange,
+    graph, isReady, layoutRevision, staticLayoutRevision, topologyKey, positionSource,
+    positioningError, cloudRouted, runRefreshLayout, notifyLayoutChange, applyExternalPositions,
   };
 }

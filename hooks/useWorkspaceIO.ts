@@ -16,6 +16,9 @@ import {
   type WorkspaceSettingsDocument,
 } from '@/lib/graphIO';
 import { useStore, type RawEdge, type RawNode, type WorkspaceFilters } from '@/store/useStore';
+import { ENGINE_POLICY_VERSION, effectiveComputationEngine, effectiveRenderer } from '@/services/engines/policy';
+import { migrateComputationPreference, migrateRendererPreference, migrateWorkspaceFilters } from '@/services/graphIO/migrations';
+import { weightChannelMetadata } from '@/services/attributes/weights';
 
 interface WorkspaceIOOptions {
   graph: Graph;
@@ -25,7 +28,6 @@ interface WorkspaceIOOptions {
   bipartite: boolean;
   isDarkMode: boolean;
   projectName: string;
-  rendererEngine: 'auto' | 'd3' | 'sigma';
   useSigma: boolean;
   sigmaRendererRef: RefObject<Sigma | null>;
   communityMap: Record<string, string>;
@@ -48,11 +50,15 @@ export function useWorkspaceIO(options: WorkspaceIOOptions) {
       format: 'workspace-settings',
       version: 1,
       projectName: options.projectName,
-      rendererEngine: options.rendererEngine,
+      computeEngine: state.computeEngine,
+      rendererEngine: state.rendererEngine,
+      enginePolicyVersion: ENGINE_POLICY_VERSION,
+      effectiveEngine: effectiveComputationEngine(options.rawNodes.length, options.rawEdges.length, state.computeEngine),
+      effectiveRenderer: effectiveRenderer(state.rendererEngine, effectiveComputationEngine(options.rawNodes.length, options.rawEdges.length, state.computeEngine)),
       graphMode: {
         directed: options.directed,
         bipartite: options.bipartite,
-        weighted: options.rawEdges.some((edge) => Number(edge.weight_raw) !== 1 || Number(edge.weight_secondary) !== 1),
+        weighted: options.rawEdges.some((edge) => Number(edge.weight_raw) !== 1 || (edge.weight_secondary !== undefined && Number(edge.weight_secondary) !== 1)),
       },
       filters: state.filters,
       appearance: {
@@ -62,6 +68,7 @@ export function useWorkspaceIO(options: WorkspaceIOOptions) {
         communityMap: options.communityMap,
         customAttributes: state.customAttributes,
         legendColorOverrides: state.legendColorOverrides,
+        isLegendMinimized: state.isLegendMinimized,
       },
       visibility: {
         hiddenLegendItems: state.hiddenLegendItems,
@@ -99,13 +106,19 @@ export function useWorkspaceIO(options: WorkspaceIOOptions) {
           visibility: {},
           calculations: { selected: {} },
         };
-        const nextFilters = { ...useStore.getState().filters, ...(settings.filters || {}) };
+        const nextFilters = {
+          ...useStore.getState().filters,
+          ...(settings.filters || {}),
+          edgeFilter: migrateWorkspaceFilters(settings.filters, options.rawEdges),
+          weightFilters: undefined,
+        };
         useStore.setState({
           projectName: settings.projectName || options.projectName,
           directed: settings.graphMode?.directed ?? options.directed,
           bipartite: settings.graphMode?.bipartite ?? options.bipartite,
           isDarkMode: settings.appearance?.isDarkMode ?? useStore.getState().isDarkMode,
-          rendererEngine: settings.rendererEngine || 'auto',
+          computeEngine: migrateComputationPreference(settings, options.rawNodes.length, options.rawEdges.length),
+          rendererEngine: migrateRendererPreference(settings),
           filters: nextFilters,
           communityMap: settings.appearance?.communityMap || {},
           customAttributes: mergeCustomAttributeMetadata(
@@ -118,6 +131,7 @@ export function useWorkspaceIO(options: WorkspaceIOOptions) {
           hiddenLegendItems: settings.visibility?.hiddenLegendItems || [],
           isolatedLegendItem: settings.visibility?.isolatedLegendItem || null,
           isolatedCommunityId: settings.visibility?.isolatedCommunityId || null,
+          isLegendMinimized: settings.appearance?.isLegendMinimized ?? false,
         });
         options.setAppliedFilters(nextFilters);
         options.setMetricsToRun((current) => ({ ...current, ...(settings.calculations?.selected || {}) }));
@@ -177,7 +191,7 @@ export function useWorkspaceIO(options: WorkspaceIOOptions) {
       options.nodeMetrics,
       options.edgeMetrics,
       options.graphMetrics,
-      { selectedMetrics: options.metricsToRun, validity: options.metricValidity },
+      { selectedMetrics: options.metricsToRun, validity: options.metricValidity, attributeDescriptors: useStore.getState().customAttributes },
     );
     const exportGraph = canonicalExportGraph(
       options.graph,

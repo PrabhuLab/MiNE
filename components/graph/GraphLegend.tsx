@@ -61,7 +61,10 @@ export default function GraphLegend({
 }: GraphLegendProps) {
   const clickTimers = useRef<{ [key: string]: NodeJS.Timeout }>({});
   const [editingColorId, setEditingColorId] = useState<string | null>(null);
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set());
   const setLegendColor = useStore((state) => state.setLegendColor);
+  const metricScales = legendMetricScales.length ? legendMetricScales : legendMetricScale ? [legendMetricScale] : [];
+  const visualScalesSection = 'Visual Scales';
   useEffect(() => () => Object.values(clickTimers.current).forEach(clearTimeout), []);
 
   const handleElementItemClick = (e: React.MouseEvent, item: ElementLegendItem) => {
@@ -157,7 +160,7 @@ export default function GraphLegend({
 
       {!isLegendMinimized && (
         <div
-          className={`p-3 pt-2 text-[10px] space-y-3 ${
+          className={`mine-scroll-container max-h-[70vh] p-3 pt-2 text-[10px] space-y-3 ${
             isDarkMode ? 'border-[#333]' : 'border-[#d0d0d0]'
           } border-t`}
         >
@@ -173,7 +176,7 @@ export default function GraphLegend({
                 return (
                   <div
                     key={item.id}
-                    className={`flex items-center space-x-2 cursor-pointer p-1 -mx-1 rounded-sm transition-all ${
+                    className={`group flex items-center space-x-2 cursor-pointer p-1 -mx-1 rounded-sm transition-all ${
                       isIsolated
                         ? 'bg-[#b4ff39]/20 font-bold border border-[#b4ff39]'
                         : isHidden
@@ -187,6 +190,14 @@ export default function GraphLegend({
                   >
                     <item.Icon />
                     <span>{item.label}</span>
+                    {item.colorKey && item.color ? <input
+                      aria-label={`Change ${item.label} color`}
+                      type="color"
+                      value={useStore.getState().legendColorOverrides[item.colorKey] || item.color}
+                      onClick={(event) => event.stopPropagation()}
+                      onInput={(event) => setLegendColor(item.colorKey!, event.currentTarget.value)}
+                      className="ml-auto h-4 w-4 cursor-pointer border-0 p-0 opacity-0 transition-opacity group-hover:opacity-100"
+                    /> : null}
                   </div>
                 );
               })}
@@ -279,39 +290,25 @@ export default function GraphLegend({
             </div>
           </div>
 
-          {/* Continuous Metric Scale Legend */}
-          {(legendMetricScales.length ? legendMetricScales : legendMetricScale ? [legendMetricScale] : []).map((metricScale) => (
-            <div className="group/scale pt-1" key={`${metricScale.visual || 'color'}:${metricScale.title}`}>
-              <div className="flex items-center justify-between opacity-50 uppercase font-bold mb-1.5">
-                <span>{metricScale.title}</span>
-                {metricScale.colorKeys && metricScale.colors ? <div className="flex gap-1 opacity-0 transition-opacity group-hover/scale:opacity-100">
-                  <input aria-label={`${metricScale.title} minimum color`} type="color" value={metricScale.colors.min} onClick={(event) => event.stopPropagation()} onInput={(event) => setLegendColor(metricScale.colorKeys!.min, event.currentTarget.value)} className="h-4 w-4 cursor-pointer border-0 p-0" />
-                  <input aria-label={`${metricScale.title} maximum color`} type="color" value={metricScale.colors.max} onClick={(event) => event.stopPropagation()} onInput={(event) => setLegendColor(metricScale.colorKeys!.max, event.currentTarget.value)} className="h-4 w-4 cursor-pointer border-0 p-0" />
-                </div> : null}
-              </div>
-              {metricScale.description ? <div className="mb-1.5 text-[9px] font-mono opacity-65">{metricScale.description}</div> : null}
-              {(metricScale.visual || 'color') === 'color' ? (
-                metricScale.scale ? <div className="w-full h-3 rounded-sm border border-black/10 dark:border-white/20 mb-1" style={{ background: gradientCss(metricScale) }} /> : null
-              ) : metricScale.visual === 'size' ? (
-                <div className="mb-1 flex h-7 items-end justify-between px-1" aria-label={`${metricScale.title} size scale`}>
-                  {[7, 13, 20].map((diameter) => <span key={diameter} className="inline-block rounded-full border border-current bg-current/20" style={{ width: diameter, height: diameter }} />)}
-                </div>
-              ) : (
-                <div className="mb-1 flex h-7 flex-col justify-between py-1" aria-label={`${metricScale.title} width scale`}>
-                  {[1, 3, 6].map((width) => <span key={width} className="block w-full bg-current" style={{ height: width }} />)}
-                </div>
-              )}
-              {metricScale.ticks.length ? <div className="flex justify-between text-[9px] font-mono opacity-80">
-                <span>{metricScale.ticks[0]?.toFixed(2)}</span><span>{metricScale.ticks[1]?.toFixed(2)}</span><span>{metricScale.ticks[2]?.toFixed(2)}</span>
-              </div> : null}
-            </div>
-          ))}
           {legendCategories.map((category) => (
             <div key={category.title}>
-              <div className="opacity-50 uppercase font-bold mb-1 flex items-center justify-between">
+              <button
+                type="button"
+                className="mb-1 flex w-full items-center justify-between text-left font-bold uppercase opacity-50 hover:opacity-80"
+                aria-expanded={!collapsedSections.has(category.title)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setCollapsedSections((current) => {
+                    const next = new Set(current);
+                    if (next.has(category.title)) next.delete(category.title); else next.add(category.title);
+                    return next;
+                  });
+                }}
+              >
                 <span>{category.title}</span>
-              </div>
-              <div className="space-y-1 max-h-[160px] overflow-y-auto pr-1">
+                {collapsedSections.has(category.title) ? <ChevronDown size={12} /> : <ChevronUp size={12} />}
+              </button>
+              {!collapsedSections.has(category.title) && <div className="mine-scroll-container max-h-[160px] space-y-1 pr-1">
                 {category.items.map((item, i) => {
                   const isIsolated = isolatedCommunityId === item.id || isolatedLegendItem === item.id;
                   const isHidden = hiddenItems.has(item.id);
@@ -356,9 +353,55 @@ export default function GraphLegend({
                     </div>
                   );
                 })}
-              </div>
+              </div>}
             </div>
           ))}
+          {metricScales.length > 0 && <div>
+            <button
+              type="button"
+              className="mb-1 flex w-full items-center justify-between text-left font-bold uppercase opacity-50 hover:opacity-80"
+              aria-expanded={!collapsedSections.has(visualScalesSection)}
+              onClick={(event) => {
+                event.stopPropagation();
+                setCollapsedSections((current) => {
+                  const next = new Set(current);
+                  if (next.has(visualScalesSection)) next.delete(visualScalesSection); else next.add(visualScalesSection);
+                  return next;
+                });
+              }}
+            >
+              <span>{visualScalesSection}</span>
+              {collapsedSections.has(visualScalesSection) ? <ChevronDown size={12} /> : <ChevronUp size={12} />}
+            </button>
+            {!collapsedSections.has(visualScalesSection) && <div className="space-y-3">
+              {metricScales.map((metricScale) => (
+                <div className="group/scale pt-1" key={`${metricScale.visual || 'color'}:${metricScale.title}`}>
+                  <div className="flex items-center justify-between opacity-50 uppercase font-bold mb-1.5">
+                    <span>{metricScale.title}</span>
+                    {metricScale.colorKeys && metricScale.colors ? <div className="flex gap-1 opacity-0 transition-opacity group-hover/scale:opacity-100">
+                      <input aria-label={`${metricScale.title} minimum color`} type="color" value={metricScale.colors.min} onClick={(event) => event.stopPropagation()} onInput={(event) => setLegendColor(metricScale.colorKeys!.min, event.currentTarget.value)} className="h-4 w-4 cursor-pointer border-0 p-0" />
+                      <input aria-label={`${metricScale.title} maximum color`} type="color" value={metricScale.colors.max} onClick={(event) => event.stopPropagation()} onInput={(event) => setLegendColor(metricScale.colorKeys!.max, event.currentTarget.value)} className="h-4 w-4 cursor-pointer border-0 p-0" />
+                    </div> : null}
+                  </div>
+                  {metricScale.description ? <div className="mb-1.5 text-[9px] font-mono opacity-65">{metricScale.description}</div> : null}
+                  {(metricScale.visual || 'color') === 'color' ? (
+                    metricScale.scale ? <div className="w-full h-3 rounded-sm border border-black/10 dark:border-white/20 mb-1" style={{ background: gradientCss(metricScale) }} /> : null
+                  ) : metricScale.visual === 'size' ? (
+                    <div className="mb-1 flex h-7 items-end justify-between px-1" aria-label={`${metricScale.title} size scale`}>
+                      {[7, 13, 20].map((diameter) => <span key={diameter} className="inline-block rounded-full border border-current bg-current/20" style={{ width: diameter, height: diameter }} />)}
+                    </div>
+                  ) : (
+                    <div className="mb-1 flex h-7 flex-col justify-between py-1" aria-label={`${metricScale.title} width scale`}>
+                      {[1, 3, 6].map((width) => <span key={width} className="block w-full bg-current" style={{ height: width }} />)}
+                    </div>
+                  )}
+                  {metricScale.ticks.length ? <div className="flex justify-between text-[9px] font-mono opacity-80">
+                    <span>{metricScale.ticks[0]?.toFixed(2)}</span><span>{metricScale.ticks[1]?.toFixed(2)}</span><span>{metricScale.ticks[2]?.toFixed(2)}</span>
+                  </div> : null}
+                </div>
+              ))}
+            </div>}
+          </div>}
         </div>
       )}
     </div>

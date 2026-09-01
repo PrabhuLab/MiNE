@@ -16,7 +16,7 @@ export function useGraphFilters() {
   }, [filters]);
 
   const removedNodesStr = appliedFilters.removedNodes || '';
-  const weightFiltersStr = JSON.stringify(appliedFilters.weightFilters || []);
+  const edgeFilterStr = JSON.stringify(appliedFilters.edgeFilter);
 
   useEffect(() => {
     const computed = computeActiveNetwork(rawNodes, rawEdges, appliedFilters);
@@ -39,20 +39,19 @@ export function useGraphFilters() {
       }
       return computed;
     });
-  }, [rawNodes, rawEdges, removedNodesStr, weightFiltersStr, appliedFilters]);
+  }, [rawNodes, rawEdges, removedNodesStr, edgeFilterStr, appliedFilters]);
 
   // Sync missing variables fallback logic (the one with useEffect)
   const hasType = rawNodes.some(n => n.type !== undefined);
-  const hasAbundance = rawNodes.some(n => n.abundance !== undefined);
   const hasSecondaryWeight = rawEdges.some(e => e.weight_secondary !== undefined);
 
   useEffect(() => {
     if (!hasType && filters.nodeColorBase === 'type') setFilter('nodeColorBase', 'community');
-    if (!hasAbundance && filters.nodeSizeBase === 'abundance') setFilter('nodeSizeBase', 'degree');
+    if (filters.nodeSizeBase === 'abundance') setFilter('nodeSizeBase', 'degree');
     if (!hasSecondaryWeight && filters.edgeColorBase === 'weight_secondary') setFilter('edgeColorBase', 'uniform');
     if (!hasSecondaryWeight && filters.edgeWeightBase === 'weight_secondary') setFilter('edgeWeightBase', 'weight_raw');
-    if (!hasSecondaryWeight && filters.edgeOpacityBase === 'weight_secondary') setFilter('edgeOpacityBase', 'uniform');
-  }, [hasType, hasAbundance, hasSecondaryWeight, filters.nodeColorBase, filters.nodeSizeBase, filters.edgeColorBase, filters.edgeWeightBase, filters.edgeOpacityBase, setFilter]);
+    if (!hasSecondaryWeight && filters.edgeFilter?.attribute === 'weight_secondary') setFilter('edgeFilter', null);
+  }, [hasType, hasSecondaryWeight, filters.nodeColorBase, filters.nodeSizeBase, filters.edgeColorBase, filters.edgeWeightBase, filters.edgeFilter, setFilter]);
 
   return {
     rawNodes,
@@ -63,8 +62,5 @@ export function useGraphFilters() {
     setAppliedFilters,
     validNodes: network.validNodes,
     validEdges: network.validEdges,
-    hasType,
-    hasAbundance,
-    hasSecondaryWeight
   };
 }

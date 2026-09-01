@@ -1,6 +1,8 @@
 import type Graph from 'graphology';
 import type { SerializedGraph } from 'graphology-types';
 import type { CustomAttributeMetadata, ImportedMetricsBundle, WorkspaceFilters } from '@/store/useStore';
+import type { ComputeEngine } from '@/services/cloud/config';
+import type { ComputationEngine, Renderer, RendererPreference } from '@/services/engines/policy';
 
 export const NETWORK_WORKSPACE_FORMAT = 'network-workspace' as const;
 export const WORKSPACE_SETTINGS_FORMAT = 'workspace-settings' as const;
@@ -10,7 +12,11 @@ export interface WorkspaceSettingsDocument {
   format: typeof WORKSPACE_SETTINGS_FORMAT;
   version: typeof GRAPH_IO_VERSION;
   projectName: string;
-  rendererEngine: 'auto' | 'd3' | 'sigma';
+  rendererEngine?: RendererPreference;
+  computeEngine?: ComputeEngine;
+  enginePolicyVersion?: number;
+  effectiveEngine?: ComputationEngine;
+  effectiveRenderer?: Renderer;
   graphMode: { directed: boolean; bipartite: boolean; weighted: boolean };
   filters: WorkspaceFilters;
   appearance: {
@@ -20,6 +26,7 @@ export interface WorkspaceSettingsDocument {
     communityMap: Record<string, string>;
     customAttributes?: CustomAttributeMetadata[];
     legendColorOverrides?: Record<string, string>;
+    isLegendMinimized?: boolean;
   };
   visibility: {
     hiddenLegendItems: string[];

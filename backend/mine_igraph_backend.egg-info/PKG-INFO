@@ -1,0 +1,12 @@
+Metadata-Version: 2.4
+Name: mine-igraph-backend
+Version: 0.1.0
+Requires-Python: <3.13,>=3.12
+Requires-Dist: fastapi==0.116.1
+Requires-Dist: igraph==0.11.9
+Requires-Dist: orjson==3.11.1
+Requires-Dist: pydantic-settings==2.10.1
+Requires-Dist: uvicorn==0.35.0
+Provides-Extra: test
+Requires-Dist: httpx==0.28.1; extra == "test"
+Requires-Dist: pytest==8.4.1; extra == "test"

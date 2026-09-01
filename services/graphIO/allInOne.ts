@@ -15,12 +15,12 @@ export function createRandomClusterAllInOne(
   graph.forEachNode((node, attributes) => graph.mergeNodeAttributes(node, {
     label: `Node ${node}`,
     name: `Node ${node}`,
-    abundance: 10,
     community: attributes.cluster,
   }));
-  graph.forEachEdge((edge) => graph.mergeEdgeAttributes(edge, { weight: 1, weight_raw: 1, weight_secondary: 1 }));
+  graph.forEachEdge((edge) => graph.mergeEdgeAttributes(edge, { weight: 1, weight_raw: 1 }));
   graph.setAttribute('directed', false);
   graph.setAttribute('bipartite', false);
   graph.setAttribute('weighted', false);
+  graph.setAttribute('weightChannels', { primary: true, secondary: false });
   return buildAllInOne(graph, { ...EMPTY_METRICS }, { ...workspace, graphMode: { directed: false, bipartite: false, weighted: false } });
 }

@@ -1,4 +1,8 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
+import type { ComputeEnginePreference } from '@/services/cloud/config';
+import { mergeComputeEnginePreference, persistedComputeEnginePreference } from '@/services/cloud/preference';
+import type { RendererPreference } from '@/services/engines/policy';
 
 export interface RawNode {
   id: string;
@@ -8,7 +12,7 @@ export interface RawNode {
   group?: string | number;
   bipartite?: number | string;
   community?: string | number;
-  abundance: number;
+  abundance?: number;
   x?: number;
   y?: number;
   partition?: string | number;
@@ -19,7 +23,7 @@ export interface RawEdge {
   source: string;
   target: string;
   weight_raw: number;
-  weight_secondary: number;
+  weight_secondary?: number;
   [key: string]: any;
 }
 
@@ -27,7 +31,9 @@ export type CustomAttributeType = 'binary' | 'discrete' | 'continuous' | 'nomina
 
 export interface CustomAttributeMetadata {
   name: string;
+  label?: string;
   scope: 'node' | 'edge';
+  origin?: 'topology' | 'uploaded' | 'metric' | 'community';
   detectedType: CustomAttributeType;
   selectedType: CustomAttributeType;
   source?: string;
@@ -38,6 +44,8 @@ export interface CustomAttributeMetadata {
   combine?: boolean;
   drivesCommunity?: boolean;
   ordinalOrder?: string[];
+  presentCount?: number;
+  resultOf?: string;
 }
 
 export interface ImportedMetricsBundle {
@@ -53,8 +61,16 @@ export interface WeightFilter {
   cutoff: number;
 }
 
+export interface EdgeFilter {
+  attribute: string;
+  min: number;
+  max: number;
+}
+
 export interface WorkspaceFilters {
-  weightFilters: WeightFilter[];
+  edgeFilter: EdgeFilter | null;
+  /** @deprecated Read only during legacy workspace migration. */
+  weightFilters?: WeightFilter[];
   searchEdges: boolean;
   removedNodes: string;
   resolution: number;
@@ -79,6 +95,7 @@ export interface WorkspaceFilters {
   livePhysics: boolean;
   customAttributeScope: 'node' | 'edge';
   customNodeAttribute: string;
+  customNodeSizeAttribute: string;
   customEdgeAttribute: string;
   communityAttribute: string;
 }
@@ -90,11 +107,14 @@ interface AppState {
   bipartite: boolean;
   rawNodes: RawNode[];
   rawEdges: RawEdge[];
+  graphGeneration: number;
   setRawData: (nodes: RawNode[], edges: RawEdge[], directed?: boolean, bipartite?: boolean) => void;
   customAttributes: CustomAttributeMetadata[];
   setCustomAttributes: (attributes: CustomAttributeMetadata[]) => void;
   importedMetrics: ImportedMetricsBundle | null;
   setImportedMetrics: (metrics: ImportedMetricsBundle | null) => void;
+  restoredVisualization: boolean;
+  setRestoredVisualization: (restored: boolean) => void;
 
   filters: WorkspaceFilters;
   setFilter: <K extends keyof WorkspaceFilters>(key: K, value: WorkspaceFilters[K]) => void;
@@ -117,14 +137,18 @@ interface AppState {
   setHiddenLegendItems: (val: string[]) => void;
   isolatedLegendItem: string | null;
   setIsolatedLegendItem: (val: string | null) => void;
+  isLegendMinimized: boolean;
+  setIsLegendMinimized: (val: boolean) => void;
   searchQuery: string;
   setSearchQuery: (val: string) => void;
   showArrowheads: boolean;
   setShowArrowheads: (val: boolean) => void;
   showNodeLabels: boolean;
   setShowNodeLabels: (val: boolean) => void;
-  rendererEngine: 'auto' | 'd3' | 'sigma';
-  setRendererEngine: (engine: 'auto' | 'd3' | 'sigma') => void;
+  rendererEngine: RendererPreference;
+  setRendererEngine: (engine: RendererPreference) => void;
+  computeEngine: ComputeEnginePreference;
+  setComputeEngine: (engine: ComputeEnginePreference) => void;
   isRendererSwitching: boolean;
   setIsRendererSwitching: (val: boolean) => void;
   projectName: string;
@@ -132,11 +156,13 @@ interface AppState {
   clearStore: () => void;
 }
 
-export const useStore = create<AppState>((set) => ({
+export const useStore = create<AppState>()(persist<AppState, [], [], { computeEngine: ComputeEnginePreference; rendererEngine: RendererPreference }>((set) => ({
   isDarkMode: false,
   setIsDarkMode: (val) => set({ isDarkMode: val }),
   rendererEngine: 'auto',
   setRendererEngine: (val) => set({ rendererEngine: val }),
+  computeEngine: 'browser',
+  setComputeEngine: (val) => set({ computeEngine: val }),
   isRendererSwitching: false,
   setIsRendererSwitching: (val) => set({ isRendererSwitching: val }),
   projectName: 'NEW_PROJECT_NAME',
@@ -145,11 +171,14 @@ export const useStore = create<AppState>((set) => ({
   bipartite: false,
   rawNodes: [],
   rawEdges: [],
-  setRawData: (nodes, edges, directed = false, bipartite = false) => set({ rawNodes: nodes, rawEdges: edges, directed, bipartite }),
+  graphGeneration: 0,
+  setRawData: (nodes, edges, directed = false, bipartite = false) => set((state) => ({ rawNodes: nodes, rawEdges: edges, directed, bipartite, graphGeneration: state.graphGeneration + 1 })),
   customAttributes: [],
   setCustomAttributes: (customAttributes) => set({ customAttributes }),
   importedMetrics: null,
   setImportedMetrics: (importedMetrics) => set({ importedMetrics }),
+  restoredVisualization: false,
+  setRestoredVisualization: (restoredVisualization) => set({ restoredVisualization }),
 
   selectedElement: null,
   setSelectedElement: (val) => set({ selectedElement: val }),
@@ -164,6 +193,8 @@ export const useStore = create<AppState>((set) => ({
   setHiddenLegendItems: (val) => set({ hiddenLegendItems: val }),
   isolatedLegendItem: null,
   setIsolatedLegendItem: (val) => set({ isolatedLegendItem: val }),
+  isLegendMinimized: false,
+  setIsLegendMinimized: (val) => set({ isLegendMinimized: val }),
   searchQuery: '',
   setSearchQuery: (val) => set({ searchQuery: val }),
   showArrowheads: false,
@@ -172,21 +203,21 @@ export const useStore = create<AppState>((set) => ({
   setShowNodeLabels: (val) => set({ showNodeLabels: val }),
 
   filters: {
-    weightFilters: [],
+    edgeFilter: null,
     searchEdges: false,
     removedNodes: "",
     resolution: 1.0,
     nodeSize: 3,
     bipartiteNodeSize: 2,
-    nodeSizeBase: 'abundance',
-    nodeColorBase: 'louvain',
+    nodeSizeBase: 'degree',
+    nodeColorBase: 'uniform',
     uniformNodeColor: '#cccccc',
     uniformEdgeColor: '#888888',
     nodeOpacity: 1.0,
     edgeWeight: 1.0,
     edgeWeightBase: 'weight_raw',
-    edgeColorBase: 'nodeMetric',
-    edgeColorNodeMetric: 'louvain',
+    edgeColorBase: 'uniform',
+    edgeColorNodeMetric: '',
     edgeColorNodeTarget: 'source',
     edgeOpacity: 0.3,
     edgeOpacityBase: 'uniform',
@@ -197,6 +228,7 @@ export const useStore = create<AppState>((set) => ({
     livePhysics: false,
     customAttributeScope: 'node',
     customNodeAttribute: '',
+    customNodeSizeAttribute: '',
     customEdgeAttribute: '',
     communityAttribute: '',
   },
@@ -210,7 +242,8 @@ export const useStore = create<AppState>((set) => ({
     legendColorOverrides: { ...state.legendColorOverrides, [key]: color },
   })),
   
-  clearStore: () => set({
+  clearStore: () => set((state) => ({
+    graphGeneration: state.graphGeneration + 1,
     projectName: 'NEW_PROJECT_NAME',
     directed: false,
     bipartite: false,
@@ -218,6 +251,7 @@ export const useStore = create<AppState>((set) => ({
     rawEdges: [],
     customAttributes: [],
     importedMetrics: null,
+    restoredVisualization: false,
     communityMap: {},
     legendColorOverrides: {},
     selectedElement: null,
@@ -226,24 +260,25 @@ export const useStore = create<AppState>((set) => ({
     hoveredCommunityId: null,
     hiddenLegendItems: [],
     isolatedLegendItem: null,
+    isLegendMinimized: false,
     showArrowheads: false,
     showNodeLabels: false,
     filters: {
-      weightFilters: [],
+      edgeFilter: null,
       searchEdges: false,
       removedNodes: "",
       resolution: 1.0,
       nodeSize: 3,
       bipartiteNodeSize: 2,
-      nodeSizeBase: 'abundance',
-      nodeColorBase: 'louvain',
+      nodeSizeBase: 'degree',
+      nodeColorBase: 'uniform',
       uniformNodeColor: '#cccccc',
       uniformEdgeColor: '#888888',
       nodeOpacity: 1.0,
       edgeWeight: 1.0,
       edgeWeightBase: 'weight_raw',
-      edgeColorBase: 'nodeMetric',
-      edgeColorNodeMetric: 'louvain',
+      edgeColorBase: 'uniform',
+      edgeColorNodeMetric: '',
       edgeColorNodeTarget: 'source',
       edgeOpacity: 0.3,
       edgeOpacityBase: 'uniform',
@@ -254,8 +289,14 @@ export const useStore = create<AppState>((set) => ({
       livePhysics: false,
       customAttributeScope: 'node',
       customNodeAttribute: '',
+      customNodeSizeAttribute: '',
       customEdgeAttribute: '',
       communityAttribute: '',
     }
-  })
+  }))
+}), {
+  name: 'mine-ui-preferences-v1',
+  partialize: persistedComputeEnginePreference,
+  merge: mergeComputeEnginePreference,
+  skipHydration: true,
 }));

@@ -1,16 +1,17 @@
-/* eslint-disable react-hooks/set-state-in-effect */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { liveNumericValue } from '@/services/graphStyles/liveUpdate';
 
-export const SyncInput = ({ value, onChange, step, className }: any) => {
+export const SyncInput = ({ value, onChange, step, className, live = false }: any) => {
   const [localVal, setLocalVal] = useState(value);
+  const editingRef = useRef(false);
 
   useEffect(() => {
-    setLocalVal(value);
+    if (!editingRef.current) setLocalVal(value);
   }, [value]);
 
   const commit = () => {
     const num = Number(localVal);
-    if (!isNaN(num) && num !== value) {
+    if (!isNaN(num) && (live || num !== value)) {
       onChange(num);
     }
   };
@@ -20,8 +21,14 @@ export const SyncInput = ({ value, onChange, step, className }: any) => {
       type="number"
       className={`text-inherit ${className}`}
       value={localVal ?? ''}
-      onChange={e => setLocalVal(e.target.value)}
-      onBlur={commit}
+      onChange={e => {
+        const next = e.target.value;
+        setLocalVal(next);
+        const numeric = liveNumericValue(next, live);
+        if (numeric !== undefined) onChange(numeric);
+      }}
+      onFocus={() => { editingRef.current = true; }}
+      onBlur={() => { commit(); editingRef.current = false; }}
       onKeyDown={e => {
         if (e.key === 'Enter') {
           commit();
@@ -35,13 +42,14 @@ export const SyncInput = ({ value, onChange, step, className }: any) => {
 
 export const SyncTextInput = ({ value, onChange, className, placeholder, list, options, live = false }: any) => {
   const [localVal, setLocalVal] = useState(value);
+  const editingRef = useRef(false);
 
   useEffect(() => {
-    setLocalVal(value);
+    if (!editingRef.current) setLocalVal(value);
   }, [value]);
 
   const commit = () => {
-    if (localVal !== value) {
+    if (live || localVal !== value) {
       onChange(localVal);
     }
   };
@@ -61,7 +69,8 @@ export const SyncTextInput = ({ value, onChange, className, placeholder, list, o
           setLocalVal(e.target.value);
           if (live) onChange(e.target.value);
         }}
-        onBlur={commit}
+        onFocus={() => { editingRef.current = true; }}
+        onBlur={() => { commit(); editingRef.current = false; }}
         onKeyDown={e => {
           if (e.key === 'Enter') {
             commit();

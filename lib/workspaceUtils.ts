@@ -1,5 +1,5 @@
 import type Graph from 'graphology';
-import modularityMetric from 'graphology-metrics/graph/modularity';
+import modularityMetric from 'graphology-metrics/graph/modularity.js';
 
 export function computeMaxRelWeight(rawEdges: any[]): number {
   if (!rawEdges || rawEdges.length === 0) return 100;
@@ -30,55 +30,18 @@ export function computeActiveNetwork(rawNodes: any[], rawEdges: any[], appliedFi
       .filter(Boolean)
   );
 
-  const degreeByNode = new Map<string, { degree: number; inDegree: number; outDegree: number }>();
-  const ensureDegree = (id: unknown) => {
-    const key = String(id);
-    if (!degreeByNode.has(key)) degreeByNode.set(key, { degree: 0, inDegree: 0, outDegree: 0 });
-    return degreeByNode.get(key)!;
-  };
-  (rawNodes || []).forEach((node) => ensureDegree(node.id));
-  (rawEdges || []).forEach((edge) => {
-    const source = ensureDegree(edge.source);
-    const target = ensureDegree(edge.target);
-    source.degree += 1;
-    source.outDegree += 1;
-    target.degree += 1;
-    target.inDegree += 1;
-  });
-
-  const nodeFilters = (appliedFilters.weightFilters || []).filter((filter: any) => String(filter.type).startsWith('node:'));
-  const edgeFilters = (appliedFilters.weightFilters || []).filter((filter: any) => !String(filter.type).startsWith('node:'));
-  const customNodeAttribute = appliedFilters.customNodeAttribute;
-  const nodeFilterValue = (node: any, type: string) => {
-    const metric = type.slice('node:'.length);
-    const degrees = degreeByNode.get(String(node.id));
-    if (metric === 'custom') return customNodeAttribute ? node[customNodeAttribute] : undefined;
-    if (metric === 'degree') return degrees?.degree;
-    if (metric === 'inDegree') return degrees?.inDegree;
-    if (metric === 'outDegree') return degrees?.outDegree;
-    return node[metric];
-  };
-
   const eligibleNodes = (rawNodes || []).filter(n => {
     const nodeIdStr = String(n.id);
-    if (removedSet.has(nodeIdStr)) return false;
-    return nodeFilters.every((filter: any) => {
-      const value = Number(nodeFilterValue(n, String(filter.type)));
-      return !Number.isFinite(value) || value >= Number(filter.cutoff);
-    });
+    return !removedSet.has(nodeIdStr);
   });
   const eligibleNodeIds = new Set(eligibleNodes.map(n => String(n.id)));
 
   const filteredEdges = (rawEdges || []).filter(e => {
-    const passesWeightFilters = edgeFilters.every((filter: any) => {
-      const type = String(filter.type);
-      const attribute = type.startsWith('edge:') ? type.slice('edge:'.length) : type;
-      const value = Number(e[attribute]);
-      if (!Number.isFinite(value)) return true;
-      return value >= Number(filter.cutoff);
-    });
+    const filter = appliedFilters.edgeFilter;
+    const value = filter ? Number(e[filter.attribute]) : 0;
+    const passesWeightFilter = !filter || (Number.isFinite(value) && value >= Number(filter.min) && value <= Number(filter.max));
 
-    return passesWeightFilters &&
+    return passesWeightFilter &&
       !removedSet.has(String(e.source)) &&
       !removedSet.has(String(e.target)) &&
       eligibleNodeIds.has(String(e.source)) &&
@@ -189,7 +152,7 @@ export function computeTableDataNodes(validNodes: any[], networkMetrics: any[], 
     const net = netMap.get(node.id) || {};
     const mod = modMap.get(node.id) || {};
     const comm = mod.community ?? net.louvain ?? communityMap[node.id] ?? node.community ?? "";
-    return { ...node, net, mod, comm };
+    return { ...node, ...net, ...mod, community: comm || node.community };
   });
 
   if (searchQuery) {
@@ -202,50 +165,25 @@ export function computeTableDataNodes(validNodes: any[], networkMetrics: any[], 
 
   if (sortConfig) {
     data.sort((a, b) => {
-      let aVal: any = a[sortConfig.key] ?? a.net?.[sortConfig.key] ?? a.mod?.[sortConfig.key] ?? a.id;
-      let bVal: any = b[sortConfig.key] ?? b.net?.[sortConfig.key] ?? b.mod?.[sortConfig.key] ?? b.id;
-
-      if (sortConfig.key === "id") {
-        aVal = a.id; bVal = b.id;
-      } else if (sortConfig.key === "label") {
-        aVal = a.label || a.name || ""; bVal = b.label || b.name || "";
-      } else if (sortConfig.key === "abundance") {
-        aVal = a.abundance || 0; bVal = b.abundance || 0;
-      } else if (sortConfig.key === "degree") {
-        aVal = a.net.degree ?? (parseFloat(a.net.degreeCentrality) || 0); bVal = b.net.degree ?? (parseFloat(b.net.degreeCentrality) || 0);
-      } else if (sortConfig.key === "inDegree") {
-        aVal = a.net.inDegree ?? (parseFloat(a.net.inDegreeCentrality) || 0); bVal = b.net.inDegree ?? (parseFloat(b.net.inDegreeCentrality) || 0);
-      } else if (sortConfig.key === "outDegree") {
-        aVal = a.net.outDegree ?? (parseFloat(a.net.outDegreeCentrality) || 0); bVal = b.net.outDegree ?? (parseFloat(b.net.outDegreeCentrality) || 0);
-      } else if (sortConfig.key === "inDegreeCentrality") {
-        aVal = parseFloat(a.net.inDegreeCentrality) || 0; bVal = parseFloat(b.net.inDegreeCentrality) || 0;
-      } else if (sortConfig.key === "outDegreeCentrality") {
-        aVal = parseFloat(a.net.outDegreeCentrality) || 0; bVal = parseFloat(b.net.outDegreeCentrality) || 0;
-      } else if (sortConfig.key === "degreeCentrality") {
-        aVal = parseFloat(a.net.degreeCentrality) || 0; bVal = parseFloat(b.net.degreeCentrality) || 0;
-      } else if (sortConfig.key === "eigenvector") {
-        aVal = parseFloat(a.net.eigenvector) || 0; bVal = parseFloat(b.net.eigenvector) || 0;
-      } else if (sortConfig.key === "pagerank") {
-        aVal = parseFloat(a.net.pagerank) || 0; bVal = parseFloat(b.net.pagerank) || 0;
-      } else if (sortConfig.key === "community") {
-        aVal = a.comm; bVal = b.comm;
-      } else if (sortConfig.key === "louvain") {
-        aVal = a.net.louvain || ""; bVal = b.net.louvain || "";
-      } else if (sortConfig.key === "deltaQ") {
-        aVal = parseFloat(a.mod.deltaQ) || 0; bVal = parseFloat(b.mod.deltaQ) || 0;
-      }
-
-      if (aVal < bVal) return sortConfig.direction === "asc" ? -1 : 1;
-      if (aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1;
-      return 0;
+      const aVal: any = a[sortConfig.key];
+      const bVal: any = b[sortConfig.key];
+      const empty = (value: any) => value === undefined || value === null || value === '';
+      if (empty(aVal) && empty(bVal)) return 0;
+      if (empty(aVal)) return 1;
+      if (empty(bVal)) return -1;
+      const direction = sortConfig.direction === 'asc' ? 1 : -1;
+      if (typeof aVal === 'number' && typeof bVal === 'number') return (aVal - bVal) * direction;
+      if (typeof aVal === 'boolean' && typeof bVal === 'boolean') return (Number(aVal) - Number(bVal)) * direction;
+      return String(aVal).localeCompare(String(bVal), undefined, { numeric: true }) * direction;
     });
   }
 
   return data;
 }
 
-export function computeTableDataEdges(validEdges: any[], searchQuery: string, sortConfig: { key: string, direction: "asc" | "desc" } | null) {
-  let data = validEdges;
+export function computeTableDataEdges(validEdges: any[], edgeMetrics: any[], searchQuery: string, sortConfig: { key: string, direction: "asc" | "desc" } | null) {
+  const metrics = new Map((edgeMetrics || []).map((entry: any) => [String(entry.key), entry]));
+  let data = validEdges.map((edge) => ({ ...edge, ...(metrics.get(String(edge.key)) || metrics.get(`${edge.source}->${edge.target}`) || {}) }));
   if (searchQuery) {
     const q = searchQuery.toLowerCase();
     data = data.filter(d => 
@@ -256,22 +194,13 @@ export function computeTableDataEdges(validEdges: any[], searchQuery: string, so
   
   if (sortConfig) {
     data = [...data].sort((a, b) => {
-      let aVal: any = a[sortConfig.key] ?? a.source;
-      let bVal: any = b[sortConfig.key] ?? b.source;
-
-      if (sortConfig.key === "source") {
-        aVal = a.source; bVal = b.source;
-      } else if (sortConfig.key === "target") {
-        aVal = a.target; bVal = b.target;
-      } else if (sortConfig.key === "weight_raw") {
-        aVal = a.weight_raw; bVal = b.weight_raw;
-      } else if (sortConfig.key === "weight_secondary") {
-        aVal = a.weight_secondary; bVal = b.weight_secondary;
-      }
-
-      if (aVal < bVal) return sortConfig.direction === "asc" ? -1 : 1;
-      if (aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1;
-      return 0;
+      const aVal: any = a[sortConfig.key];
+      const bVal: any = b[sortConfig.key];
+      const direction = sortConfig.direction === 'asc' ? 1 : -1;
+      if (aVal === undefined || aVal === null) return 1;
+      if (bVal === undefined || bVal === null) return -1;
+      if (typeof aVal === 'number' && typeof bVal === 'number') return (aVal - bVal) * direction;
+      return String(aVal).localeCompare(String(bVal), undefined, { numeric: true }) * direction;
     });
   }
 

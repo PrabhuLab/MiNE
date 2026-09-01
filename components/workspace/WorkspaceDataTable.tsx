@@ -12,7 +12,7 @@ interface WorkspaceDataTableProps {
 }
 
 const HIDDEN_COLUMNS = new Set(['net', 'mod', 'comm', 'x', 'y', 'partitionIndex']);
-const preferredNodeColumns = ['id', 'label', 'name', 'abundance', 'type', 'partition', 'community'];
+const preferredNodeColumns = ['id', 'label', 'name', 'degree', 'type', 'partition', 'community'];
 const preferredEdgeColumns = ['source', 'target', 'weight_raw', 'weight_secondary'];
 const labelOf = (key: string) => key.replace(/_/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/\b\w/g, (letter) => letter.toUpperCase());
 const displayValue = (value: unknown) => {
@@ -49,7 +49,7 @@ export const WorkspaceDataTable = ({ dataTab, tableData, tableDataEdges, edgeMet
   }, [selectedElement]);
 
   return (
-    <div className="flex-1 w-full h-full overflow-auto">
+    <div className="mine-scroll-container flex-1 w-full h-full overflow-x-auto">
       <table className={`min-w-max w-full text-left text-xs border-collapse ${isDarkMode ? 'text-[#ddd]' : 'text-[#333]'}`}>
         <thead className={`sticky top-0 shadow-sm z-20 ${isDarkMode ? 'bg-[#222] border-b border-[#444]' : 'bg-[#f0f0f0] border-b border-[#ccc]'}`}>
           <tr>

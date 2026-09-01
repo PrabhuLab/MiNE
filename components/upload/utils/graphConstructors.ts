@@ -3,7 +3,7 @@ import type { TopologyType, ColumnMappingState, ParsedDataState } from '../types
 export interface GraphNode {
   id: string;
   name: string;
-  abundance: number;
+  abundance?: number;
   type?: string;
   community?: string;
   [key: string]: any;
@@ -13,7 +13,7 @@ export interface GraphEdge {
   source: string;
   target: string;
   weight_raw: number;
-  weight_secondary: number;
+  weight_secondary?: number;
   [key: string]: any;
 }
 
@@ -70,7 +70,7 @@ export function constructGraph(
         id,
         name: n[nodeLabelCol || 'name'] ?? n.name ?? id,
         label: n[nodeLabelCol || 'label'] ?? n.label ?? n.name ?? id,
-        abundance: Number.isFinite(Number(n.abundance)) ? Number(n.abundance) : 10,
+        ...(Number.isFinite(Number(n.abundance)) ? { abundance: Number(n.abundance) } : {}),
         ...(mappedPartition !== undefined && mappedPartition !== null && mappedPartition !== '' ? { partition: mappedPartition } : {}),
         ...(mappedCommunity !== undefined && mappedCommunity !== null && mappedCommunity !== '' ? { community: mappedCommunity } : {}),
       });
@@ -88,12 +88,14 @@ export function constructGraph(
         : `${targetId}_${sourceId}`;
       if (!edgeSet.has(edgeId)) {
         edgeSet.add(edgeId);
+        const secondarySource = weightSecCol || (Object.prototype.hasOwnProperty.call(e, 'weight_secondary') ? 'weight_secondary' : '');
+        const secondary = secondarySource ? Number(e[secondarySource]) : Number.NaN;
         edges.push({
           ...e,
           source: sourceId,
           target: targetId,
           weight_raw: Number.isFinite(Number(e[weightRawCol || 'weight'] ?? e.weight)) ? Number(e[weightRawCol || 'weight'] ?? e.weight) : 1,
-          weight_secondary: Number.isFinite(Number(e[weightSecCol || 'weight'] ?? e.weight)) ? Number(e[weightSecCol || 'weight'] ?? e.weight) : 1,
+          ...(Number.isFinite(secondary) ? { weight_secondary: secondary } : { weight_secondary: undefined }),
         });
       }
     });
@@ -117,7 +119,7 @@ export function constructGraph(
       for (let col = safeDataStartCol; col < (matrix[safeColHeadersRow]?.length || 0); col++) {
         const colNodeId = String(matrix[safeColHeadersRow]?.[col] ?? '').trim();
         if (colNodeId) {
-          nodesMap.set(colNodeId, { id: colNodeId, name: colNodeId, label: colNodeId, partition: 'B', abundance: 0 });
+          nodesMap.set(colNodeId, { id: colNodeId, name: colNodeId, label: colNodeId, partition: 'B' });
         }
       }
 
@@ -127,7 +129,7 @@ export function constructGraph(
         if (!rowNodeId) continue;
 
         if (!nodesMap.has(rowNodeId)) {
-          nodesMap.set(rowNodeId, { id: rowNodeId, name: rowNodeId, label: rowNodeId, partition: 'A', abundance: 0 });
+          nodesMap.set(rowNodeId, { id: rowNodeId, name: rowNodeId, label: rowNodeId, partition: 'A' });
         }
 
         for (let col = safeDataStartCol; col < matrix[row].length; col++) {
@@ -149,13 +151,7 @@ export function constructGraph(
                 source: rowNodeId,
                 target: colNodeId,
                 weight_raw: parsedWeight,
-                weight_secondary: parsedWeight,
               });
-
-              const aNode = nodesMap.get(rowNodeId);
-              const bNode = nodesMap.get(colNodeId);
-              if (aNode) aNode.abundance += parsedWeight;
-              if (bNode) bNode.abundance += parsedWeight;
             }
           }
         }
@@ -183,11 +179,7 @@ export function constructGraph(
         const sourceId = row[safeRowHeadersCol];
         if (!sourceId) continue;
 
-        let abundance = 0;
-        const colIndex = countHeaders.indexOf(sourceId);
-        if (colIndex !== -1) abundance = parseFloat(row[colIndex]) || 0;
-        if (abundance === 0) abundance = 10;
-        nodesMap.set(sourceId, { id: sourceId, name: sourceId, abundance });
+        nodesMap.set(sourceId, { id: sourceId, name: sourceId });
       }
 
       for (let i = safeDataStartRow; i < countsData.length; i++) {
@@ -214,7 +206,7 @@ export function constructGraph(
             if (!edgeSet.has(edgeId)) {
               edgeSet.add(edgeId);
               edges.push({ source: sourceId, target: targetId, weight_raw: rawW, weight_secondary: secW });
-              if (!nodesMap.has(targetId)) nodesMap.set(targetId, { id: targetId, name: targetId, abundance: 10 });
+              if (!nodesMap.has(targetId)) nodesMap.set(targetId, { id: targetId, name: targetId });
             }
           }
         }
@@ -230,7 +222,7 @@ export function constructGraph(
         const headerId = String(headers[j] ?? '').trim();
         if (!headerId) continue;
         headerIndexById.set(headerId, j);
-        nodesMap.set(headerId, { id: headerId, name: headerId, abundance: 10 });
+        nodesMap.set(headerId, { id: headerId, name: headerId });
       }
 
       /**
@@ -263,21 +255,7 @@ export function constructGraph(
         const sourceId = String(row[safeRowHeadersCol] ?? '').trim();
         if (!sourceId) continue;
 
-        let abundance = 0;
-        const colIndex = headerIndexById.get(sourceId);
-        if (colIndex !== undefined) {
-          if (row.length >= headers.length) {
-            abundance = parseFloat(row[colIndex]) || 0;
-          } else {
-            const valueCount = Math.max(0, row.length - safeDataStartCol);
-            const remainingWithDiagonal = Math.max(0, headers.length - colIndex);
-            if (valueCount === remainingWithDiagonal) {
-              abundance = parseFloat(row[safeDataStartCol]) || 0;
-            }
-          }
-        }
-        if (abundance === 0) abundance = 10;
-        nodesMap.set(sourceId, { id: sourceId, name: sourceId, abundance });
+        nodesMap.set(sourceId, { id: sourceId, name: sourceId });
       }
       for (let i = safeDataStartRow; i < data.length; i++) {
         const row = data[i] || [];
@@ -297,8 +275,8 @@ export function constructGraph(
               : `${targetId}_${sourceId}`;
             if (!edgeSet.has(edgeId)) {
               edgeSet.add(edgeId);
-              edges.push({ source: sourceId, target: targetId, weight_raw: value, weight_secondary: value });
-              if (!nodesMap.has(targetId)) nodesMap.set(targetId, { id: targetId, name: targetId, abundance: 10 });
+              edges.push({ source: sourceId, target: targetId, weight_raw: value });
+              if (!nodesMap.has(targetId)) nodesMap.set(targetId, { id: targetId, name: targetId });
             }
           }
         }
@@ -322,9 +300,8 @@ export function constructGraph(
           if (sId === tId) continue;
 
           const wRaw = wrIdx !== -1 ? parseFloat(row[wrIdx]) : 1;
-          const wSec = wsIdx !== -1 ? parseFloat(row[wsIdx]) : wRaw;
+          const wSec = wsIdx !== -1 ? parseFloat(row[wsIdx]) : Number.NaN;
           const finalWR = !isNaN(wRaw) ? wRaw : 1;
-          const finalWS = !isNaN(wSec) ? wSec : finalWR;
 
           const edgeId = isDirected ? `${sId}->${tId}` : sId < tId ? `${sId}_${tId}` : `${tId}_${sId}`;
           if (!edgeSet.has(edgeId)) {
@@ -335,9 +312,9 @@ export function constructGraph(
                 if (row[j] !== undefined && row[j] !== '') extraEdgeProps[eHeaders[j]] = row[j];
               }
             }
-            edges.push({ source: sId, target: tId, weight_raw: finalWR, weight_secondary: finalWS, ...extraEdgeProps });
-            if (!nodesMap.has(sId)) nodesMap.set(sId, { id: sId, name: sId, abundance: 10, partition: topology === 'Bipartite' ? 'A' : undefined });
-            if (!nodesMap.has(tId)) nodesMap.set(tId, { id: tId, name: tId, abundance: 10, partition: topology === 'Bipartite' ? 'B' : undefined });
+            edges.push({ source: sId, target: tId, weight_raw: finalWR, ...(!isNaN(wSec) ? { weight_secondary: wSec } : {}), ...extraEdgeProps });
+            if (!nodesMap.has(sId)) nodesMap.set(sId, { id: sId, name: sId, partition: topology === 'Bipartite' ? 'A' : undefined });
+            if (!nodesMap.has(tId)) nodesMap.set(tId, { id: tId, name: tId, partition: topology === 'Bipartite' ? 'B' : undefined });
           }
         }
       }
@@ -351,7 +328,7 @@ export function constructGraph(
         const row = parsedData.adjList[i];
         const sourceId = row[actualSourceColIdx];
         if (!sourceId) continue;
-        if (!nodesMap.has(sourceId)) nodesMap.set(sourceId, { id: sourceId, name: sourceId, abundance: 10 });
+        if (!nodesMap.has(sourceId)) nodesMap.set(sourceId, { id: sourceId, name: sourceId });
 
         for (let j = safeDataStartCol; j < row.length; j++) {
           const targetId = row[j];
@@ -360,8 +337,8 @@ export function constructGraph(
           const edgeId = isDirected ? `${sourceId}->${targetId}` : sourceId < targetId ? `${sourceId}_${targetId}` : `${targetId}_${sourceId}`;
           if (!edgeSet.has(edgeId)) {
             edgeSet.add(edgeId);
-            edges.push({ source: sourceId, target: targetId, weight_raw: 1, weight_secondary: 1 });
-            if (!nodesMap.has(targetId)) nodesMap.set(targetId, { id: targetId, name: targetId, abundance: 10 });
+            edges.push({ source: sourceId, target: targetId, weight_raw: 1 });
+            if (!nodesMap.has(targetId)) nodesMap.set(targetId, { id: targetId, name: targetId });
           }
         }
       }
@@ -453,7 +430,6 @@ export function constructGraph(
               id,
               name: displayLabel,
               label: displayLabel,
-              abundance: 10,
               ...extraProps,
               ...(partition !== undefined ? { partition } : topology === 'Bipartite' ? { partition: 'A' } : {}),
               ...(comm !== undefined ? { community: comm } : {}),
@@ -467,15 +443,9 @@ export function constructGraph(
   }
 
   const finalNodes = Array.from(nodesMap.values());
-  if (format !== 'Incidence Matrix') {
-    finalNodes.forEach(n => {
-      if (typeof n.abundance !== 'number' || isNaN(n.abundance) || n.abundance <= 0) n.abundance = 10;
-    });
-  } else {
-    finalNodes.forEach(n => {
-      if (typeof n.abundance !== 'number' || isNaN(n.abundance) || n.abundance <= 0) n.abundance = 1;
-    });
-  }
+  finalNodes.forEach((node) => {
+    if ('abundance' in node && !Number.isFinite(Number(node.abundance))) delete node.abundance;
+  });
 
   return { nodes: finalNodes, edges };
 }

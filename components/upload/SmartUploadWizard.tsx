@@ -26,6 +26,9 @@ import { StepWeights } from './steps/StepWeights';
 import { StepDirection } from './steps/StepDirection';
 import { StepFileFormat } from './steps/StepFileFormat';
 import { StepDataMapping } from './steps/StepDataMapping';
+import { migrateComputationPreference, migrateRendererPreference, migrateWorkspaceFilters } from '@/services/graphIO/migrations';
+import { UnifiedNetworkImportCard } from './UnifiedNetworkImportCard';
+import { RandomGraphCard, type RandomGraphOptions } from './RandomGraphCard';
 
 const detectNodeIdColumn = (headers: string[]) =>
   headers.find((header) => /^(?:id|node[ _-]?id|key|mode[ _-]?#)$/i.test(String(header).trim())) || headers[0] || '';
@@ -40,7 +43,7 @@ export default function SmartUploadWizard() {
   const isDarkMode = useStore((state) => state.isDarkMode);
   const [networkFiles, setNetworkFiles] = useState<File[]>([]);
   const [networkImporting, setNetworkImporting] = useState(false);
-  const [randomOptions, setRandomOptions] = useState({ order: 100, size: 350, clusters: 5, clusterDensity: 0.7 });
+  const [randomOptions, setRandomOptions] = useState<RandomGraphOptions>({ order: 100, size: 350, clusters: 5, clusterDensity: 0.7 });
 
   // Cascade UI State
   const [step, setStep] = useState(1);
@@ -239,11 +242,12 @@ export default function SmartUploadWizard() {
       filters: {
         ...state.filters,
         customNodeAttribute: '',
+        customNodeSizeAttribute: '',
         customEdgeAttribute: '',
         communityAttribute: '',
-        nodeColorBase: 'louvain',
-        edgeColorBase: 'nodeMetric',
-        edgeColorNodeMetric: 'louvain',
+        nodeColorBase: 'uniform',
+        edgeColorBase: 'uniform',
+        edgeColorNodeMetric: '',
         edgeColorNodeTarget: 'source' as const,
       },
       customAttributes: inferredCustomAttributes,
@@ -251,7 +255,7 @@ export default function SmartUploadWizard() {
     router.push('/workspace');
   };
 
-  const applyParsedNetwork = (parsed: ParsedNetwork) => {
+  const applyParsedNetwork = (parsed: ParsedNetwork, restoreVisualization = Boolean(parsed.workspace)) => {
     const { nodes, edges } = graphToRaw(parsed.graph);
     const workspace = parsed.workspace;
     const inferredCustomAttributes = [...inferCustomNodeAttributes(nodes), ...inferCustomEdgeAttributes(edges)];
@@ -261,14 +265,16 @@ export default function SmartUploadWizard() {
     const nextFilters = workspace?.filters ? {
       ...defaultFilters,
       ...workspace.filters,
+      edgeFilter: migrateWorkspaceFilters(workspace.filters, edges),
+      weightFilters: undefined,
       communityAttribute: '',
-      nodeColorBase: workspace.filters.nodeColorBase === 'community' ? 'louvain' : workspace.filters.nodeColorBase,
+      nodeColorBase: workspace.filters.nodeColorBase === 'community' ? 'uniform' : workspace.filters.nodeColorBase,
     } : {
       ...defaultFilters,
       communityAttribute: '',
-      nodeColorBase: 'louvain',
-      edgeColorBase: 'nodeMetric',
-      edgeColorNodeMetric: 'louvain',
+      nodeColorBase: 'uniform',
+      edgeColorBase: 'uniform',
+      edgeColorNodeMetric: '',
       edgeColorNodeTarget: 'source' as const,
     };
     useStore.setState({
@@ -277,8 +283,10 @@ export default function SmartUploadWizard() {
       directed: workspace?.graphMode.directed ?? parsed.directed,
       bipartite: workspace?.graphMode.bipartite ?? parsed.bipartite,
       importedMetrics: parsed.metrics,
+      restoredVisualization: restoreVisualization,
       projectName: workspace?.projectName || parsed.projectName || networkFiles[0]?.name.replace(/\.[^.]+$/, '') || 'NEW_PROJECT_NAME',
-      rendererEngine: workspace?.rendererEngine || 'auto',
+      computeEngine: migrateComputationPreference(workspace, nodes.length, edges.length),
+      rendererEngine: workspace ? migrateRendererPreference(workspace) : useStore.getState().rendererEngine,
       filters: nextFilters,
       isDarkMode: workspace?.appearance.isDarkMode ?? useStore.getState().isDarkMode,
       showNodeLabels: workspace?.appearance.showNodeLabels ?? false,
@@ -287,7 +295,7 @@ export default function SmartUploadWizard() {
       legendColorOverrides: workspace?.appearance.legendColorOverrides || {},
       customAttributes: mergeCustomAttributeMetadata(
         inferredCustomAttributes,
-        workspace?.appearance.customAttributes?.map((attribute) => ({ ...attribute, drivesCommunity: false })),
+        (workspace?.appearance.customAttributes || parsed.metrics?.metadata?.attributeDescriptors)?.map((attribute: any) => ({ ...attribute, drivesCommunity: false })),
       ),
       hiddenLegendItems: workspace?.visibility.hiddenLegendItems || [],
       isolatedLegendItem: workspace?.visibility.isolatedLegendItem || null,
@@ -312,11 +320,14 @@ export default function SmartUploadWizard() {
     setNetworkImporting(true);
     setError(null);
     try {
+      const maximumEdges = Math.max(0, randomOptions.order * (randomOptions.order - 1) / 2);
+      if (randomOptions.size > maximumEdges) throw new Error(`A simple undirected graph with ${randomOptions.order} nodes supports at most ${maximumEdges} edges.`);
       const state = useStore.getState();
       const workspace: WorkspaceSettingsDocument = {
         format: 'workspace-settings',
         version: 1,
         projectName: 'RANDOM_CLUSTER_GRAPH',
+        computeEngine: state.computeEngine,
         rendererEngine: state.rendererEngine,
         graphMode: { directed: false, bipartite: false, weighted: false },
         filters: state.filters,
@@ -334,7 +345,7 @@ export default function SmartUploadWizard() {
       };
       const document = createRandomClusterAllInOne(randomOptions, workspace);
       const file = new File([JSON.stringify(document)], 'random-cluster.network.json', { type: 'application/json' });
-      applyParsedNetwork(await parseNetworkFiles([file]));
+      applyParsedNetwork(await parseNetworkFiles([file]), false);
     } catch (generationError: any) {
       setError(generationError.message || 'Unable to create random graph.');
     } finally {
@@ -344,58 +355,8 @@ export default function SmartUploadWizard() {
 
   return (
     <div className="flex flex-col gap-8">
-      {!topology && <section className={`order-2 border p-6 ${isDarkMode ? 'bg-[#141414] border-[#333]' : 'bg-white border-[#141414]'}`}>
-        <h2 className="text-xl font-black tracking-tighter uppercase mb-2">Unified Network Import</h2>
-        <p className="text-[10px] font-mono opacity-60 mb-5">JSON / ALL-IN-ONE JSON / GRAPHML / GEXF / NODE + EDGE CSV / CSV ZIP</p>
-        <label className={`flex min-h-28 items-center justify-center border border-dashed cursor-pointer ${isDarkMode ? 'border-[#E4E3E0]/50' : 'border-[#141414]'}`}>
-          <div className="text-center">
-            <div className="text-[10px] font-bold uppercase tracking-widest">Select network file(s)</div>
-            <div className="text-[10px] font-mono opacity-60 mt-2">{networkFiles.map((file) => file.name).join(', ') || 'Choose one network file, or nodes.csv + edges.csv'}</div>
-          </div>
-          <input
-            type="file"
-            multiple
-            accept=".json,.graphml,.xml,.gexf,.zip,.csv"
-            className="hidden"
-            onChange={(event) => setNetworkFiles(Array.from(event.target.files || []))}
-          />
-        </label>
-        <button
-          disabled={!networkFiles.length || networkImporting}
-          onClick={handleUnifiedImport}
-          className={`mt-4 w-full border px-4 py-3 text-[10px] font-bold uppercase tracking-widest disabled:opacity-40 ${isDarkMode ? 'border-[#E4E3E0] text-[#E4E3E0]' : 'border-[#141414] bg-[#141414] text-white'}`}
-        >
-          {networkImporting ? 'Loading…' : 'Import Network'}
-        </button>
-
-        <div className={`mt-7 border-t pt-6 ${isDarkMode ? 'border-[#333]' : 'border-[#ddd]'}`}>
-          <h3 className="text-xs font-bold uppercase tracking-widest mb-4">Create Random Graph</h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {([
-              ['order', 'Nodes', 1, 10000, 1],
-              ['size', 'Edges', 1, 100000, 1],
-              ['clusters', 'Clusters', 1, 100, 1],
-              ['clusterDensity', 'Cluster density', 0, 1, 0.05],
-            ] as const).map(([key, label, min, max, stepValue]) => (
-              <label key={key} className="text-[10px] font-bold uppercase tracking-widest">
-                {label}
-                <input
-                  type="number"
-                  min={min}
-                  max={max}
-                  step={stepValue}
-                  value={randomOptions[key]}
-                  onChange={(event) => setRandomOptions((current) => ({ ...current, [key]: Number(event.target.value) }))}
-                  className={`mt-2 w-full border px-3 py-2 font-mono ${isDarkMode ? 'bg-[#1a1a1a] border-[#333]' : 'bg-white border-[#141414]'}`}
-                />
-              </label>
-            ))}
-          </div>
-          <button onClick={handleRandomGraph} disabled={networkImporting} className="mt-4 border border-current px-5 py-3 text-[10px] font-bold uppercase tracking-widest disabled:opacity-40">
-            Create Random Graph
-          </button>
-        </div>
-      </section>}
+      {!topology && <UnifiedNetworkImportCard isDarkMode={isDarkMode} files={networkFiles} importing={networkImporting} onFilesChange={setNetworkFiles} onImport={handleUnifiedImport} />}
+      {!topology && <RandomGraphCard isDarkMode={isDarkMode} options={randomOptions} generating={networkImporting} onChange={setRandomOptions} onGenerate={handleRandomGraph} />}
 
       <div
       className={`order-1 w-full max-w-4xl mx-auto mt-12 overflow-hidden mb-12 flex flex-col transition-colors ${

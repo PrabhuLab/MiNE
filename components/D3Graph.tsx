@@ -14,7 +14,8 @@ import { useGraphStyles } from '@/hooks/useGraphStyles';
 import { useGraphSimulation } from '@/hooks/useGraphSimulation';
 import type { GraphFocusRequest } from '@/services/workspace/types';
 import { createElementLegendItems } from '@/components/graph/legend/elementItems';
-import { collectVisibleD3NodeIds } from '@/components/graph/d3/presentation';
+import { computeGraphLegendVisibility } from '@/services/graphPresentation/legendVisibility';
+import { isSecondaryNode } from '@/services/graphPresentation/visibility';
 
 interface D3GraphProps {
   graph: Graph;
@@ -68,7 +69,7 @@ export default function D3Graph({
   networkMetrics = [],
   nodeSizeMult,
   bipartiteNodeSizeMult = 2,
-  nodeSizeBase = 'abundance',
+  nodeSizeBase = 'degree',
   nodeColorBase = 'custom',
   uniformNodeColor = '#cccccc',
   uniformEdgeColor = '#cccccc',
@@ -111,7 +112,6 @@ export default function D3Graph({
   const [clickedEdge, setClickedEdge] = useState<RawEdge | null>(null);
   const [isCalculatingLayout, setIsCalculatingLayout] = useState(false);
   const [tooltip, setTooltip] = useState<TooltipData | null>(null);
-  const [isLegendMinimized, setIsLegendMinimized] = useState(false);
 
   const {
     hiddenLegendItems,
@@ -128,6 +128,8 @@ export default function D3Graph({
     setShowArrowheads,
     showNodeLabels,
     setShowNodeLabels,
+    isLegendMinimized,
+    setIsLegendMinimized,
   } = useStore();
 
   const hiddenItems = useMemo(() => new Set(hiddenLegendItems), [hiddenLegendItems]);
@@ -236,27 +238,55 @@ export default function D3Graph({
     [elementLegendItems],
   );
 
+  const edgeVisibilityRecords = useMemo(() => edges.map((edge) => ({
+    id: String(edge.key ?? `${edge.source}->${edge.target}`),
+    source: String(edge.source),
+    target: String(edge.target),
+  })), [edges]);
+  const legendVisibility = useMemo(() => computeGraphLegendVisibility({
+    nodes,
+    edges: edgeVisibilityRecords,
+    bipartite,
+    isSecondaryNode: (node) => isSecondaryNode(node as RawNode, bipartite),
+    displayMap: communityDisplay.displayMap,
+    hiddenItemIds: hiddenItems,
+    isolatedItemId: isolatedLegendItem || isolatedCommunityId,
+    nodeMembership: legendNodeMembership,
+    edgeMembership: legendEdgeMembership,
+  }), [bipartite, communityDisplay.displayMap, edgeVisibilityRecords, hiddenItems, isolatedCommunityId, isolatedLegendItem, legendEdgeMembership, legendNodeMembership, nodes]);
+
   const getVisibleNodeIds = React.useCallback(
     (
       targetFilter?: string | null,
       isolatedCommunityOverride?: string | null,
       isolatedLegendOverride?: string | null,
       hiddenOverride?: Set<string>,
-    ) => collectVisibleD3NodeIds(
-      nodes,
-      {
+    ) => {
+      const isolatedCommunity = isolatedCommunityOverride !== undefined ? isolatedCommunityOverride : isolatedCommunityId;
+      const isolatedLegend = isolatedLegendOverride !== undefined ? isolatedLegendOverride : isolatedLegendItem;
+      const visibility = computeGraphLegendVisibility({
+        nodes,
+        edges: edgeVisibilityRecords,
         bipartite,
-        hiddenItems: hiddenOverride ?? hiddenItems,
-        isolatedLegendItem,
-        isolatedCommunityId,
+        isSecondaryNode: (node) => isSecondaryNode(node as RawNode, bipartite),
         displayMap: communityDisplay.displayMap,
-        legendNodeMembership,
-      },
-      targetFilter,
-      isolatedCommunityOverride,
-      isolatedLegendOverride,
-    ),
-    [nodes, bipartite, hiddenItems, isolatedLegendItem, isolatedCommunityId, communityDisplay.displayMap, legendNodeMembership],
+        hiddenItemIds: hiddenOverride ?? hiddenItems,
+        isolatedItemId: isolatedLegend || isolatedCommunity,
+        nodeMembership: legendNodeMembership,
+        edgeMembership: legendEdgeMembership,
+      });
+      return Array.from(visibility.visibleNodeIds).filter((nodeId) => {
+        if (!targetFilter) return true;
+        const node = nodes.find((candidate) => String(candidate.id) === nodeId);
+        if (targetFilter.startsWith('community:')) return String(communityDisplay.displayMap[nodeId] ?? -1) === targetFilter.slice('community:'.length);
+        if (targetFilter.startsWith('type:')) return String(node?.type) === targetFilter.slice('type:'.length);
+        if (targetFilter.startsWith('attribute:')) return legendNodeMembership.get(targetFilter)?.has(nodeId) ?? visibility.visibleNodeIds.has(nodeId);
+        if (targetFilter === 'element:bipartite') return Boolean(node && isSecondaryNode(node, bipartite));
+        if (targetFilter === 'element:standard') return Boolean(node && !isSecondaryNode(node, bipartite));
+        return true;
+      });
+    },
+    [nodes, bipartite, hiddenItems, isolatedLegendItem, isolatedCommunityId, communityDisplay.displayMap, legendNodeMembership, legendEdgeMembership, edgeVisibilityRecords],
   );
   const fittedNodeIds = useMemo(
     () => focusedEdgeNodeIds.size > 0 ? Array.from(focusedEdgeNodeIds) : getVisibleNodeIds(),
@@ -312,6 +342,7 @@ export default function D3Graph({
     displayMap: communityDisplay.displayMap,
     legendNodeMembership,
     legendEdgeMembership,
+    legendVisibility,
     maxRaw,
     maxSec,
     clickedNode,
@@ -395,7 +426,7 @@ export default function D3Graph({
       });
       setIsolatedCommunityId(id);
       setSelectedCommunityId(id);
-      fitD3NodeSet(getVisibleNodeIds(id, id, isolatedLegendItem, revealedItems));
+      fitD3NodeSet(getVisibleNodeIds(null, id, isolatedLegendItem, revealedItems));
     }
   };
 
@@ -413,7 +444,7 @@ export default function D3Graph({
         return next;
       });
       setIsolatedLegendItem(id);
-      fitD3NodeSet(getVisibleNodeIds(id, isolatedCommunityId, id, revealedItems));
+      fitD3NodeSet(getVisibleNodeIds(null, isolatedCommunityId, id, revealedItems));
     }
   };
 
@@ -423,12 +454,11 @@ export default function D3Graph({
     setIsolatedCommunityId(null);
     setSelectedCommunityId(null);
     setIsolatedLegendItem(null);
-    setHiddenLegendItems([]);
     setHoveredCommunityId(null);
     setClickedNode(null);
     setClickedEdge(null);
     if (onClearSelection) onClearSelection();
-    fitD3NodeSet(getVisibleNodeIds(null, null, null, new Set()));
+    fitD3NodeSet(getVisibleNodeIds(null, null, null, hiddenItems));
   };
 
   return (

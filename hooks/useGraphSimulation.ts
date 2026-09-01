@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useMemo } from 'react';
 import * as d3 from 'd3';
 import type Graph from 'graphology';
 import { useStore, RawNode, RawEdge } from '@/store/useStore';
@@ -11,6 +11,8 @@ import {
   type D3PresentationContext,
 } from '@/components/graph/d3/presentation';
 import { isSecondaryNode } from '@/services/graphPresentation/visibility';
+import { computeGraphRevisions } from '@/services/cloud/revision';
+import type { LegendVisibilityResult } from '@/services/graphPresentation/legendVisibility';
 
 interface UseGraphSimulationProps {
   graph: Graph | null;
@@ -61,6 +63,7 @@ interface UseGraphSimulationProps {
   displayMap: Record<string, number>;
   legendNodeMembership: Map<string, Set<string>>;
   legendEdgeMembership: Map<string, Set<string>>;
+  legendVisibility: LegendVisibilityResult;
   maxRaw: number;
   maxSec: number;
   clickedNode: RawNode | null;
@@ -92,7 +95,7 @@ export function useGraphSimulation({
   networkMetrics = [],
   nodeSizeMult = 3,
   bipartiteNodeSizeMult = 2,
-  nodeSizeBase = 'abundance',
+  nodeSizeBase = 'degree',
   edgeWeightMult = 1,
   edgeWeightBase = 'weight_raw',
   maxRaw = 1,
@@ -122,6 +125,7 @@ export function useGraphSimulation({
   displayMap,
   legendNodeMembership,
   legendEdgeMembership,
+  legendVisibility,
   clickedNode,
   setClickedNode,
   clickedEdge,
@@ -227,6 +231,11 @@ export function useGraphSimulation({
     fitD3NodeSet(fitNodeIds);
   }, [fitNodeIds, fitD3NodeSet]);
 
+  const renderTopologyKey = useMemo(() => {
+    const revision = computeGraphRevisions(nodes, edges, directed, false).graphRevision;
+    return `${revision}:${layoutRevision}:${refreshKey}`;
+  }, [directed, edges, layoutRevision, nodes, refreshKey]);
+
   // Main D3 SVG Rendering Pipeline
   useEffect(() => {
     if (!svgRef.current || !containerRef.current) return;
@@ -234,11 +243,7 @@ export function useGraphSimulation({
     const width = containerRef.current.clientWidth || 800;
     const height = containerRef.current.clientHeight || 600;
     const previousTransform = d3.zoomTransform(svgRef.current);
-    const topologyKey = JSON.stringify([
-      nodes.map((node) => node.id),
-      layoutRevision,
-      refreshKey,
-    ]);
+    const topologyKey = renderTopologyKey;
     const shouldFitTopology = lastTopologyKeyRef.current !== topologyKey;
 
     svg.selectAll('*').remove();
@@ -268,13 +273,15 @@ export function useGraphSimulation({
     const zoomBehavior = d3
       .zoom<SVGSVGElement, unknown>()
       .extent([[0, 0], [width, height]])
-      .scaleExtent([0.000001, 1000])
+      .scaleExtent([0.02, 100])
+      .filter((event) => event.type === 'wheel' || event.type === 'touchstart' || event.button === 0)
       .on('zoom', (e) => {
         zoomGroup.attr('transform', e.transform);
       });
 
     zoomBehaviorRef.current = zoomBehavior;
     svg.call(zoomBehavior as any);
+    svg.on('dblclick.zoom', null);
 
     zoomGroup
       .append('rect')
@@ -288,16 +295,6 @@ export function useGraphSimulation({
         setClickedEdge(null);
         if (onClearSelection) onClearSelection();
       });
-    // Build degree map for degree-based node sizing
-    const degreeMap: Record<string, number> = {};
-    if (nodeSizeBase === 'degree') {
-      nodes.forEach((n) => (degreeMap[n.id] = 0));
-      edges.forEach((e) => {
-        if (degreeMap[String(e.source)] !== undefined) degreeMap[String(e.source)]++;
-        if (degreeMap[String(e.target)] !== undefined) degreeMap[String(e.target)]++;
-      });
-    }
-
     // O(1) Map lookup for shared simulation node objects
     const sharedD3NodesMap = d3NodesMapRef?.current;
     const graphNodes = nodes.map((d) => {
@@ -314,23 +311,9 @@ export function useGraphSimulation({
         y = d.y ?? (Math.random() - 0.5) * 600;
       }
 
-      // Compute radius in graph coordinates — old D3 formula, no referenceScale normalization
-      const net = netMap.get(d.id);
-      let baseVal = 10;
-      if (nodeSizeBase === 'abundance') baseVal = (d.abundance ?? 10);
-      else if (nodeSizeBase === 'degree') baseVal = (degreeMap[d.id] || 0) * 5;
-      else if (nodeSizeBase === 'eigenvector') baseVal = parseFloat(net?.eigenvector || '0') * 50;
-      else if (nodeSizeBase === 'pagerank') baseVal = parseFloat(net?.pagerank || '0') * 500;
-      else if (nodeSizeBase === 'betweenness') baseVal = parseFloat(net?.betweenness || '0') * 100;
-      else if (nodeSizeBase === 'closeness') baseVal = parseFloat(net?.closeness || '0') * 100;
-      else if (nodeSizeBase === 'clustering') baseVal = parseFloat(net?.clustering || '0') * 20;
-      else if (nodeSizeBase === 'degreeCentrality') baseVal = parseFloat(net?.degreeCentrality || '0') * 100;
-      else if (nodeSizeBase === 'inDegreeCentrality') baseVal = parseFloat(net?.inDegreeCentrality || '0') * 100;
-      else if (nodeSizeBase === 'outDegreeCentrality') baseVal = parseFloat(net?.outDegreeCentrality || '0') * 100;
-      else if (nodeSizeBase === 'uniform') baseVal = 5;
-      const isSquare = isSecondaryNode(d, bipartite);
-      const mult = isSquare ? bipartiteNodeSizeMult : nodeSizeMult;
-      const baseRadius = mult * Math.max(Math.log(baseVal + 2), 1) + 2;
+      // The Graphology presentation layer owns the canonical renderer-independent size.
+      const graphSize = graph?.hasNode(d.id) ? Number(graph.getNodeAttribute(d.id, 'size')) : Number.NaN;
+      const baseRadius = Number.isFinite(graphSize) ? graphSize : 5;
 
       if (!sharedNode) {
         sharedNode = {
@@ -431,6 +414,7 @@ export function useGraphSimulation({
       nodeOpacity,
       legendNodeMembership,
       legendEdgeMembership,
+      legendVisibility,
     };
     const nodePresentation = new Map(graphNodes.map((node: any) => [
       String(node.id),
@@ -449,6 +433,13 @@ export function useGraphSimulation({
         nodePresentation,
       );
     };
+    const canonicalEdgeWidth = (edge: any) => {
+      const source = endpointId(edge.source);
+      const target = endpointId(edge.target);
+      if (!graph?.hasEdge(source, target)) return 2;
+      const size = Number(graph.getEdgeAttribute(graph.edge(source, target), 'size'));
+      return Number.isFinite(size) ? Math.max(0.5, size) : 2;
+    };
 
     const link = zoomGroup
       .append('g')
@@ -461,16 +452,7 @@ export function useGraphSimulation({
       .style('display', (d: any) => edgePresentation(d).hidden ? 'none' : null)
       .attr('stroke', (d: any) => getEdgeColor(d.rawEdge || d))
       .attr('stroke-opacity', (d: any) => edgePresentation(d).opacity)
-      .attr('stroke-width', (d: any) => {
-        const raw = d.rawEdge || d;
-        let w = 1;
-        if (edgeWeightBase === 'weight_raw') w = raw.weight_raw !== undefined ? Number(raw.weight_raw) : 1;
-        else if (edgeWeightBase === 'weight_secondary') w = raw.weight_secondary !== undefined ? Number(raw.weight_secondary) : 1;
-        const maxW = edgeWeightBase === 'weight_raw' ? maxRaw : edgeWeightBase === 'weight_secondary' ? maxSec : 1;
-        const normalizedW = maxW > 0 ? w / maxW : 1;
-        const strokeWidth = Math.min(0.5 + 3.5 * normalizedW, 4) * edgeWeightMult;
-        return `${Math.max(strokeWidth, 2)}px`;
-      })
+      .attr('stroke-width', (d: any) => `${canonicalEdgeWidth(d)}px`)
       .attr('marker-end', (d: any) => (
         directed && getShouldShowArrowhead(d.rawEdge || d)
           ? 'url(#arrowhead)'
@@ -502,8 +484,8 @@ export function useGraphSimulation({
           y: e.clientY,
           title: `Edge: ${srcId} → ${tgtId}`,
           items: [
-            ...(raw.weight_raw ? [{ label: 'Raw Weight', value: raw.weight_raw }] : []),
-            ...(raw.weight_secondary ? [{ label: 'Secondary Weight', value: raw.weight_secondary }] : []),
+            ...(raw.weight_raw !== undefined ? [{ label: 'Weight', value: raw.weight_raw }] : []),
+            ...(raw.weight_secondary !== undefined ? [{ label: 'Secondary Weight', value: raw.weight_secondary }] : []),
           ],
         });
       })
@@ -703,6 +685,7 @@ export function useGraphSimulation({
     bipartite,
     livePhysics,
     refreshKey,
+    renderTopologyKey,
     layoutRevision,
     containerRef,
     svgRef,
@@ -724,6 +707,7 @@ export function useGraphSimulation({
     displayMap,
     legendNodeMembership,
     legendEdgeMembership,
+    legendVisibility,
     clickedNode,
     clickedEdge,
     focusedEdgeNodeSet,
@@ -736,32 +720,9 @@ export function useGraphSimulation({
     if (!svgRef.current || !d3NodesMapRef?.current) return;
     const svg = d3.select(svgRef.current);
 
-    const fastDegreeMap: Record<string, number> = {};
-    if (nodeSizeBase === 'degree') {
-      nodes.forEach((n) => (fastDegreeMap[n.id] = 0));
-      edges.forEach((e) => {
-        if (fastDegreeMap[String(e.source)] !== undefined) fastDegreeMap[String(e.source)]++;
-        if (fastDegreeMap[String(e.target)] !== undefined) fastDegreeMap[String(e.target)]++;
-      });
-    }
-
     d3NodesMapRef.current.forEach((node: any) => {
-      const net = netMap.get(node.id);
-      let baseVal = 10;
-      if (nodeSizeBase === 'abundance') baseVal = (node.abundance ?? 10);
-      else if (nodeSizeBase === 'degree') baseVal = (fastDegreeMap[node.id] || 0) * 5;
-      else if (nodeSizeBase === 'eigenvector') baseVal = parseFloat(net?.eigenvector || '0') * 50;
-      else if (nodeSizeBase === 'pagerank') baseVal = parseFloat(net?.pagerank || '0') * 500;
-      else if (nodeSizeBase === 'betweenness') baseVal = parseFloat(net?.betweenness || '0') * 100;
-      else if (nodeSizeBase === 'closeness') baseVal = parseFloat(net?.closeness || '0') * 100;
-      else if (nodeSizeBase === 'clustering') baseVal = parseFloat(net?.clustering || '0') * 20;
-      else if (nodeSizeBase === 'degreeCentrality') baseVal = parseFloat(net?.degreeCentrality || '0') * 100;
-      else if (nodeSizeBase === 'inDegreeCentrality') baseVal = parseFloat(net?.inDegreeCentrality || '0') * 100;
-      else if (nodeSizeBase === 'outDegreeCentrality') baseVal = parseFloat(net?.outDegreeCentrality || '0') * 100;
-      else if (nodeSizeBase === 'uniform') baseVal = 5;
-      const isSquare = isSecondaryNode(node, bipartite);
-      const mult = isSquare ? bipartiteNodeSizeMult : nodeSizeMult;
-      node.currentRadius = mult * Math.max(Math.log(baseVal + 2), 1) + 2;
+      const graphSize = graph?.hasNode(node.id) ? Number(graph.getNodeAttribute(node.id, 'size')) : Number.NaN;
+      node.currentRadius = Number.isFinite(graphSize) ? graphSize : 5;
     });
 
     svg
@@ -779,17 +740,14 @@ export function useGraphSimulation({
       .attr('dx', (d: any) => d.currentRadius >= 14 ? 0 : d.currentRadius + 4)
       .attr('fill', (d: any) => d.currentRadius >= 14 ? (isDarkMode ? '#222' : '#fff') : isDarkMode ? '#ddd' : '#141414');
 
-    const maxW = edgeWeightBase === 'weight_raw' ? maxRaw : edgeWeightBase === 'weight_secondary' ? maxSec : 1;
     svg.selectAll<SVGPathElement, any>('.graph-link').style('stroke-width', (d: any) => {
-      const raw = d.rawEdge || d;
-      let w = 1;
-      if (edgeWeightBase === 'weight_raw') w = raw.weight_raw !== undefined ? Number(raw.weight_raw) : 1;
-      else if (edgeWeightBase === 'weight_secondary') w = raw.weight_secondary !== undefined ? Number(raw.weight_secondary) : 1;
-      const normalizedW = maxW > 0 ? w / maxW : 1;
-      const strokeWidth = Math.min(0.5 + 3.5 * normalizedW, 4) * edgeWeightMult;
-      return `${Math.max(strokeWidth, 2)}px`;
+      const source = String(typeof d.source === 'object' ? d.source.id : d.source);
+      const target = String(typeof d.target === 'object' ? d.target.id : d.target);
+      if (!graph?.hasEdge(source, target)) return '2px';
+      const size = Number(graph.getEdgeAttribute(graph.edge(source, target), 'size'));
+      return `${Number.isFinite(size) ? Math.max(0.5, size) : 2}px`;
     });
-  }, [nodeSizeBase, nodeSizeMult, bipartiteNodeSizeMult, bipartite, edgeWeightBase, edgeWeightMult, networkMetrics, nodes, edges, isDarkMode, maxRaw, maxSec, netMap, svgRef, d3NodesMapRef]);
+  }, [graph, isDarkMode, svgRef, d3NodesMapRef]);
 
   // Subscribe to direct D3 physics ticks for fast SVG DOM updates
   useEffect(() => {

@@ -8,6 +8,7 @@ export type { GraphFocusRequest } from '@/services/workspace/types';
 export interface SigmaGraphProps {
   graph: Graph;
   isReady?: boolean;
+  staticLayoutRevision?: number;
   nodes: RawNode[];
   edges: RawEdge[];
   communityMap: Record<string, string>;

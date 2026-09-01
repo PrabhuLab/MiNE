@@ -7,6 +7,13 @@
   --f-mono: 'Courier New', Courier, monospace;
   --f-sans: 'Helvetica Neue', Helvetica, Arial, sans-serif;
   --f-serif: 'Georgia', serif;
+  --range-track: #b8b8b8;
+  --range-thumb: #141414;
+}
+
+.dark, [data-theme="dark"] {
+  --range-track: #696969;
+  --range-thumb: #b4ff39;
 }
 
 body {
@@ -50,8 +57,8 @@ body {
 input[type="range"] {
   appearance: none;
   width: 100%;
-  height: 1px;
-  background: var(--line);
+  height: 4px;
+  background: var(--range-track);
   outline: none;
 }
 
@@ -59,7 +66,56 @@ input[type="range"]::-webkit-slider-thumb {
   appearance: none;
   width: 12px;
   height: 12px;
-  background: var(--line);
+  background: var(--range-thumb);
   cursor: pointer;
-  border-radius: 0;
+  border-radius: 999px;
+}
+
+input[type="range"]::-moz-range-track {
+  height: 4px;
+  background: var(--range-track);
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--range-thumb);
+  cursor: pointer;
+}
+
+.mine-range-end {
+  pointer-events: none;
+  background: transparent !important;
+}
+
+.mine-range-end::-webkit-slider-thumb {
+  pointer-events: auto;
+}
+
+.mine-range-end::-moz-range-thumb {
+  pointer-events: auto;
+}
+
+.mine-scroll-container {
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: #777 transparent;
+}
+
+.mine-scroll-container::-webkit-scrollbar {
+  width: 9px;
+}
+
+.mine-scroll-container::-webkit-scrollbar-track {
+  background: rgba(127, 127, 127, 0.13);
+}
+
+.mine-scroll-container::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: #777;
+  background-clip: padding-box;
 }
