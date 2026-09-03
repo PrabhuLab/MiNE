@@ -24,6 +24,9 @@ interface WorkspaceSidebarProps {
   layoutControls?: React.ReactNode;
   rawNodes: any[];
   rawEdges: any[];
+  filterNodes: any[];
+  networkMetrics: any[];
+  edgeMetrics: any[];
   setAppliedFilters: (val: any) => void;
   appliedFilters: any;
 }
@@ -43,6 +46,9 @@ export const WorkspaceSidebar = ({
   layoutControls,
   rawNodes,
   rawEdges,
+  filterNodes,
+  networkMetrics,
+  edgeMetrics,
   setAppliedFilters,
   appliedFilters,
 }: WorkspaceSidebarProps) => {
@@ -95,7 +101,7 @@ export const WorkspaceSidebar = ({
         </div>
       </div>
 
-      <SimulationControls setAppliedFilters={setAppliedFilters} appliedFilters={appliedFilters} rawNodes={rawNodes} />
+      <SimulationControls setAppliedFilters={setAppliedFilters} appliedFilters={appliedFilters} rawNodes={rawNodes} filterNodes={filterNodes} networkMetrics={networkMetrics} edgeMetrics={edgeMetrics} />
          
       <div className={`h-px w-full my-4 ${isDarkMode ? 'bg-[#333]' : 'bg-[#ccc]'}`}></div>
 

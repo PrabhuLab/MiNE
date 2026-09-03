@@ -37,5 +37,6 @@ export function GraphMetricCarousel({ metrics }: { metrics: Record<string, any> 
 }
 
 function labelFallback(id: string): string {
-  return id.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, (letter) => letter.toUpperCase());
+  if (id === 'community_louvain_quality' || id.endsWith('_louvain_quality')) return 'Louvain Modularity';
+  return id.replace(/_/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, (letter) => letter.toUpperCase());
 }

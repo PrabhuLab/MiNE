@@ -50,8 +50,30 @@ export interface MetricsRequest {
 }
 
 export interface LouvainMetricsResult {
-  nodeMetrics: any[];
+  nodeMetrics: LouvainNodeMetric[];
   modularity: number;
+}
+
+/**
+ * Sparse, node-aligned terms for the igraph modularity matrix formula.
+ * `modularityContribution` sums to the graph's Louvain modularity and
+ * `louvainDeltaQ` is the corresponding two-sided Louvain delta term.
+ */
+export interface LouvainNodeMetric {
+  id: string;
+  community: string;
+  louvain?: string;
+  withinCommunityWeight: number;
+  nodeStrength: number;
+  communityStrength: number;
+  modularityContribution: number;
+  louvainDeltaQ: number;
+  /** Backward-compatible alias retained in exports and tables. */
+  deltaQ: number;
+  /** Backward-compatible aliases retained for existing workspaces. */
+  k_i_in: number;
+  nodeDegree: number;
+  communityDegree: number;
 }
 
 export interface MetricsResult {
@@ -67,6 +89,6 @@ export interface MetricsResult {
 
 export interface TopologyMetrics {
   nodeIds: string[];
-  degreeByNode: Record<string, { degree?: number; inDegree?: number; outDegree?: number }>;
+  degreeByNode: Record<string, { degree: number; inDegree?: number; outDegree?: number }>;
   declaredCommunities: Record<string, string>;
 }

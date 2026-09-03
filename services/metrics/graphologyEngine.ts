@@ -15,7 +15,7 @@ function finiteWeight(value: unknown, fallback = 1): number {
   return Number.isFinite(numeric) ? numeric : fallback;
 }
 
-function createGraph(request: Pick<MetricsRequest, 'nodes' | 'edges' | 'directed' | 'weightAttribute'>): any {
+export function createMetricsGraph(request: Pick<MetricsRequest, 'nodes' | 'edges' | 'directed' | 'weightAttribute'>): any {
   const graph: any = new (Graph as any)({ type: request.directed ? 'directed' : 'undirected', multi: false, allowSelfLoops: false });
   request.nodes.forEach((node) => {
     if (!graph.hasNode(String(node.id))) graph.addNode(String(node.id), { ...node });
@@ -32,7 +32,7 @@ function createGraph(request: Pick<MetricsRequest, 'nodes' | 'edges' | 'directed
 }
 
 export function calculateTopologyMetrics(nodes: any[], edges: any[], directed: boolean): TopologyMetrics {
-  const graph = createGraph({ nodes, edges, directed, weightAttribute: 'weight_raw' });
+  const graph = createMetricsGraph({ nodes, edges, directed, weightAttribute: 'weight_raw' });
   const degreeByNode: TopologyMetrics['degreeByNode'] = {};
   const declaredCommunities: Record<string, string> = {};
   nodes.forEach((node) => {
@@ -40,7 +40,7 @@ export function calculateTopologyMetrics(nodes: any[], edges: any[], directed: b
   });
   graph.forEachNode((nodeId: string) => {
     degreeByNode[nodeId] = directed
-      ? { inDegree: graph.inDegree(nodeId), outDegree: graph.outDegree(nodeId) }
+      ? { degree: graph.degree(nodeId), inDegree: graph.inDegree(nodeId), outDegree: graph.outDegree(nodeId) }
       : { degree: graph.degree(nodeId) };
   });
   return { nodeIds: graph.nodes(), degreeByNode, declaredCommunities };
@@ -63,7 +63,7 @@ function graphContext(graph: any, request: MetricsRequest): MetricGraphContext {
 
 class GraphologyMetricsEngine implements MetricsEngine {
   async compute(request: MetricsRequest): Promise<MetricsResult> {
-    const graph = createGraph(request);
+    const graph = createMetricsGraph(request);
     const metricsByNode: Record<string, Record<string, any>> = Object.fromEntries(graph.nodes().map((node: string) => [node, {}]));
     const metricsByEdge: Record<string, Record<string, any>> = {};
     const graphMetrics: Record<string, any> = {};
@@ -82,7 +82,7 @@ class GraphologyMetricsEngine implements MetricsEngine {
           metricsByNode[node].louvain = label;
           graph.setNodeAttribute(node, 'community', String(community));
         });
-        const nodeMetrics = computeCommunityMetrics(graph, communityMap, request.directed);
+        const nodeMetrics = computeCommunityMetrics(graph, communityMap, request.directed, request.resolution);
         nodeMetrics.forEach((entry: any) => Object.assign(metricsByNode[String(entry.id)], entry));
         louvainResult = { nodeMetrics, modularity: details.modularity };
         graphMetrics.louvainModularity = details.modularity;

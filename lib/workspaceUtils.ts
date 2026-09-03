@@ -1,5 +1,5 @@
 import type Graph from 'graphology';
-import modularityMetric from 'graphology-metrics/graph/modularity.js';
+import type { NodeFilter } from '@/store/useStore';
 
 export function computeMaxRelWeight(rawEdges: any[]): number {
   if (!rawEdges || rawEdges.length === 0) return 100;
@@ -39,7 +39,8 @@ export function computeActiveNetwork(rawNodes: any[], rawEdges: any[], appliedFi
   const filteredEdges = (rawEdges || []).filter(e => {
     const filter = appliedFilters.edgeFilter;
     const value = filter ? Number(e[filter.attribute]) : 0;
-    const passesWeightFilter = !filter || (Number.isFinite(value) && value >= Number(filter.min) && value <= Number(filter.max));
+    const passesWeightFilter = !filter || filter.source === 'metric'
+      || (Number.isFinite(value) && value >= Number(filter.min) && value <= Number(filter.max));
 
     return passesWeightFilter &&
       !removedSet.has(String(e.source)) &&
@@ -61,86 +62,142 @@ export function computeActiveNetwork(rawNodes: any[], rawEdges: any[], appliedFi
   return { validNodes: filteredNodes, validEdges: strictlyValidEdges };
 }
 
-export function computeCommunityMetrics(graph: Graph, newCommunityMap: Record<string, any>, directed: boolean) {
-  let sumWeights = 0;
-  graph.forEachEdge((e: any, atts: any) => { sumWeights += (atts.weight || 1); });
-      
-  const metrics = graph.nodes().map((nodeId: string) => {
-    const comm = newCommunityMap[nodeId] || "";
-        
+/**
+ * Applies a node-value filter without changing the graph used to calculate
+ * that value. This avoids a self-invalidating cycle for centrality and
+ * Louvain metrics while keeping the viewport and data tables in sync.
+ */
+export function filterNetworkByNodeMetric(
+  nodes: any[],
+  edges: any[],
+  filter: NodeFilter | null | undefined,
+  networkMetrics: any[],
+) {
+  if (!filter) return { validNodes: nodes, validEdges: edges };
+  const metricsByNode = new Map((networkMetrics || []).map((entry) => [String(entry.id), entry]));
+  const values = nodes.map((node) => Number(metricsByNode.get(String(node.id))?.[filter.attribute] ?? node[filter.attribute]));
+  if (!values.some(Number.isFinite)) return { validNodes: nodes, validEdges: edges };
+
+  const validNodes = nodes.filter((node) => {
+    const value = Number(metricsByNode.get(String(node.id))?.[filter.attribute] ?? node[filter.attribute]);
+    return Number.isFinite(value) && value >= Number(filter.min) && value <= Number(filter.max);
+  });
+  const nodeIds = new Set(validNodes.map((node) => String(node.id)));
+  const validEdges = edges.filter((edge) => nodeIds.has(String(edge.source)) && nodeIds.has(String(edge.target)));
+  return { validNodes, validEdges };
+}
+
+/** Presentation-stage counterpart for calculated edge metrics. */
+export function filterNetworkByEdgeMetric(
+  nodes: any[],
+  edges: any[],
+  filter: { attribute: string; min: number; max: number; source?: string } | null | undefined,
+  edgeMetrics: any[],
+) {
+  if (!filter || filter.source !== 'metric') return { validNodes: nodes, validEdges: edges };
+  const metricsByEdge = new Map(edgeMetrics.flatMap((entry) => {
+    const keys = [entry.key, entry.source !== undefined ? `${entry.source}->${entry.target}` : undefined].filter(Boolean).map(String);
+    return keys.map((key) => [key, entry] as const);
+  }));
+  const metricFor = (edge: any) => metricsByEdge.get(String(edge.key ?? `${edge.source}->${edge.target}`))
+    || metricsByEdge.get(`${edge.source}->${edge.target}`)
+    || metricsByEdge.get(`${edge.target}->${edge.source}`)
+    || metricsByEdge.get(`${edge.source}--${edge.target}`)
+    || metricsByEdge.get(`${edge.target}--${edge.source}`);
+  const hasValues = edges.some((edge) => Number.isFinite(Number(metricFor(edge)?.[filter.attribute])));
+  if (!hasValues) return { validNodes: nodes, validEdges: edges };
+  const validEdges = edges.filter((edge) => {
+    const value = Number(metricFor(edge)?.[filter.attribute]);
+    return Number.isFinite(value) && value >= Number(filter.min) && value <= Number(filter.max);
+  });
+  return { validNodes: nodes, validEdges };
+}
+
+const finiteWeight = (value: unknown): number => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : 1;
+};
+
+/**
+ * Computes sparse node rows equivalent to summing the igraph modularity
+ * matrix within each node's assigned community. The per-node contributions
+ * therefore sum to Q without allocating igraph's dense n x n matrix.
+ */
+export function computeCommunityMetrics(
+  graph: Graph,
+  newCommunityMap: Record<string, any>,
+  directed: boolean,
+  resolution = 1,
+) {
+  const nodes = graph.nodes();
+  const communityOf = Object.fromEntries(nodes.map((node) => [node, String(newCommunityMap[node] ?? '')]));
+  const nodeIn = Object.fromEntries(nodes.map((node) => [node, 0])) as Record<string, number>;
+  const nodeOut = Object.fromEntries(nodes.map((node) => [node, 0])) as Record<string, number>;
+  const withinIn = Object.fromEntries(nodes.map((node) => [node, 0])) as Record<string, number>;
+  const withinOut = Object.fromEntries(nodes.map((node) => [node, 0])) as Record<string, number>;
+  let totalWeight = 0;
+
+  graph.forEachEdge((_edge, attributes, source, target) => {
+    const weight = finiteWeight(attributes.weight);
+    totalWeight += weight;
     if (directed) {
-      const totalWeight = sumWeights;
-      let nodeInDegree = 0;
-      let nodeOutDegree = 0;
-          
-      graph.forEachInEdge(nodeId, (e: any, atts: any) => { nodeInDegree += (atts.weight || 1); });
-      graph.forEachOutEdge(nodeId, (e: any, atts: any) => { nodeOutDegree += (atts.weight || 1); });
-
-      let commInDegree = 0;
-      let commOutDegree = 0;
-      graph.forEachNode((n: any) => {
-        if (newCommunityMap[n] === comm) {
-          graph.forEachInEdge(n, (e: any, atts: any) => { commInDegree += (atts.weight || 1); });
-          graph.forEachOutEdge(n, (e: any, atts: any) => { commOutDegree += (atts.weight || 1); });
-        }
-      });
-
-      let k_in_from_comm = 0;
-      let k_out_to_comm = 0;
-      graph.forEachInEdge(nodeId, (e: any, atts: any, source: any) => {
-        if (newCommunityMap[source] === comm) k_in_from_comm += (atts.weight || 1);
-      });
-      graph.forEachOutEdge(nodeId, (e: any, atts: any, source: any, target: any) => {
-        if (newCommunityMap[target] === comm) k_out_to_comm += (atts.weight || 1);
-      });
-          
-      const nodeCommunityDegree = k_in_from_comm + k_out_to_comm;
-      const deltaQ = totalWeight > 0
-        ? modularityMetric.directedDelta(totalWeight, commInDegree, commOutDegree, nodeInDegree, nodeOutDegree, nodeCommunityDegree)
-        : 0;
-            
-      return {
-        id: nodeId,
-        community: comm,
-        k_i_in: nodeCommunityDegree,
-        nodeDegree: `↓${nodeInDegree.toFixed(2)} ↑${nodeOutDegree.toFixed(2)}`,
-        communityDegree: `↓${commInDegree.toFixed(2)} ↑${commOutDegree.toFixed(2)}`,
-        deltaQ
-      };
-    } else {
-      const totalWeight = sumWeights;
-      let nodeDegree = 0;
-      graph.forEachEdge(nodeId, (e: any, atts: any) => { nodeDegree += (atts.weight || 1); });
-          
-      let communityDegree = 0;
-      graph.forEachNode((n: any) => {
-        if (newCommunityMap[n] === comm) {
-          graph.forEachEdge(n, (e: any, atts: any) => { communityDegree += (atts.weight || 1); });
-        }
-      });
-
-      let k_i_in = 0;
-      graph.forEachEdge(nodeId, (edge: any, atts: any, source: any, target: any) => {
-        const neighbor = source === nodeId ? target : source;
-        if (newCommunityMap[neighbor] === comm) {
-          k_i_in += (atts.weight || 1);
-        }
-      });
-
-      const deltaQ = totalWeight > 0 ? modularityMetric.undirectedDelta(totalWeight, communityDegree, nodeDegree, k_i_in * 2) : 0;
-          
-      return {
-        id: nodeId,
-        community: comm,
-        k_i_in,
-        nodeDegree,
-        communityDegree,
-        deltaQ
-      };
+      nodeOut[source] += weight;
+      nodeIn[target] += weight;
+      if (communityOf[source] === communityOf[target]) {
+        withinOut[source] += weight;
+        withinIn[target] += weight;
+      }
+      return;
+    }
+    nodeOut[source] += weight;
+    nodeOut[target] += weight;
+    if (communityOf[source] === communityOf[target]) {
+      withinOut[source] += weight;
+      withinOut[target] += weight;
     }
   });
 
-  metrics.sort((a: any, b: any) => parseFloat(b.deltaQ) - parseFloat(a.deltaQ));
+  const communityIn: Record<string, number> = {};
+  const communityOut: Record<string, number> = {};
+  nodes.forEach((node) => {
+    const community = communityOf[node];
+    communityIn[community] = (communityIn[community] || 0) + nodeIn[node];
+    communityOut[community] = (communityOut[community] || 0) + nodeOut[node];
+  });
+
+  const metrics = nodes.map((node) => {
+    const community = communityOf[node];
+    const nodeStrength = directed ? nodeIn[node] + nodeOut[node] : nodeOut[node];
+    const communityStrength = directed
+      ? (communityIn[community] || 0) + (communityOut[community] || 0)
+      : communityOut[community] || 0;
+    const withinCommunityWeight = directed ? withinIn[node] + withinOut[node] : withinOut[node];
+    const louvainDeltaQ = totalWeight > 0
+      ? directed
+        ? withinCommunityWeight / totalWeight - resolution * (
+          nodeOut[node] * (communityIn[community] || 0) + nodeIn[node] * (communityOut[community] || 0)
+        ) / (totalWeight * totalWeight)
+        : withinCommunityWeight / totalWeight
+          - resolution * nodeStrength * communityStrength / (2 * totalWeight * totalWeight)
+      : 0;
+    const modularityContribution = louvainDeltaQ / 2;
+    return {
+      id: node,
+      community,
+      withinCommunityWeight,
+      nodeStrength,
+      communityStrength,
+      modularityContribution,
+      louvainDeltaQ,
+      // Preserve the original MiNE column names for imported workspaces.
+      deltaQ: louvainDeltaQ,
+      k_i_in: withinCommunityWeight,
+      nodeDegree: nodeStrength,
+      communityDegree: communityStrength,
+    };
+  });
+
+  metrics.sort((a, b) => b.louvainDeltaQ - a.louvainDeltaQ);
   return metrics;
 }
 

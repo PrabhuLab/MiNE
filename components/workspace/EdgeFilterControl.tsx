@@ -14,17 +14,19 @@ const rangeOf = (values: unknown[]) => {
   return { minimum, maximum, step: integral ? 1 : Math.max((maximum - minimum) / 200, 0.001) };
 };
 
-export function EdgeFilterControl() {
+export function EdgeFilterControl({ edgeMetrics = [] }: { edgeMetrics?: any[] }) {
   const { rawNodes, rawEdges, customAttributes, filters, setFilter, isDarkMode } = useStore();
-  const registry = useMemo(() => buildAttributeRegistry({ nodes: rawNodes, edges: rawEdges, metadata: customAttributes }), [customAttributes, rawEdges, rawNodes]);
+  const metricByKey = useMemo(() => new Map(edgeMetrics.map((entry) => [String(entry.key), entry])), [edgeMetrics]);
+  const edgeRecords = useMemo(() => rawEdges.map((edge) => ({ ...edge, ...(metricByKey.get(String(edge.key)) || {}) })), [metricByKey, rawEdges]);
+  const registry = useMemo(() => buildAttributeRegistry({ nodes: rawNodes, edges: edgeRecords, metadata: customAttributes }), [customAttributes, edgeRecords, rawNodes]);
   const secondaryPresent = rawEdges.some((edge) => edge.weight_secondary !== undefined && Number.isFinite(Number(edge.weight_secondary)));
   const options = useMemo(() => [
-    { value: 'weight_raw', label: 'Weight' },
-    ...(secondaryPresent ? [{ value: 'weight_secondary', label: 'Secondary Weight' }] : []),
-    ...edgeWeightDescriptors(registry).map((descriptor) => ({ value: descriptor.name, label: descriptor.label })),
+    { value: 'weight_raw', label: 'Weight', source: 'attribute' as const },
+    ...(secondaryPresent ? [{ value: 'weight_secondary', label: 'Secondary Weight', source: 'attribute' as const }] : []),
+    ...edgeWeightDescriptors(registry).filter((descriptor) => descriptor.numeric).map((descriptor) => ({ value: descriptor.name, label: descriptor.label, source: descriptor.origin === 'metric' ? 'metric' as const : 'attribute' as const })),
   ].filter((option, index, values) => values.findIndex((candidate) => candidate.value === option.value) === index), [registry, secondaryPresent]);
   const selected = filters.edgeFilter;
-  const selectedRange = rangeOf(rawEdges.map((edge) => selected ? edge[selected.attribute] : Number.NaN));
+  const selectedRange = rangeOf(edgeRecords.map((edge) => selected ? edge[selected.attribute] : Number.NaN));
   const rangeSpan = selectedRange.maximum - selectedRange.minimum;
   const minimumPercent = selected ? ((selected.min - selectedRange.minimum) / rangeSpan) * 100 : 0;
   const maximumPercent = selected ? ((selected.max - selectedRange.minimum) / rangeSpan) * 100 : 100;
@@ -34,8 +36,9 @@ export function EdgeFilterControl() {
       setFilter('edgeFilter', null);
       return;
     }
-    const extent = rangeOf(rawEdges.map((edge) => edge[attribute]));
-    setFilter('edgeFilter', { attribute, min: extent.minimum, max: extent.maximum });
+    const option = options.find((candidate) => candidate.value === attribute);
+    const extent = rangeOf(edgeRecords.map((edge) => edge[attribute]));
+    setFilter('edgeFilter', { attribute, min: extent.minimum, max: extent.maximum, source: option?.source || 'attribute' });
   };
 
   const update = (minimum: number, maximum: number) => {

@@ -1,7 +1,8 @@
-import { graphologyMetricsEngine } from '@/services/metrics/graphologyEngine';
+import { createMetricsGraph, graphologyMetricsEngine } from '@/services/metrics/graphologyEngine';
 import { requestCloudAnalysis } from '@/services/cloud/coordinator';
 import { buildCloudAnalyzeRequest } from '@/services/cloud/request';
 import type { CommunityComputationResult, CommunityRequest } from './types';
+import { computeCommunityMetrics } from '@/lib/workspaceUtils';
 
 const resultIdOf = (algorithm: string) => `community_${algorithm}`;
 const labelOf = (algorithm: string) => ({
@@ -27,11 +28,13 @@ export async function computeCommunityInBrowser(request: CommunityRequest): Prom
     signal: request.signal,
   });
   if (!result.louvain) throw new Error(result.warnings.louvain || 'Louvain did not return a result.');
+  const memberships = Object.fromEntries(result.louvain.nodeMetrics.map((entry) => [String(entry.id), `Cluster ${Number(entry.community) + 1}`]));
   return {
     resultId: resultIdOf('louvain'),
     algorithm: 'louvain',
     label: 'Louvain',
-    memberships: Object.fromEntries(result.louvain.nodeMetrics.map((entry) => [String(entry.id), String(entry.community)])),
+    memberships,
+    louvainNodeMetrics: result.louvain.nodeMetrics.map((entry) => ({ ...entry, community: memberships[String(entry.id)], louvain: memberships[String(entry.id)] })),
     quality: Number.isFinite(result.louvain.modularity) ? result.louvain.modularity : null,
     provenance: { engine: 'graphology', ...request.settings },
     calculatedAt: new Date().toISOString(),
@@ -59,11 +62,24 @@ export async function computeCommunityInCloud(request: CommunityRequest): Promis
     const response = await requestCloudAnalysis(legacyRequest, request.signal);
     const memberships = response.nodeMetrics.louvain;
     if (!memberships || memberships.length !== legacyRequest.nodeIds.length) throw new Error('Cloud Louvain response did not include aligned memberships.');
+    const membershipMap = Object.fromEntries(legacyRequest.nodeIds.map((id, index) => [id, `Cluster ${Number(memberships[index]) + 1}`]));
+    // Derive the aligned node rows locally as well. This keeps the browser
+    // client compatible with older deployed backends that return membership
+    // and Q but predate node-level modularity fields.
+    const graph = createMetricsGraph({
+      nodes: request.nodes,
+      edges: request.edges,
+      directed: false,
+      weightAttribute: request.settings.weightChannel === 'unweighted' ? '__unweighted' : request.settings.weightChannel,
+    });
+    const rawMemberships = Object.fromEntries(legacyRequest.nodeIds.map((id, index) => [id, String(memberships[index])]));
+    const localNodeMetrics = computeCommunityMetrics(graph, rawMemberships, false, request.settings.resolution);
     return {
       resultId: resultIdOf('louvain'),
       algorithm: 'louvain',
       label: 'Louvain',
-      memberships: Object.fromEntries(legacyRequest.nodeIds.map((id, index) => [id, `Cluster ${Number(memberships[index]) + 1}`])),
+      memberships: membershipMap,
+      louvainNodeMetrics: localNodeMetrics.map((entry) => ({ ...entry, community: membershipMap[entry.id], louvain: membershipMap[entry.id] })),
       quality: Number.isFinite(Number(response.graphMetrics.louvainModularity)) ? Number(response.graphMetrics.louvainModularity) : null,
       provenance: { engine: 'python-igraph', ...request.settings },
       calculatedAt: new Date().toISOString(),

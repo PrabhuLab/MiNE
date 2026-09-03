@@ -290,7 +290,8 @@ function normalizeParsedGraph(graph: Graph, metadata: Record<string, any> = {}):
     parsedMetricsMetadata = rawMetadata;
   }
   const metricNames = new Set([
-    'community', 'deltaQ', 'k_i_in', 'nodeDegree', 'communityDegree', 'degree', 'inDegree', 'outDegree',
+    'community', 'deltaQ', 'louvainDeltaQ', 'modularityContribution', 'withinCommunityWeight', 'nodeStrength', 'communityStrength',
+    'k_i_in', 'nodeDegree', 'communityDegree', 'degree', 'inDegree', 'outDegree',
     'degreeCentrality', 'inDegreeCentrality', 'outDegreeCentrality', 'betweenness', 'closeness', 'clustering',
     'pagerank', 'eigenvector', 'eccentricity', 'weightedDegree', 'weightedInDegree', 'weightedOutDegree',
     'hub', 'authority', 'louvain', 'edgeBetweenness', 'disparity',

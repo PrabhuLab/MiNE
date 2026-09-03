@@ -2,13 +2,15 @@ import type { MetricsEngine } from './engine';
 import type { MetricValidity, MetricsResult } from './types';
 import { requestCloudAnalysis } from '@/services/cloud/coordinator';
 import { buildCloudAnalyzeRequest } from '@/services/cloud/request';
+import { createMetricsGraph } from './graphologyEngine';
+import { computeCommunityMetrics } from '@/lib/workspaceUtils';
 
 const RESULT_ATTRIBUTES: Record<string, string[]> = {
   density: ['density'], diameter: ['diameter'], extent: ['extent'], simpleSize: ['simpleSize'], weightedSize: ['weightedSize'],
   eccentricity: ['eccentricity'], weightedDegree: ['weightedDegree', 'weightedInDegree', 'weightedOutDegree'],
   degree: ['degreeCentrality', 'inDegreeCentrality', 'outDegreeCentrality'], betweenness: ['betweenness'],
   edgeBetweenness: ['edgeBetweenness'], closeness: ['closeness'], eigenvector: ['eigenvector'], hits: ['hub', 'authority'],
-  pagerank: ['pagerank'], louvain: ['louvain'], modularity: ['modularity'],
+  pagerank: ['pagerank'], louvain: ['louvain', 'louvainDeltaQ', 'modularityContribution', 'withinCommunityWeight', 'nodeStrength', 'communityStrength'], modularity: ['modularity'],
 };
 
 export const cloudMetricsEngine: MetricsEngine = {
@@ -47,10 +49,15 @@ export const cloudMetricsEngine: MetricsEngine = {
       if (present) validity[id] = { graphRevision: request.graphRevision, filterRevision: request.filterRevision, calculatedAt };
     });
     const louvainValues = result.nodeMetrics.louvain;
-    const louvain = louvainValues ? {
-      nodeMetrics: cloudRequest.nodeIds.map((id, index) => ({ id, louvain: `Cluster ${Number(louvainValues[index]) + 1}`, community: `Cluster ${Number(louvainValues[index]) + 1}` })),
-      modularity: Number(result.graphMetrics.louvainModularity ?? 0),
-    } : null;
+    const louvain = louvainValues ? (() => {
+      const membership = Object.fromEntries(cloudRequest.nodeIds.map((id, index) => [id, String(louvainValues[index])]));
+      const graph = createMetricsGraph({ nodes: request.nodes, edges: request.edges, directed: false, weightAttribute: request.weightAttribute });
+      const nodeMetrics = computeCommunityMetrics(graph, membership, false, request.resolution).map((entry) => {
+        const label = `Cluster ${Number(entry.community) + 1}`;
+        return { ...entry, louvain: label, community: label };
+      });
+      return { nodeMetrics, modularity: Number(result.graphMetrics.louvainModularity ?? 0) };
+    })() : null;
     if (louvain) louvain.nodeMetrics.forEach((entry) => Object.assign(metricsByNode[entry.id], entry));
     return {
       nodeIds: cloudRequest.nodeIds,

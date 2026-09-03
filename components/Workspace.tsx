@@ -19,6 +19,7 @@ import { useGraphLayouts } from '@/hooks/useGraphLayouts';
 import { numericExtent } from '@/lib/utils';
 import { resolveComputeEngine } from '@/services/cloud/config';
 import { degreeByNode, logarithmicNodeSize } from '@/services/graphStyles/size';
+import { filterNetworkByEdgeMetric, filterNetworkByNodeMetric } from '@/lib/workspaceUtils';
 import { effectiveRenderer } from '@/services/engines/policy';
 import { WorkspaceStatusCards } from '@/components/workspace/WorkspaceStatusCards';
 
@@ -29,6 +30,7 @@ const SigmaGraph = dynamic(() => import('./graph/SigmaGraph'), { ssr: false });
 import { WorkspaceSidebar } from "@/components/workspace/WorkspaceSidebar";
 import { WorkspaceDataTable } from "@/components/workspace/WorkspaceDataTable";
 import { GraphMetricCarousel } from '@/components/workspace/GraphMetricCarousel';
+import { ModularityTables } from '@/components/workspace/ModularityTables';
 import { isSecondaryNode } from '@/services/graphPresentation/visibility';
 import { LayoutControls } from '@/components/workspace/LayoutControls';
 
@@ -76,11 +78,21 @@ export default function Workspace() {
     runCommunity,
     invalidateLayoutMetrics,
   } = useGraphMetrics(validNodes, validEdges, appliedFilters, rawNodes, metricAccessors);
+  const nodeFilteredNetwork = useMemo(
+    () => filterNetworkByNodeMetric(validNodes, validEdges, appliedFilters.nodeFilter, networkMetrics),
+    [appliedFilters.nodeFilter, networkMetrics, validEdges, validNodes],
+  );
+  const edgeMetricFilteredNetwork = useMemo(
+    () => filterNetworkByEdgeMetric(nodeFilteredNetwork.validNodes, nodeFilteredNetwork.validEdges, appliedFilters.edgeFilter, edgeMetrics),
+    [appliedFilters.edgeFilter, edgeMetrics, nodeFilteredNetwork.validEdges, nodeFilteredNetwork.validNodes],
+  );
+  const displayNodes = edgeMetricFilteredNetwork.validNodes;
+  const displayEdges = edgeMetricFilteredNetwork.validEdges;
   const edgeMetricMap = useMemo(() => new Map(edgeMetrics.map((metric: any) => [String(metric.key), metric])), [edgeMetrics]);
-  const presentationEdges = useMemo(() => validEdges.map((edge) => {
+  const presentationEdges = useMemo(() => displayEdges.map((edge) => {
     const key = String(edge.key ?? `${edge.source}->${edge.target}`);
     return { ...edge, ...(edgeMetricMap.get(key) || edgeMetricMap.get(`${edge.source}->${edge.target}`) || {}) };
-  }), [edgeMetricMap, validEdges]);
+  }), [displayEdges, edgeMetricMap]);
 
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const {
@@ -106,7 +118,7 @@ export default function Workspace() {
     legendNodeMembership,
     legendEdgeMembership,
   } = useGraphStyles({
-    nodes: validNodes,
+    nodes: displayNodes,
     edges: presentationEdges,
     communityMap,
     networkMetrics,
@@ -137,7 +149,7 @@ export default function Workspace() {
     setSortConfig,
     tableData,
     tableDataEdges,
-  } = useDataTableSort(validNodes, validEdges, networkMetrics, nodeMetrics, edgeMetrics, legendNodeMembership, legendEdgeMembership);
+  } = useDataTableSort(displayNodes, displayEdges, networkMetrics, nodeMetrics, edgeMetrics, legendNodeMembership, legendEdgeMembership);
 
   const degreeMap = useMemo(() => degreeByNode(validNodes, validEdges), [validEdges, validNodes]);
   const metricMap = useMemo(() => new Map(networkMetrics.map((metric: any) => [String(metric.id), metric])), [networkMetrics]);
@@ -222,7 +234,7 @@ export default function Workspace() {
 
   // Unified persistent Graphology instance (using D3 static layout pre-rendering)
   const { graph, isReady, layoutRevision, staticLayoutRevision, topologyKey, positioningError, cloudRouted, runRefreshLayout, notifyLayoutChange, applyExternalPositions } = useSharedGraph({
-    nodes: validNodes,
+    nodes: displayNodes,
     edges: presentationEdges,
     directed,
     bipartite,
@@ -246,8 +258,8 @@ export default function Workspace() {
   }, [graph, layoutRevision]);
   const layoutController = useGraphLayouts({
     graph,
-    nodes: validNodes,
-    edges: validEdges,
+    nodes: displayNodes,
+    edges: displayEdges,
     topologyKey,
     livePhysics: appliedFilters.livePhysics,
     setLivePhysics: (enabled) => {
@@ -291,11 +303,11 @@ export default function Workspace() {
   }, [runRefreshLayout]);
 
   const filteredOutNodes = useMemo(() => {
-    const visibleNodeIds = new Set(validNodes.map(n => n.id));
+    const visibleNodeIds = new Set(displayNodes.map(n => n.id));
     return rawNodes
       .filter(n => !visibleNodeIds.has(n.id))
       .map(n => n.name || n.id);
-  }, [rawNodes, validNodes]);
+  }, [displayNodes, rawNodes]);
 
   const { handleImportWorkspace, handleExport } = useWorkspaceIO({
     graph,
@@ -347,6 +359,9 @@ export default function Workspace() {
         layoutControls={effectiveEngine === 'cloud' ? <LayoutControls {...layoutController} /> : undefined}
         rawNodes={rawNodes}
         rawEdges={rawEdges}
+        filterNodes={validNodes}
+        networkMetrics={networkMetrics}
+        edgeMetrics={edgeMetrics}
         setAppliedFilters={setAppliedFilters}
         appliedFilters={appliedFilters}
       />
@@ -375,6 +390,7 @@ export default function Workspace() {
               <div className="flex text-[10px] uppercase font-bold tracking-widest bg-white dark:bg-[#141414] border border-[#141414] dark:border-[#333] shadow-sm">
                 <button className={`px-4 py-2 ${dataTab === 'nodes' ? 'bg-[#141414] text-white dark:bg-[#333]' : 'text-[#888]'}`} onClick={() => setDataTab('nodes')}>Nodes</button>
                 <button className={`px-4 py-2 border-l border-[#141414] dark:border-[#333] ${dataTab === 'edges' ? 'bg-[#141414] text-white dark:bg-[#333]' : 'text-[#888]'}`} onClick={() => setDataTab('edges')}>Edges</button>
+                <button className={`px-4 py-2 border-l border-[#141414] dark:border-[#333] ${dataTab === 'modularity' ? 'bg-[#141414] text-white dark:bg-[#333]' : 'text-[#888]'}`} onClick={() => setDataTab('modularity')}>Modularity</button>
               </div>
             )}
             <div className="relative">
@@ -410,9 +426,9 @@ export default function Workspace() {
         </div>
 
         <WorkspaceStatusCards
-          activeNodeCount={validNodes.length}
+          activeNodeCount={displayNodes.length}
           rawNodeCount={rawNodes.length}
-          activeEdgeCount={validEdges.length}
+          activeEdgeCount={displayEdges.length}
           rawEdgeCount={rawEdges.length}
           engine={effectiveEngine}
           renderer={activeRenderer}
@@ -424,7 +440,7 @@ export default function Workspace() {
           <GraphMetricCarousel metrics={graphMetrics} />
         )}
 
-        {validNodes.length > 0 ? (
+        {displayNodes.length > 0 ? (
           <>
             <div className={`flex-1 w-full h-full relative ${activeTab === "graph" ? "block" : "hidden"}`}>
               {isSwitchingRenderer && (
@@ -440,7 +456,7 @@ export default function Workspace() {
                   graph={graph}
                   isReady={isReady}
                   staticLayoutRevision={staticLayoutRevision}
-                  nodes={validNodes} 
+                  nodes={displayNodes}
                   edges={presentationEdges} 
                   communityMap={communityMap}
                   networkMetrics={networkMetrics}
@@ -479,7 +495,7 @@ export default function Workspace() {
               ) : isReady ? (
                 <D3Graph 
                   graph={graph}
-                  nodes={validNodes} 
+                  nodes={displayNodes}
                   edges={presentationEdges} 
                   communityMap={communityMap}
                   networkMetrics={networkMetrics}
@@ -523,7 +539,9 @@ export default function Workspace() {
             </div>
             
             <div className={`flex-1 w-full h-full overflow-hidden ${activeTab === "data" ? "block" : "hidden"}`}>
-              <WorkspaceDataTable dataTab={dataTab} tableData={tableData} tableDataEdges={tableDataEdges} edgeMetrics={edgeMetrics} handleSort={handleSort} sortConfig={sortConfig} handleElementDoubleClick={handleElementDoubleClick} />
+              {dataTab === 'modularity'
+                ? <ModularityTables rows={tableData} graphMetrics={graphMetrics} onNodeDoubleClick={handleElementDoubleClick} />
+                : <WorkspaceDataTable dataTab={dataTab} tableData={tableData} tableDataEdges={tableDataEdges} edgeMetrics={edgeMetrics} handleSort={handleSort} sortConfig={sortConfig} handleElementDoubleClick={handleElementDoubleClick} />}
             </div>
           </>
         ) : (

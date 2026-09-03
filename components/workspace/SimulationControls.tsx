@@ -3,8 +3,9 @@ import { useStore } from '@/store/useStore';
 import { SegmentedToggle } from '@/components/ui/SegmentedToggle';
 import { EdgeFilterControl } from './EdgeFilterControl';
 import { FilterControls } from './FilterControls';
+import { NodeMetricFilterControl } from './NodeMetricFilterControl';
 
-export const SimulationControls = ({ setAppliedFilters, appliedFilters, rawNodes }: { setAppliedFilters: (val: any) => void; appliedFilters: any; rawNodes: any[] }) => {
+export const SimulationControls = ({ setAppliedFilters, appliedFilters, rawNodes, filterNodes, networkMetrics, edgeMetrics }: { setAppliedFilters: (val: any) => void; appliedFilters: any; rawNodes: any[]; filterNodes: any[]; networkMetrics: any[]; edgeMetrics: any[] }) => {
   const { filters, setFilter, isDarkMode,  } = useStore();
   const pending = JSON.stringify({ ...filters, liveUpdate: appliedFilters.liveUpdate }) !== JSON.stringify(appliedFilters);
 
@@ -47,7 +48,8 @@ export const SimulationControls = ({ setAppliedFilters, appliedFilters, rawNodes
               ariaLabel="Enable Live Physics"
             />
           </div>
-          <EdgeFilterControl />
+          <EdgeFilterControl edgeMetrics={edgeMetrics} />
+          <NodeMetricFilterControl nodes={filterNodes} networkMetrics={networkMetrics} />
           <FilterControls rawNodes={rawNodes} />
       </div>
     </div>

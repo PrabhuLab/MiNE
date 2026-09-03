@@ -42,7 +42,12 @@ DEFINITIONS = (
     MetricDefinition("eigenvector", ("eigenvector",), True, True, True, True, False, True, None, None, "strength", "Graphology parity: Euclidean norm is one"),
     MetricDefinition("hits", ("hub", "authority"), True, False, True, True, True, True, None, None, "strength", "Graphology parity: each score vector sums to one"),
     MetricDefinition("pagerank", ("pagerank",), True, True, True, True, True, True, None, None, "strength", "damping 0.85; scores sum to one"),
-    MetricDefinition("louvain", ("louvain", "louvainModularity"), False, True, True, True, True, True, None, None, "strength", "igraph multilevel membership; seeded RNG"),
+    MetricDefinition(
+        "louvain",
+        ("louvain", "louvainDeltaQ", "modularityContribution", "withinCommunityWeight", "nodeStrength", "communityStrength", "louvainModularity"),
+        False, True, True, True, True, True, None, None, "strength",
+        "igraph multilevel membership and sparse per-node modularity-matrix terms; seeded RNG",
+    ),
     MetricDefinition("modularity", ("modularity",), True, True, True, True, True, True, None, None, "strength", "MiNE parity: provided membership at resolution 1.0"),
 )
 REGISTRY = {definition.id: definition for definition in DEFINITIONS}
@@ -116,6 +121,52 @@ def _l2_normalize(values: list[float]) -> list[float]:
 def _sum_normalize(values: list[float]) -> list[float]:
     total = sum(values)
     return [value / total for value in values] if total != 0 else values
+
+
+def _louvain_node_modularity_terms(
+    graph: ig.Graph,
+    membership: list[int],
+    weights: list[float] | None,
+    resolution: float,
+) -> dict[str, list[float]]:
+    """Sparse row sums of igraph's undirected modularity matrix.
+
+    The node contributions sum to the same Q returned by igraph without
+    materializing the dense ``modularity_matrix`` result.
+    """
+    edge_weights = weights if weights is not None else [1.0] * graph.ecount()
+    total_weight = float(sum(edge_weights))
+    strengths = [float(value) for value in graph.strength(mode="all", weights=weights)]
+    community_strengths: dict[int, float] = {}
+    for community, strength in zip(membership, strengths):
+        community_strengths[community] = community_strengths.get(community, 0.0) + strength
+
+    within = [0.0] * graph.vcount()
+    for (source, target), weight in zip(graph.get_edgelist(), edge_weights):
+        if membership[source] != membership[target]:
+            continue
+        within[source] += weight
+        within[target] += weight
+
+    deltas: list[float] = []
+    contributions: list[float] = []
+    aligned_community_strengths: list[float] = []
+    for index, community in enumerate(membership):
+        community_strength = community_strengths[community]
+        delta = (
+            within[index] / total_weight
+            - resolution * strengths[index] * community_strength / (2 * total_weight * total_weight)
+        ) if total_weight > 0 else 0.0
+        deltas.append(delta)
+        contributions.append(delta / 2)
+        aligned_community_strengths.append(community_strength)
+    return {
+        "louvainDeltaQ": finite_array(deltas),
+        "modularityContribution": finite_array(contributions),
+        "withinCommunityWeight": finite_array(within),
+        "nodeStrength": finite_array(strengths),
+        "communityStrength": finite_array(aligned_community_strengths),
+    }
 
 
 def compute_metrics(graph: ig.Graph, request: AnalyzeRequest, settings: Settings):
@@ -198,6 +249,7 @@ def compute_metrics(graph: ig.Graph, request: AnalyzeRequest, settings: Settings
             clustering = graph.community_multilevel(weights=weights, resolution=request.resolution)
             membership = list(clustering.membership)
             node_metrics["louvain"] = membership
+            node_metrics.update(_louvain_node_modularity_terms(graph, membership, weights, request.resolution))
             graph_metrics["louvainModularity"] = finite_or_none(clustering.modularity)
         elif metric_id == "modularity":
             values = membership if membership is not None else _communities(request)

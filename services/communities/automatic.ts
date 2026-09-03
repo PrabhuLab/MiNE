@@ -29,7 +29,11 @@ export function validSavedLouvainKey(options: {
     const attribute = id === 'louvain' ? 'louvain' : 'community_louvain';
     return validity?.graphRevision === options.graphRevision
       && validity?.filterRevision === options.filterRevision
-      && options.nodeIds.every((nodeId) => options.nodes[nodeId]?.[attribute] !== undefined);
+      && options.nodeIds.every((nodeId) => options.nodes[nodeId]?.[attribute] !== undefined)
+      && options.nodeIds.every((nodeId) => (
+        options.nodes[nodeId]?.louvainDeltaQ !== undefined
+        || options.nodes[nodeId]?.deltaQ !== undefined
+      ));
   }) || null;
 }
 

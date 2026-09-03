@@ -5,7 +5,7 @@ import type { GraphFocusRequest } from '@/services/workspace/types';
 export function useWorkspaceSelection() {
   const setSelectedElement = useStore((state) => state.setSelectedElement);
   const [activeTab, setActiveTab] = useState<'graph' | 'data'>('graph');
-  const [dataTab, setDataTab] = useState<'nodes' | 'edges'>('nodes');
+  const [dataTab, setDataTab] = useState<'nodes' | 'edges' | 'modularity'>('nodes');
   const [graphFocusRequest, setGraphFocusRequest] = useState<GraphFocusRequest | null>(null);
   const focusRequestIdRef = useRef(0);
 

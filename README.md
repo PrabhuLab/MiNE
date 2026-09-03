@@ -6,6 +6,8 @@ MiNE is an interactive network visualization and analysis workspace for scientif
 
 - **Browser computation:** Graphology runs analysis in the client; browser community detection supports Louvain.
 - **Cloud computation:** the Python service performs curated igraph community, metric, and static-layout operations.
+- **Numeric metric filtering:** Degree, numeric uploaded attributes, calculated node centralities, Louvain node terms, and calculated edge metrics can filter the graph and data tables without invalidating the result used as the filter source.
+- **Louvain modularity detail:** Browser and Cloud results include per-node Louvain ΔQ, within-community weight, node/community strength, and an igraph-compatible modularity contribution. The Modularity data view summarizes both communities and nodes, and node contributions sum to the network Q.
 - **Independent rendering:** D3 or Sigma can render either computation mode from the same persistent Graphology model. Live Physics uses the shared D3 force simulation with either renderer.
 - **Large-graph routing policy:** Cloud is recommended at **7,000 or more raw nodes OR 15,000 or more raw edges**, but Browser remains selectable and is the sequential fallback for supported Cloud calculations. Large-graph classification always uses imported raw counts, so filtering cannot change it.
 - Initial Louvain runs automatically only below the large-graph cutoffs. At or above either cutoff, it remains available as an explicit calculation in Cloud or Browser.

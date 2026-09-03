@@ -24,7 +24,17 @@ const EMPTY_SELECTION: MetricsSelection = Object.fromEntries([
   ...METRIC_REGISTRY.map((metric) => [metric.id, false]),
 ]) as MetricsSelection;
 
-const LOUVAIN_RESULT_ATTRIBUTES = new Set(['louvain', 'community', 'deltaQ', 'k_i_in', 'nodeDegree', 'communityDegree']);
+const LOUVAIN_NUMERIC_ATTRIBUTES = [
+  ['louvainDeltaQ', 'Louvain ΔQ'],
+  ['modularityContribution', 'Modularity Contribution'],
+  ['withinCommunityWeight', 'Within-Community Weight'],
+  ['nodeStrength', 'Node Strength'],
+  ['communityStrength', 'Community Strength'],
+] as const;
+const LOUVAIN_RESULT_ATTRIBUTES = new Set([
+  'louvain', 'community', 'deltaQ', 'k_i_in', 'nodeDegree', 'communityDegree',
+  ...LOUVAIN_NUMERIC_ATTRIBUTES.map(([name]) => name),
+]);
 
 function pickAttributes(values: Record<string, any>, allowed: Set<string>): Record<string, any> {
   return Object.fromEntries(Object.entries(values).filter(([key]) => allowed.has(key)));
@@ -157,7 +167,11 @@ export function useGraphMetrics(
       delete importedGraphMetrics.modularity;
     }
     setGraphMetrics(tracksValidity
-      ? Object.fromEntries(Object.entries(importedGraphMetrics).filter(([id]) => validMetricIds.has(id) || (id === 'louvainModularity' && validMetricIds.has('louvain'))))
+      ? Object.fromEntries(Object.entries(importedGraphMetrics).filter(([id]) => (
+        validMetricIds.has(id)
+        || Array.from(validMetricIds).some((validId) => id === `${validId}_quality`)
+        || (id === 'louvainModularity' && (validMetricIds.has('louvain') || validMetricIds.has('community_louvain')))
+      )))
       : importedGraphMetrics);
     setMetricValidity(tracksValidity ? Object.fromEntries(Object.entries(importedValidity).filter(([id]) => validMetricIds.has(id))) : {});
     if (!tracksValidity) importedForRevision.current = importRevisionKey;
@@ -178,11 +192,18 @@ export function useGraphMetrics(
     validity: { graphRevision: string; filterRevision: string },
     options: { automatic?: boolean; fallbackNotice?: string } = {},
   ) => {
+    const louvainMetrics = new Map((result.louvainNodeMetrics || []).map((entry) => [String(entry.id), entry]));
     setNetworkMetrics((current) => current.map((entry) => ({
       ...entry,
+      ...(louvainMetrics.get(String(entry.id)) || {}),
       [result.resultId]: result.memberships[String(entry.id)],
     })));
-    setNodeMetrics(Object.entries(result.memberships).map(([id, community]) => ({ id, [result.resultId]: community })));
+    setNodeMetrics(Object.entries(result.memberships).map(([id, community]) => ({
+      ...(louvainMetrics.get(id) || { id }),
+      id,
+      community,
+      [result.resultId]: community,
+    })));
     setCommunityMap(result.memberships);
     setGraphMetrics((current) => ({ ...current, [`${result.resultId}_quality`]: result.quality }));
     const resultEngine = result.provenance.engine === 'graphology' ? 'browser' : 'cloud';
@@ -202,7 +223,23 @@ export function useGraphMetrics(
       presentCount: Object.keys(result.memberships).length,
     });
     const latestAttributes = useStore.getState().customAttributes;
-    setCustomAttributes([...latestAttributes.filter((entry) => !(entry.scope === 'node' && entry.name === result.resultId)), descriptor]);
+    const louvainDescriptors = result.algorithm === 'louvain' && result.louvainNodeMetrics?.length
+      ? LOUVAIN_NUMERIC_ATTRIBUTES.map(([name, label]) => resultMetadata({
+        name,
+        label,
+        scope: 'node',
+        semanticType: 'continuous',
+        origin: 'metric',
+        resultOf: result.resultId,
+        presentCount: result.louvainNodeMetrics!.length,
+      }))
+      : [];
+    const descriptorNames = new Set([result.resultId, ...louvainDescriptors.map((entry) => entry.name)]);
+    setCustomAttributes([
+      ...latestAttributes.filter((entry) => !(entry.scope === 'node' && descriptorNames.has(entry.name))),
+      descriptor,
+      ...louvainDescriptors,
+    ]);
     if (!options.automatic || !useStore.getState().restoredVisualization) {
       const styleSelection = communityResultStyleSelection(result.resultId);
       Object.entries(styleSelection).forEach(([key, value]) => setFilter(key as any, value as never));

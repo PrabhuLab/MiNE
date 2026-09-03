@@ -65,10 +65,18 @@ export interface EdgeFilter {
   attribute: string;
   min: number;
   max: number;
+  source?: 'attribute' | 'metric';
+}
+
+export interface NodeFilter {
+  attribute: string;
+  min: number;
+  max: number;
 }
 
 export interface WorkspaceFilters {
   edgeFilter: EdgeFilter | null;
+  nodeFilter: NodeFilter | null;
   /** @deprecated Read only during legacy workspace migration. */
   weightFilters?: WeightFilter[];
   searchEdges: boolean;
@@ -204,6 +212,7 @@ export const useStore = create<AppState>()(persist<AppState, [], [], { computeEn
 
   filters: {
     edgeFilter: null,
+    nodeFilter: null,
     searchEdges: false,
     removedNodes: "",
     resolution: 1.0,
@@ -265,6 +274,7 @@ export const useStore = create<AppState>()(persist<AppState, [], [], { computeEn
     showNodeLabels: false,
     filters: {
       edgeFilter: null,
+      nodeFilter: null,
       searchEdges: false,
       removedNodes: "",
       resolution: 1.0,

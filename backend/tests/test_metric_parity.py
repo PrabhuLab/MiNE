@@ -64,6 +64,9 @@ def test_modularity_uses_explicit_membership_and_louvain_is_separately_named(cli
     assert math.isfinite(result["graphMetrics"]["modularity"])
     assert math.isfinite(result["graphMetrics"]["louvainModularity"])
     assert len(result["nodeMetrics"]["louvain"]) == 3
+    assert len(result["nodeMetrics"]["louvainDeltaQ"]) == 3
+    assert len(result["nodeMetrics"]["modularityContribution"]) == 3
+    assert sum(result["nodeMetrics"]["modularityContribution"]) == pytest.approx(result["graphMetrics"]["louvainModularity"])
 
 
 def test_exact_metric_size_gate_never_returns_an_approximation(client, monkeypatch):

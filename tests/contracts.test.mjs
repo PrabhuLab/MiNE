@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { UndirectedGraph } from 'graphology';
 
 import { effectiveComputationEngine, effectiveRenderer, isLargeGraph } from '../services/engines/policy.ts';
 import { buildAttributeRegistry, edgeColorDescriptors, edgeWeightDescriptors, nodeColorDescriptors, nodeSizeDescriptors } from '../services/attributes/registry.ts';
@@ -7,10 +8,11 @@ import { communityResultStyleSelection } from '../services/communities/types.ts'
 import { automaticLouvainOnce, resetAutomaticLouvainForTests, shouldRunAutomaticLouvain, validSavedLouvainKey } from '../services/communities/automatic.ts';
 import { migrateComputationPreference, migrateRendererPreference, migrateWorkspaceFilters } from '../services/graphIO/migrations.ts';
 import { computeGraphLegendVisibility, computeLegendVisibility, legendItemId } from '../services/graphPresentation/legendVisibility.ts';
+import { sortLegendEntries } from '../services/graphPresentation/legendOrdering.ts';
 import { liveNumericValue } from '../services/graphStyles/liveUpdate.ts';
 import { staleCalculationIds } from '../services/metrics/validity.ts';
 import { degreeByNode, logarithmicNodeSize } from '../services/graphStyles/size.ts';
-import { computeActiveNetwork, computeTableDataEdges, computeTableDataNodes } from '../lib/workspaceUtils.ts';
+import { computeActiveNetwork, computeCommunityMetrics, computeTableDataEdges, computeTableDataNodes, filterNetworkByEdgeMetric, filterNetworkByNodeMetric } from '../lib/workspaceUtils.ts';
 import { detectCustomAttributeType } from '../services/graphIO/customAttributes.ts';
 
 test('large-graph boundaries prefer Cloud for auto routing without disabling Browser', () => {
@@ -80,6 +82,40 @@ test('degree uses the shared logarithmic size transform without amplification', 
   assert.equal(logarithmicNodeSize(degree.a, 3), 3 * Math.log(4) + 2);
 });
 
+test('degree and calculated numerical metrics filter nodes without recalculating the source metric', () => {
+  const nodes = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+  const edges = [{ source: 'a', target: 'b' }, { source: 'b', target: 'c' }];
+  const metrics = [{ id: 'a', degree: 1, pagerank: 0.2 }, { id: 'b', degree: 2, pagerank: 0.6 }, { id: 'c', degree: 1, pagerank: 0.2 }];
+  const byDegree = filterNetworkByNodeMetric(nodes, edges, { attribute: 'degree', min: 2, max: 2 }, metrics);
+  assert.deepEqual(byDegree.validNodes.map((node) => node.id), ['b']);
+  assert.deepEqual(byDegree.validEdges, []);
+  const byMetric = filterNetworkByNodeMetric(nodes, edges, { attribute: 'pagerank', min: 0.5, max: 1 }, metrics);
+  assert.deepEqual(byMetric.validNodes.map((node) => node.id), ['b']);
+  assert.equal(metrics[1].pagerank, 0.6);
+});
+
+test('calculated numerical edge metrics filter presentation edges without changing nodes', () => {
+  const nodes = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+  const edges = [{ key: 'ab', source: 'a', target: 'b' }, { key: 'bc', source: 'b', target: 'c' }];
+  const result = filterNetworkByEdgeMetric(nodes, edges, { attribute: 'edgeBetweenness', min: 0.5, max: 1, source: 'metric' }, [
+    { key: 'ab', edgeBetweenness: 0.25 }, { key: 'bc', edgeBetweenness: 0.75 },
+  ]);
+  assert.deepEqual(result.validNodes, nodes);
+  assert.deepEqual(result.validEdges.map((edge) => edge.key), ['bc']);
+});
+
+test('node modularity contributions follow the igraph matrix formula and sum to Q', () => {
+  const graph = new UndirectedGraph();
+  graph.addNode('a'); graph.addNode('b'); graph.addNode('c'); graph.addNode('d');
+  graph.addEdge('a', 'b', { weight: 1 });
+  graph.addEdge('c', 'd', { weight: 1 });
+  const metrics = computeCommunityMetrics(graph, { a: 0, b: 0, c: 1, d: 1 }, false, 1);
+  assert.ok(metrics.every((entry) => Math.abs(entry.louvainDeltaQ - 0.25) < 1e-12));
+  assert.ok(Math.abs(metrics.reduce((sum, entry) => sum + entry.modularityContribution, 0) - 0.5) < 1e-12);
+  const resolutionTwo = computeCommunityMetrics(graph, { a: 0, b: 0, c: 1, d: 1 }, false, 2);
+  assert.ok(Math.abs(resolutionTwo.reduce((sum, entry) => sum + entry.modularityContribution, 0)) < 1e-12);
+});
+
 test('community completion selects node color and source-derived edge color', () => {
   assert.deepEqual(communityResultStyleSelection('community_leiden'), {
     customNodeAttribute: 'community_leiden',
@@ -112,6 +148,35 @@ test('legend visibility has node- and edge-attribute hide/isolate parity', () =>
   assert.deepEqual([...isolatedEdge.visibleEdgeIds], ['bc']);
   assert.match(red, /^attribute:node:/);
   assert.ok(red.includes('%2F'));
+});
+
+test('legend communities and metrics use alphabetical and numerical ordering', () => {
+  const communities = [
+    { label: 'Community 10' },
+    { label: 'zebra' },
+    { label: 'Community 2' },
+    { label: 'alpha' },
+  ];
+  const metrics = [
+    { title: 'Metric 12' },
+    { title: 'metric 2' },
+    { title: 'Degree' },
+  ];
+
+  assert.deepEqual(
+    sortLegendEntries(communities, (entry) => entry.label).map((entry) => entry.label),
+    ['alpha', 'Community 2', 'Community 10', 'zebra'],
+  );
+  assert.deepEqual(
+    sortLegendEntries(metrics, (entry) => entry.title).map((entry) => entry.title),
+    ['Degree', 'metric 2', 'Metric 12'],
+  );
+  assert.deepEqual(communities.map((entry) => entry.label), [
+    'Community 10',
+    'zebra',
+    'Community 2',
+    'alpha',
+  ]);
 });
 
 test('Edges element isolation hides nodes and retains visible edges', () => {
@@ -156,7 +221,7 @@ test('automatic Louvain is de-duplicated and valid saved results are reused', as
   assert.equal(validSavedLouvainKey({
     validity: { community_louvain: { graphRevision: 'g', filterRevision: 'f', calculatedAt: 'now' } },
     graphRevision: 'g', filterRevision: 'f', nodeIds: ['a', 'b'],
-    nodes: { a: { community_louvain: 'A' }, b: { community_louvain: 'B' } },
+    nodes: { a: { community_louvain: 'A', louvainDeltaQ: 0.1 }, b: { community_louvain: 'B', louvainDeltaQ: 0.2 } },
   }), 'community_louvain');
 });
 

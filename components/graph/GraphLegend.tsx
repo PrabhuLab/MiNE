@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ChevronUp, ChevronDown } from 'lucide-react';
 import type { LegendMetricScale } from '@/services/graphStyles/types';
+import { sortLegendEntries } from '@/services/graphPresentation/legendOrdering';
 import type { ElementLegendItem, LegendCategories, LegendCategoryItem } from './legend/types';
 import { useStore } from '@/store/useStore';
 
@@ -63,7 +64,14 @@ export default function GraphLegend({
   const [editingColorId, setEditingColorId] = useState<string | null>(null);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set());
   const setLegendColor = useStore((state) => state.setLegendColor);
-  const metricScales = legendMetricScales.length ? legendMetricScales : legendMetricScale ? [legendMetricScale] : [];
+  const metricScales = sortLegendEntries(
+    legendMetricScales.length ? legendMetricScales : legendMetricScale ? [legendMetricScale] : [],
+    (metricScale) => metricScale.title,
+  );
+  const orderedLegendCategories = legendCategories.map((category) => ({
+    ...category,
+    items: sortLegendEntries(category.items, (item) => item.label),
+  }));
   const visualScalesSection = 'Visual Scales';
   useEffect(() => () => Object.values(clickTimers.current).forEach(clearTimeout), []);
 
@@ -290,7 +298,7 @@ export default function GraphLegend({
             </div>
           </div>
 
-          {legendCategories.map((category) => (
+          {orderedLegendCategories.map((category) => (
             <div key={category.title}>
               <button
                 type="button"
