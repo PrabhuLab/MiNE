@@ -150,12 +150,17 @@ test('legend visibility has node- and edge-attribute hide/isolate parity', () =>
   assert.ok(red.includes('%2F'));
 });
 
-test('legend communities and metrics use alphabetical and numerical ordering', () => {
+test('legend communities, metrics, and custom attributes use natural alphabetical ordering', () => {
   const communities = [
     { label: 'Community 10' },
     { label: 'zebra' },
     { label: 'Community 2' },
     { label: 'alpha' },
+  ];
+  const customAttributes = [
+    { label: 'Wholesale' },
+    { label: 'enterprise' },
+    { label: 'Academic' },
   ];
   const metrics = [
     { title: 'Metric 12' },
@@ -170,6 +175,10 @@ test('legend communities and metrics use alphabetical and numerical ordering', (
   assert.deepEqual(
     sortLegendEntries(metrics, (entry) => entry.title).map((entry) => entry.title),
     ['Degree', 'metric 2', 'Metric 12'],
+  );
+  assert.deepEqual(
+    sortLegendEntries(customAttributes, (entry) => entry.label).map((entry) => entry.label),
+    ['Academic', 'enterprise', 'Wholesale'],
   );
   assert.deepEqual(communities.map((entry) => entry.label), [
     'Community 10',
