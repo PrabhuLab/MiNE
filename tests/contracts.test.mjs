@@ -9,7 +9,8 @@ import { automaticLouvainOnce, resetAutomaticLouvainForTests, shouldRunAutomatic
 import { migrateComputationPreference, migrateRendererPreference, migrateWorkspaceFilters } from '../services/graphIO/migrations.ts';
 import { computeGraphLegendVisibility, computeLegendVisibility, legendItemId } from '../services/graphPresentation/legendVisibility.ts';
 import { sortLegendEntries } from '../services/graphPresentation/legendOrdering.ts';
-import { liveNumericValue } from '../services/graphStyles/liveUpdate.ts';
+import { graphSettings, liveNumericValue } from '../services/graphStyles/liveUpdate.ts';
+import { viewportRasterDimensions } from '../lib/exportUtils.ts';
 import { staleCalculationIds } from '../services/metrics/validity.ts';
 import { degreeByNode, logarithmicNodeSize } from '../services/graphStyles/size.ts';
 import { computeActiveNetwork, computeCommunityMetrics, computeTableDataEdges, computeTableDataNodes, filterNetworkByEdgeMetric, filterNetworkByNodeMetric } from '../lib/workspaceUtils.ts';
@@ -253,6 +254,30 @@ test('numeric customization values always enter draft state for live or deferred
   assert.equal(liveNumericValue('2.5', true), 2.5);
   assert.equal(liveNumericValue('2.5', false), 2.5);
   assert.equal(liveNumericValue('', true), undefined);
+});
+
+test('automatic graph updates use every draft setting immediately', () => {
+  const applied = { liveUpdate: false, nodeColorBase: 'uniform', nodeFilter: null };
+  const liveDraft = { liveUpdate: true, nodeColorBase: 'community', nodeFilter: { attribute: 'degree', min: 2, max: 10 } };
+  const manualDraft = { ...liveDraft, liveUpdate: false };
+
+  assert.strictEqual(graphSettings(liveDraft, applied), liveDraft);
+  assert.strictEqual(graphSettings(manualDraft, applied), applied);
+});
+
+test('raster graph exports preserve the client viewport aspect ratio at high resolution', () => {
+  assert.deepEqual(viewportRasterDimensions(1200, 675, 1), {
+    viewportWidth: 1200,
+    viewportHeight: 675,
+    exportWidth: 2400,
+    exportHeight: 1350,
+  });
+  assert.deepEqual(viewportRasterDimensions(800.4, 600.4, 3), {
+    viewportWidth: 800,
+    viewportHeight: 600,
+    exportWidth: 2400,
+    exportHeight: 1800,
+  });
 });
 
 test('metric projections flatten node and edge result records for tables', () => {

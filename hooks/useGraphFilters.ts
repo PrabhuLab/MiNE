@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useStore } from '@/store/useStore';
 import { computeActiveNetwork } from '@/lib/workspaceUtils';
+import { graphSettings } from '@/services/graphStyles/liveUpdate';
 
 export function useGraphFilters() {
   const { rawNodes, rawEdges, filters, setFilter } = useStore();
   
   const [appliedFilters, setAppliedFilters] = useState(filters);
+  const activeFilters = graphSettings(filters, appliedFilters);
   const [network, setNetwork] = useState(() => computeActiveNetwork(rawNodes, rawEdges, filters));
   
   useEffect(() => {
@@ -15,11 +17,11 @@ export function useGraphFilters() {
     }
   }, [filters]);
 
-  const removedNodesStr = appliedFilters.removedNodes || '';
-  const edgeFilterStr = JSON.stringify(appliedFilters.edgeFilter);
+  const removedNodesStr = activeFilters.removedNodes || '';
+  const edgeFilterStr = JSON.stringify(activeFilters.edgeFilter);
 
   useEffect(() => {
-    const computed = computeActiveNetwork(rawNodes, rawEdges, appliedFilters);
+    const computed = computeActiveNetwork(rawNodes, rawEdges, activeFilters);
     
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setNetwork(prev => {
@@ -39,7 +41,7 @@ export function useGraphFilters() {
       }
       return computed;
     });
-  }, [rawNodes, rawEdges, removedNodesStr, edgeFilterStr, appliedFilters]);
+  }, [rawNodes, rawEdges, removedNodesStr, edgeFilterStr, activeFilters]);
 
   // Sync missing variables fallback logic (the one with useEffect)
   const hasType = rawNodes.some(n => n.type !== undefined);
@@ -58,7 +60,7 @@ export function useGraphFilters() {
     rawEdges,
     filters,
     setFilter,
-    appliedFilters,
+    appliedFilters: activeFilters,
     setAppliedFilters,
     validNodes: network.validNodes,
     validEdges: network.validEdges,

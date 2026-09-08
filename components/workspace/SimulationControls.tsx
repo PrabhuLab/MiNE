@@ -11,23 +11,23 @@ export const SimulationControls = ({ setAppliedFilters, appliedFilters, rawNodes
 
   return (
     <div>
-      <h3 className={`text-[10px] font-bold uppercase tracking-widest mb-4 opacity-70 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Live Updates</h3>
+      <h3 className={`text-[10px] font-bold uppercase tracking-widest mb-4 opacity-70 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>Graph Updates</h3>
       <div className="flex flex-col space-y-4">
           <div className="flex items-center justify-between">
-            <label className="text-xs font-bold uppercase text-[10px]">Live Update Controls</label>
+            <label className="text-xs font-bold uppercase text-[10px]">Update Graph Automatically</label>
             <SegmentedToggle 
               checked={filters.liveUpdate}
               onChange={(v: boolean) => setFilter('liveUpdate', v)}
               isDarkMode={isDarkMode}
-              ariaLabel="Live Update Controls"
+              ariaLabel="Update graph automatically"
             />
           </div>
 
           {!filters.liveUpdate && (
             <div className="flex flex-col space-y-2">
               <div className="px-2.5 py-1.5 border border-amber-500/40 bg-amber-500/10 text-amber-500 text-[10px] uppercase font-bold tracking-widest rounded-sm flex items-center justify-between">
-                <span>{pending ? 'Changes Pending' : 'Draft Mode'}</span>
-                <span className="text-[9px] opacity-75">{pending ? '(Deferred)' : '(Applied)'}</span>
+                <span>{pending ? 'Changes Pending' : 'Manual Updates'}</span>
+                <span className="text-[9px] opacity-75">{pending ? '(Not Applied)' : '(Up to Date)'}</span>
               </div>
               <button 
                 onClick={() => setAppliedFilters(useStore.getState().filters)}

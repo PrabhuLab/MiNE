@@ -161,27 +161,33 @@ export function useWorkspaceIO(options: WorkspaceIOOptions) {
       return;
     }
     if (format === 'png' || format === 'jpeg') {
-      if (options.useSigma && options.sigmaRendererRef.current) {
-        try {
+      try {
+        if (options.useSigma && options.sigmaRendererRef.current) {
+          const renderer = options.sigmaRendererRef.current;
+          const dimensions = renderer.getDimensions();
+          const cameraState = renderer.getCamera().getState();
           const { toBlob } = await import('@sigma/export-image');
-          const blob = await toBlob(options.sigmaRendererRef.current, {
+          const blob = await toBlob(renderer, {
             format,
             fileName: options.projectName,
             backgroundColor: options.isDarkMode ? '#141414' : '#ffffff',
+            width: dimensions.width,
+            height: dimensions.height,
+            cameraState,
           });
           downloadBlobAsFile(blob, `${options.projectName}.${format === 'jpeg' ? 'jpg' : 'png'}`);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          console.error('Sigma image export failed:', error);
-          window.alert(`Sigma image export failed: ${message}`);
+        } else {
+          await exportImage(
+            document.getElementById('network-graph-svg') as SVGSVGElement | null,
+            format,
+            `${options.projectName}.${format === 'jpeg' ? 'jpg' : 'png'}`,
+            options.isDarkMode,
+          );
         }
-      } else {
-        exportImage(
-          document.getElementById('network-graph-svg') as SVGSVGElement | null,
-          format,
-          `${options.projectName}.${format === 'jpeg' ? 'jpg' : 'png'}`,
-          options.isDarkMode,
-        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error('Graph image export failed:', error);
+        window.alert(`Graph image export failed: ${message}`);
       }
       return;
     }

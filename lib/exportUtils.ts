@@ -32,7 +32,6 @@ export const exportElementAsImage = async (element: HTMLElement | null, filename
     allowTaint: false,
     onclone: (documentClone) => {
       const legendClone = documentClone.getElementById(element.id);
-      legendClone?.querySelectorAll('input[type="color"]').forEach((input) => input.remove());
       if (!legendClone) return;
 
       // Tailwind 4 uses oklab/color-mix for several computed colors, which
@@ -71,6 +70,9 @@ export const exportElementAsImage = async (element: HTMLElement | null, filename
           clonedNode.style.setProperty('background-image', 'none', 'important');
         }
       });
+      // Remove color pickers only after original and cloned nodes have been
+      // matched; removing them earlier shifts every subsequent style mapping.
+      legendClone.querySelectorAll('input[type="color"]').forEach((input) => input.remove());
     },
   });
   const blob = await new Promise<Blob | null>((resolve, reject) => {
@@ -109,68 +111,34 @@ export const exportSvg = (svgElement: SVGSVGElement | null, filename: string) =>
   downloadStringAsFile(svgString, filename, 'image/svg+xml;charset=utf-8');
 };
 
-export const exportImage = (svgElement: SVGSVGElement | null, format: 'png' | 'jpeg', filename: string, isDarkMode: boolean = false) => {
-  if (!svgElement) return;
+export const viewportRasterDimensions = (width: number, height: number, pixelRatio: number) => {
+  const viewportWidth = Math.max(1, Math.round(width));
+  const viewportHeight = Math.max(1, Math.round(height));
+  const scale = Math.max(2, pixelRatio || 1);
+  return {
+    viewportWidth,
+    viewportHeight,
+    exportWidth: Math.round(viewportWidth * scale),
+    exportHeight: Math.round(viewportHeight * scale),
+  };
+};
 
+export const exportImage = async (svgElement: SVGSVGElement | null, format: 'png' | 'jpeg', filename: string, isDarkMode: boolean = false) => {
+  if (!svgElement) throw new Error('The graph viewport is not available.');
+
+  const bounds = svgElement.getBoundingClientRect();
+  const { viewportWidth, viewportHeight, exportWidth, exportHeight } = viewportRasterDimensions(
+    bounds.width || svgElement.clientWidth,
+    bounds.height || svgElement.clientHeight,
+    window.devicePixelRatio || 1,
+  );
   const clone = svgElement.cloneNode(true) as SVGSVGElement;
-  
-  // Find zoom group to get actual content bounding box
-  const zoomGroupDom = svgElement.querySelector('.zoom-group') as SVGGElement | null;
-  const zoomGroupClone = clone.querySelector('.zoom-group') as SVGGElement | null;
-  
-  let exportWidth = 2000;
-  let exportHeight = 2000;
 
-  if (zoomGroupDom && zoomGroupClone) {
-    // Calculate bounding box manually based on visible nodes to avoid huge invisible SVG elements
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    const nodeGroups = zoomGroupDom.querySelectorAll('.node-group');
-    
-    nodeGroups.forEach(group => {
-      if (group.getAttribute('display') === 'none') return;
-      const transform = group.getAttribute('transform');
-      if (transform) {
-        const match = transform.match(/translate\(([^,]+),\s*([^)]+)\)/);
-        if (match) {
-          const x = parseFloat(match[1]);
-          const y = parseFloat(match[2]);
-          const circle = group.querySelector('circle.node-shape');
-          const r = circle ? parseFloat(circle.getAttribute('r') || '0') : 0;
-          
-          if (x - r < minX) minX = x - r;
-          if (x + r > maxX) maxX = x + r;
-          if (y - r < minY) minY = y - r;
-          if (y + r > maxY) maxY = y + r;
-        }
-      }
-    });
-
-    if (minX !== Infinity && maxX !== -Infinity && minY !== Infinity && maxY !== -Infinity) {
-      const padding = 100;
-      const vbX = minX - padding;
-      const vbY = minY - padding;
-      const vbWidth = (maxX - minX) + padding * 2;
-      const vbHeight = (maxY - minY) + padding * 2;
-      
-      // Set viewBox on clone to exactly match the content
-      clone.setAttribute('viewBox', `${vbX} ${vbY} ${vbWidth} ${vbHeight}`);
-      
-      // Remove the current zoom transform from the clone so it doesn't get offset
-      zoomGroupClone.removeAttribute('transform');
-      
-      // Set explicit export dimensions based on bounding box ratio to ensure high res
-      exportWidth = Math.max(4000, vbWidth * 2); // High resolution base width
-      exportHeight = exportWidth * (vbHeight / vbWidth);
-      
-      clone.setAttribute('width', `${exportWidth}`);
-      clone.setAttribute('height', `${exportHeight}`);
-    }
-  } else {
-    exportWidth = (svgElement.clientWidth || 1000) * 4;
-    exportHeight = (svgElement.clientHeight || 1000) * 4;
-    clone.setAttribute('width', `${exportWidth}`);
-    clone.setAttribute('height', `${exportHeight}`);
-  }
+  // Keep the zoom group's current transform and rasterize the exact visible
+  // SVG viewport. Output resolution is increased without changing framing.
+  clone.setAttribute('viewBox', `0 0 ${viewportWidth} ${viewportHeight}`);
+  clone.setAttribute('width', `${exportWidth}`);
+  clone.setAttribute('height', `${exportHeight}`);
 
   // Inline basic styles to ensure text and lines render correctly in canvas
   const style = document.createElement('style');
@@ -192,34 +160,37 @@ export const exportImage = (svgElement: SVGSVGElement | null, format: 'png' | 'j
   }
   source = '<?xml version="1.0" standalone="no"?>\r\n' + source;
   
-  const img = new Image();
   const svgBlob = new Blob([source], { type: 'image/svg+xml;charset=utf-8' });
   const url = URL.createObjectURL(svgBlob);
-  
-  img.onload = () => {
+
+  try {
+    const img = new Image();
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error('The graph SVG could not be rendered.'));
+      img.src = url;
+    });
+
     const canvas = document.createElement('canvas');
     canvas.width = exportWidth;
     canvas.height = exportHeight;
-    
     const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    
-    // Set background if it's jpeg or if we want a solid background
-    if (format === 'jpeg') {
-      ctx.fillStyle = isDarkMode ? '#141414' : '#ffffff';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-    }
-    
+    if (!ctx) throw new Error('A canvas could not be created for the graph export.');
+
+    ctx.fillStyle = isDarkMode ? '#141414' : '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(img, 0, 0, exportWidth, exportHeight);
-    
-    const imgUrl = canvas.toDataURL(`image/${format}`, 1.0);
-    const a = document.createElement('a');
-    a.href = imgUrl;
-    a.download = filename;
-    a.click();
-    
+
+    const blob = await new Promise<Blob | null>((resolve, reject) => {
+      try {
+        canvas.toBlob(resolve, `image/${format}`, 1);
+      } catch (error) {
+        reject(error);
+      }
+    });
+    if (!blob) throw new Error(`The graph could not be encoded as ${format.toUpperCase()}.`);
+    downloadBlobAsFile(blob, filename);
+  } finally {
     URL.revokeObjectURL(url);
-  };
-  
-  img.src = url;
+  }
 };
