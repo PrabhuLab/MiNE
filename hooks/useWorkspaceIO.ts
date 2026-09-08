@@ -2,7 +2,7 @@ import type { ChangeEvent, RefObject } from 'react';
 import type Graph from 'graphology';
 import type Sigma from 'sigma';
 import { resetCommunityColorCache } from '@/lib/communityUtils';
-import { downloadBlobAsFile, downloadStringAsFile, exportElementAsImage, exportImage, exportSvg } from '@/lib/exportUtils';
+import { downloadBlobAsFile, downloadStringAsFile, exportElementAsImage, exportImage, exportSvg, viewportRasterDimensions } from '@/lib/exportUtils';
 import {
   buildAllInOne,
   buildCsvZip,
@@ -166,13 +166,17 @@ export function useWorkspaceIO(options: WorkspaceIOOptions) {
           const renderer = options.sigmaRendererRef.current;
           const dimensions = renderer.getDimensions();
           const cameraState = renderer.getCamera().getState();
+          const pixelRatio = window.devicePixelRatio || 1;
+          const rasterDimensions = viewportRasterDimensions(dimensions.width, dimensions.height, pixelRatio);
           const { toBlob } = await import('@sigma/export-image');
           const blob = await toBlob(renderer, {
             format,
             fileName: options.projectName,
             backgroundColor: options.isDarkMode ? '#141414' : '#ffffff',
-            width: dimensions.width,
-            height: dimensions.height,
+            // Sigma applies the device pixel ratio internally. Scale its
+            // temporary viewport so the final raster is at least 4×.
+            width: rasterDimensions.exportWidth / pixelRatio,
+            height: rasterDimensions.exportHeight / pixelRatio,
             cameraState,
           });
           downloadBlobAsFile(blob, `${options.projectName}.${format === 'jpeg' ? 'jpg' : 'png'}`);

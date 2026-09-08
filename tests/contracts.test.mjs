@@ -269,14 +269,14 @@ test('raster graph exports preserve the client viewport aspect ratio at high res
   assert.deepEqual(viewportRasterDimensions(1200, 675, 1), {
     viewportWidth: 1200,
     viewportHeight: 675,
-    exportWidth: 2400,
-    exportHeight: 1350,
+    exportWidth: 4800,
+    exportHeight: 2700,
   });
   assert.deepEqual(viewportRasterDimensions(800.4, 600.4, 3), {
     viewportWidth: 800,
     viewportHeight: 600,
-    exportWidth: 2400,
-    exportHeight: 1800,
+    exportWidth: 3200,
+    exportHeight: 2400,
   });
 });
 
