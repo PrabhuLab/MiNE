@@ -174,7 +174,7 @@ export function useWorkspaceIO(options: WorkspaceIOOptions) {
             fileName: options.projectName,
             backgroundColor: options.isDarkMode ? '#141414' : '#ffffff',
             // Sigma applies the device pixel ratio internally. Scale its
-            // temporary viewport so the final raster is at least 4×.
+            // temporary viewport so the final raster is at least 10×.
             width: rasterDimensions.exportWidth / pixelRatio,
             height: rasterDimensions.exportHeight / pixelRatio,
             cameraState,

@@ -114,7 +114,7 @@ export const exportSvg = (svgElement: SVGSVGElement | null, filename: string) =>
 export const viewportRasterDimensions = (width: number, height: number, pixelRatio: number) => {
   const viewportWidth = Math.max(1, Math.round(width));
   const viewportHeight = Math.max(1, Math.round(height));
-  const scale = Math.max(4, pixelRatio || 1);
+  const scale = Math.max(10, pixelRatio || 1);
   return {
     viewportWidth,
     viewportHeight,
