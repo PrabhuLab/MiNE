@@ -29,6 +29,8 @@ import { StepDataMapping } from './steps/StepDataMapping';
 import { migrateComputationPreference, migrateRendererPreference, migrateWorkspaceFilters } from '@/services/graphIO/migrations';
 import { UnifiedNetworkImportCard } from './UnifiedNetworkImportCard';
 import { RandomGraphCard, type RandomGraphOptions } from './RandomGraphCard';
+import { MindatNetworkCard } from './MindatNetworkCard';
+import { fetchMindatDataset, fetchMindatNetwork, type MindatDatasetQuery, type MindatNetworkQuery } from '@/services/mindat/client';
 
 const detectNodeIdColumn = (headers: string[]) =>
   headers.find((header) => /^(?:id|node[ _-]?id|key|mode[ _-]?#)$/i.test(String(header).trim())) || headers[0] || '';
@@ -43,6 +45,8 @@ export default function SmartUploadWizard() {
   const isDarkMode = useStore((state) => state.isDarkMode);
   const [networkFiles, setNetworkFiles] = useState<File[]>([]);
   const [networkImporting, setNetworkImporting] = useState(false);
+  const [mindatImporting, setMindatImporting] = useState(false);
+  const [mindatError, setMindatError] = useState<string | null>(null);
   const [randomOptions, setRandomOptions] = useState<RandomGraphOptions>({ order: 100, size: 350, clusters: 5, clusterDensity: 0.7 });
 
   // Cascade UI State
@@ -353,10 +357,57 @@ export default function SmartUploadWizard() {
     }
   };
 
+  const handleMindatDataset = async (query: MindatDatasetQuery) => {
+    setMindatImporting(true);
+    setMindatError(null);
+    try {
+      return await fetchMindatDataset(query);
+    } catch (mindatRequestError) {
+      setMindatError(mindatRequestError instanceof Error ? mindatRequestError.message : 'Unable to create Mindat JSON.');
+      throw mindatRequestError;
+    } finally {
+      setMindatImporting(false);
+    }
+  };
+
+  const handleMindatNetwork = async (query: MindatNetworkQuery) => {
+    setMindatImporting(true);
+    setMindatError(null);
+    try {
+      const network = await fetchMindatNetwork(query);
+      const graph = graphFromRaw(network.nodes, network.edges, false, network.bipartite);
+      graph.mergeAttributes({
+        source: 'Mindat.org API',
+        sourceUrl: 'https://api.mindat.org/v1/',
+        license: 'CC BY-NC-SA 4.0',
+        mindatQuery: JSON.stringify(query.dataset.query),
+        mindatTopology: query.topology,
+        mindatAttributes: JSON.stringify(query.attributes),
+        occurrenceCount: network.occurrenceCount,
+        mineralCount: network.mineralCount,
+        localityCount: network.localityCount,
+      });
+      applyParsedNetwork({
+        graph,
+        directed: false,
+        bipartite: network.bipartite,
+        weighted: network.edges.some((edge) => edge.weight_raw !== 1),
+        metrics: null,
+        workspace: null,
+        projectName: query.topology === 'bipartite' ? 'MINDAT_OCCURRENCES' : `MINDAT_${query.topology.toUpperCase()}_PROJECTION`,
+      }, false);
+    } catch (mindatRequestError) {
+      setMindatError(mindatRequestError instanceof Error ? mindatRequestError.message : 'Unable to create a network from Mindat.');
+    } finally {
+      setMindatImporting(false);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-8">
       {!topology && <UnifiedNetworkImportCard isDarkMode={isDarkMode} files={networkFiles} importing={networkImporting} onFilesChange={setNetworkFiles} onImport={handleUnifiedImport} />}
       {!topology && <RandomGraphCard isDarkMode={isDarkMode} options={randomOptions} generating={networkImporting} onChange={setRandomOptions} onGenerate={handleRandomGraph} />}
+      {!topology && <MindatNetworkCard isDarkMode={isDarkMode} generating={mindatImporting} error={mindatError} onCreateDataset={handleMindatDataset} onBuildNetwork={handleMindatNetwork} />}
 
       <div
       className={`order-1 w-full max-w-4xl mx-auto mt-12 overflow-hidden mb-12 flex flex-col transition-colors ${

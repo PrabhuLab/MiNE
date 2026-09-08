@@ -1,5 +1,5 @@
 from typing import Any, Literal
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 
 def to_camel(value: str) -> str:
@@ -90,3 +90,76 @@ class AnalyzeResponse(ApiModel):
     validity: dict[str, Any] = Field(default_factory=dict)
     warnings: dict[str, str] = Field(default_factory=dict)
     timings: dict[str, float] = Field(default_factory=dict)
+
+
+class MindatAttributeSelection(ApiModel):
+    mineral: list[str] = Field(default_factory=list, max_length=256)
+    locality: list[str] = Field(default_factory=list, max_length=128)
+    occurrence: list[str] = Field(default_factory=list, max_length=64)
+
+    @field_validator("mineral", "locality", "occurrence")
+    @classmethod
+    def unique_attributes(cls, values: list[str]) -> list[str]:
+        return list(dict.fromkeys(value.strip() for value in values if value.strip()))
+
+
+class MindatSearchFilters(ApiModel):
+    mineral_ids: list[int] = Field(default_factory=list, max_length=100)
+    locality_ids: list[int] = Field(default_factory=list, max_length=100)
+    name: str = Field(default="", max_length=255)
+    keywords: str = Field(default="", max_length=255)
+    include_elements: list[str] = Field(default_factory=list, max_length=32)
+    exclude_elements: list[str] = Field(default_factory=list, max_length=32)
+    essential_elements_only: bool = False
+
+    @field_validator("mineral_ids", "locality_ids")
+    @classmethod
+    def positive_unique_ids(cls, values: list[int]) -> list[int]:
+        if any(value <= 0 for value in values):
+            raise ValueError("Mindat IDs must be positive integers.")
+        return list(dict.fromkeys(values))
+
+    @field_validator("include_elements", "exclude_elements")
+    @classmethod
+    def chemical_symbols(cls, values: list[str]) -> list[str]:
+        cleaned = list(dict.fromkeys(value.strip() for value in values if value.strip()))
+        if any(
+            not value.isalpha() or len(value) > 2 or not value[0].isupper()
+            or (len(value) == 2 and not value[1].islower())
+            for value in cleaned
+        ):
+            raise ValueError("Chemical elements must use symbols such as Fe, Cu, or Si.")
+        return cleaned
+
+    @model_validator(mode="after")
+    def search_filter_requested(self):
+        if not any((
+            self.mineral_ids, self.locality_ids, self.name.strip(), self.keywords.strip(),
+            self.include_elements, self.exclude_elements,
+        )):
+            raise ValueError("At least one Mindat search filter is required.")
+        return self
+
+
+class MindatDatasetRequest(ApiModel):
+    api_token: SecretStr = Field(min_length=1, max_length=512)
+    filters: MindatSearchFilters
+    max_geomaterials: int = Field(default=250, ge=1, le=500)
+    max_occurrences: int = Field(default=1000, ge=1, le=5000)
+    include_questioned: bool = False
+
+
+class MindatDataset(ApiModel):
+    format: Literal["mindat-json"] = "mindat-json"
+    version: Literal[1] = 1
+    query: dict[str, Any]
+    attribute_catalog: dict[Literal["mineral", "locality", "occurrence"], list[str]]
+    geomaterials: list[dict[str, Any]]
+    localities: list[dict[str, Any]]
+    occurrences: list[dict[str, Any]]
+
+
+class MindatNetworkRequest(ApiModel):
+    dataset: MindatDataset
+    topology: Literal["bipartite", "mineral", "locality"] = "bipartite"
+    attributes: MindatAttributeSelection = Field(default_factory=MindatAttributeSelection)

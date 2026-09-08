@@ -15,6 +15,9 @@ def test_health_and_capabilities(client):
     assert "leiden" not in algorithm_ids
     assert capabilities["limits"]["maxNodes"] > 0
     assert capabilities["exactMetricThresholds"]["edgeBetweenness"]["maxNodes"] < capabilities["limits"]["maxNodes"]
+    assert capabilities["mindat"]["sourceFormat"] == "mindat-json"
+    assert capabilities["mindat"]["formulaSearch"] is False
+    assert "excludeElements" in capabilities["mindat"]["searchFilters"]
 
 
 def test_gzip_contract_is_compact_and_revision_aligned(client):

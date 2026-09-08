@@ -27,6 +27,11 @@ MiNE supports:
 - Graphology JSON and MiNE All-in-One JSON;
 - GraphML and GEXF;
 - canonical `nodes.csv` + `edges.csv` pairs and CSV ZIP exports.
+- Mindat JSON creation by mineral/locality ID, wildcard mineral name, general search term, included chemical elements, excluded chemical elements, and essential-element matching. A created dataset can be downloaded, then converted into a bipartite mineral–locality network, mineral shared-locality projection, or locality shared-mineral projection through a scrollable attribute-mapping step.
+
+Mindat imports require an approved Mindat API token and the configured Python service. The service uses the OpenMindat Python package to retrieve the selected records. The token is kept only in page/request memory and is not saved in workspace files, browser preferences, environment variables, or OpenMindat key files.
+
+OpenMindat 0.1.3 does not expose a dedicated chemical-formula search filter, so MiNE does not emulate one. Formula fields returned by Mindat remain available in the JSON and network attribute checklist.
 
 Secondary Weight remains absent unless it was explicitly supplied by the source. An uploaded field named `abundance` is preserved as ordinary numeric metadata; degree is the built-in topology size field.
 

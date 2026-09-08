@@ -20,7 +20,8 @@ from .errors import ApiError, too_large
 from .graph_builder import build_graph
 from .layouts import SUPPORTED_LAYOUTS, compute_layout
 from .metrics import REGISTRY, capabilities, compute_metrics
-from .models import AnalyzeRequest, AnalyzeResponse, Positions
+from .models import AnalyzeRequest, AnalyzeResponse, MindatDatasetRequest, MindatNetworkRequest, Positions
+from .mindat import build_mindat_network, fetch_mindat_dataset
 from .communities import COMMUNITY_CAPABILITIES, compute_community
 
 settings = get_settings()
@@ -36,6 +37,7 @@ app.add_middleware(
 logger = logging.getLogger("mine.igraph")
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(message)s")
 analysis_slot = threading.BoundedSemaphore(1)
+mindat_slot = threading.BoundedSemaphore(2)
 
 
 def log_event(event: str, **values: Any) -> None:
@@ -103,16 +105,80 @@ async def get_capabilities():
         "supportedMetricIds": list(REGISTRY),
         "supportedLayoutIds": list(SUPPORTED_LAYOUTS),
         "communityAlgorithms": COMMUNITY_CAPABILITIES,
+        "mindat": {
+            "package": "openmindat",
+            "sourceFormat": "mindat-json",
+            "searchFilters": ["mineralIds", "localityIds", "name", "keywords", "includeElements", "excludeElements", "essentialElementsOnly"],
+            "formulaSearch": False,
+            "networkTopologies": ["bipartite", "mineral", "locality"],
+        },
         "limits": {
             "maxNodes": settings.max_nodes,
             "maxEdges": settings.max_edges,
             "maxCompressedBytes": settings.max_compressed_bytes,
             "maxDecompressedBytes": settings.max_decompressed_bytes,
+            "mindatMaxProjectionEdges": settings.mindat_max_projection_edges,
         },
         "exactMetricThresholds": exact_thresholds,
         "approximateMetricThresholds": {},
         "metricDefinitions": capabilities(settings),
     }
+
+
+def perform_mindat_dataset_with_slot(request: MindatDatasetRequest):
+    try:
+        return fetch_mindat_dataset(request)
+    finally:
+        mindat_slot.release()
+
+
+def perform_mindat_network_with_slot(request: MindatNetworkRequest) -> dict[str, Any]:
+    try:
+        return build_mindat_network(request, settings.mindat_max_projection_edges)
+    finally:
+        mindat_slot.release()
+
+
+@app.post("/v1/mindat/dataset")
+async def create_mindat_dataset(http_request: Request):
+    body = await http_request.body()
+    if len(body) > 256 * 1024:
+        raise too_large("mindat_body", "Mindat request exceeds the configured transport limit.")
+    try:
+        request = MindatDatasetRequest.model_validate(orjson.loads(body))
+    except orjson.JSONDecodeError as exc:
+        raise ApiError(400, "invalid_json", "Request body is not valid JSON.") from exc
+    except Exception as exc:
+        raise ApiError(422, "validation_error", "Mindat dataset search fields are invalid.") from exc
+    if not mindat_slot.acquire(blocking=False):
+        raise ApiError(429, "mindat_busy", "The Mindat importer is busy. Try again shortly.")
+    try:
+        dataset = await asyncio.wait_for(
+            asyncio.to_thread(perform_mindat_dataset_with_slot, request),
+            timeout=settings.request_timeout_seconds,
+        )
+    except asyncio.TimeoutError as exc:
+        raise ApiError(503, "mindat_timeout", "Mindat did not finish the request in time.") from exc
+    accept_gzip = "gzip" in http_request.headers.get("accept-encoding", "").lower()
+    return json_response(dataset.model_dump(by_alias=True), accept_gzip=accept_gzip)
+
+
+@app.post("/v1/mindat/network")
+async def create_mindat_network(http_request: Request):
+    body = await http_request.body()
+    if len(body) > settings.max_decompressed_bytes:
+        raise too_large("mindat_body", "Mindat JSON exceeds the configured transport limit.")
+    try:
+        request = MindatNetworkRequest.model_validate(orjson.loads(body))
+    except orjson.JSONDecodeError as exc:
+        raise ApiError(400, "invalid_json", "Request body is not valid JSON.") from exc
+    except Exception as exc:
+        raise ApiError(422, "validation_error", "Mindat network fields or source JSON are invalid.") from exc
+    if not mindat_slot.acquire(blocking=False):
+        raise ApiError(429, "mindat_busy", "The Mindat importer is busy. Try again shortly.")
+    payload = await asyncio.to_thread(perform_mindat_network_with_slot, request)
+    accept_gzip = "gzip" in http_request.headers.get("accept-encoding", "").lower()
+    return json_response(payload, accept_gzip=accept_gzip)
 
 
 def perform_analysis(request: AnalyzeRequest, decode_ms: float) -> AnalyzeResponse:

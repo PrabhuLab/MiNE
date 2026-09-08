@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     edge_betweenness_max_nodes: int = 25_000
     edge_betweenness_max_edges: int = 150_000
     fr_max_nodes: int = 20_000
+    mindat_max_projection_edges: int = 250_000
 
     @property
     def allowed_origins(self) -> list[str]:
