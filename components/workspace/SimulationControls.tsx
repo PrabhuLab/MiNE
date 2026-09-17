@@ -2,6 +2,7 @@ import React from 'react';
 import { useStore } from '@/store/useStore';
 import { SegmentedToggle } from '@/components/ui/SegmentedToggle';
 import { EdgeFilterControl } from './EdgeFilterControl';
+import { CommunityFilterControl } from './CommunityFilterControl';
 import { FilterControls } from './FilterControls';
 import { NodeMetricFilterControl } from './NodeMetricFilterControl';
 
@@ -50,6 +51,7 @@ export const SimulationControls = ({ setAppliedFilters, appliedFilters, rawNodes
           </div>
           <EdgeFilterControl edgeMetrics={edgeMetrics} />
           <NodeMetricFilterControl nodes={filterNodes} networkMetrics={networkMetrics} />
+          <CommunityFilterControl nodes={rawNodes} networkMetrics={networkMetrics} />
           <FilterControls rawNodes={rawNodes} />
       </div>
     </div>

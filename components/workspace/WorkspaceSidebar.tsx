@@ -4,6 +4,7 @@ import { ChevronRight, ChevronLeft, Sun, Moon, Download } from 'lucide-react';
 
 import { SimulationControls } from './SimulationControls';
 import { SearchControls } from './SearchControls';
+import { AdvancedSettings } from './AdvancedSettings';
 import { CustomizationControls } from './CustomizationControls';
 import { CalculationControls } from './CalculationControls';
 import type { MetricGraphContext, MetricsSelection } from '@/services/metrics/types';
@@ -127,6 +128,7 @@ export const WorkspaceSidebar = ({
         edgeCount={rawEdges.length}
         layoutControls={layoutControls}
       />
+      <AdvancedSettings />
     </aside>
   );
 };

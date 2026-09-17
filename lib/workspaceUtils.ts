@@ -263,3 +263,20 @@ export function computeTableDataEdges(validEdges: any[], edgeMetrics: any[], sea
 
   return data;
 }
+
+/** Filter the presentation without recalculating the communities being filtered. */
+export function filterNetworkByCommunity(
+  nodes: any[], edges: any[],
+  filter: { attribute: string; excludedValues: string[] } | null | undefined,
+  networkMetrics: any[],
+) {
+  if (!filter?.excludedValues.length) return { validNodes: nodes, validEdges: edges };
+  const metrics = new Map(networkMetrics.map((row) => [String(row.id), row]));
+  const excluded = new Set(filter.excludedValues);
+  const validNodes = nodes.filter((node) => {
+    const value = metrics.get(String(node.id))?.[filter.attribute] ?? node[filter.attribute];
+    return value == null || !excluded.has(String(value));
+  });
+  const ids = new Set(validNodes.map((node) => String(node.id)));
+  return { validNodes, validEdges: edges.filter((edge) => ids.has(String(edge.source)) && ids.has(String(edge.target))) };
+}

@@ -13,7 +13,7 @@ import { graphSettings, liveNumericValue } from '../services/graphStyles/liveUpd
 import { viewportRasterDimensions } from '../lib/exportUtils.ts';
 import { staleCalculationIds } from '../services/metrics/validity.ts';
 import { degreeByNode, logarithmicNodeSize } from '../services/graphStyles/size.ts';
-import { computeActiveNetwork, computeCommunityMetrics, computeTableDataEdges, computeTableDataNodes, filterNetworkByEdgeMetric, filterNetworkByNodeMetric } from '../lib/workspaceUtils.ts';
+import { filterNetworkByCommunity, computeActiveNetwork, computeCommunityMetrics, computeTableDataEdges, computeTableDataNodes, filterNetworkByEdgeMetric, filterNetworkByNodeMetric } from '../lib/workspaceUtils.ts';
 import { detectCustomAttributeType } from '../services/graphIO/customAttributes.ts';
 
 test('large-graph boundaries prefer Cloud for auto routing without disabling Browser', () => {
@@ -286,4 +286,26 @@ test('metric projections flatten node and edge result records for tables', () =>
   assert.equal(nodes[0].pagerank, 0.4);
   assert.equal(nodes[0].community_leiden, 'Cluster 1');
   assert.equal(edges[0].edgeBetweenness, 0.7);
+});
+
+
+test('community exclusion removes members and incident edges while preserving other nodes', () => {
+  const nodes = [{ id: 'a', community: 0 }, { id: 'b', community: 1 }, { id: 'c', community: 1 }, { id: 'd' }];
+  const edges = [{ source: 'a', target: 'b' }, { source: 'b', target: 'c' }];
+  const result = filterNetworkByCommunity(nodes, edges, { attribute: 'community', excludedValues: ['0'] }, []);
+  assert.deepEqual(result.validNodes.map(n => n.id), ['b', 'c', 'd']);
+  assert.deepEqual(result.validEdges, [edges[1]]);
+  assert.equal(filterNetworkByCommunity(nodes, edges, null, []).validNodes, nodes);
+  assert.equal(filterNetworkByCommunity(nodes, edges, { attribute: 'community', excludedValues: [] }, []).validEdges, edges);
+  const calculated = filterNetworkByCommunity(nodes, edges, { attribute: 'community', excludedValues: ['0', '1'] }, [{ id: 'd', community: 0 }]);
+  assert.deepEqual(calculated, { validNodes: [], validEdges: [] });
+});
+
+test('numeric years can be explicitly interpreted as categories', () => {
+  const nodes = [{ Year: 2023 }, { Year: 2024 }, { Year: 2025 }];
+  const detectedType = detectCustomAttributeType(nodes.map(n => n.Year));
+  assert.equal(detectedType, 'discrete');
+  const [descriptor] = buildAttributeRegistry({ nodes, edges: [], metadata: [{ name: 'Year', scope: 'node', detectedType, selectedType: 'nominal' }] });
+  assert.equal(descriptor.categorical, true);
+  assert.equal(descriptor.numeric, false);
 });

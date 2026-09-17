@@ -99,6 +99,7 @@ export function CustomizationControls() {
         <label className="flex items-center justify-between text-[10px] font-bold uppercase tracking-widest"><span>Thickness Multiplier</span><SyncInput live={filters.liveUpdate} value={filters.edgeWeight} onChange={(value: number) => setFilter('edgeWeight', value)} step="0.5" className={inputClass} /></label>
         <label className="flex items-center justify-between text-[10px] font-bold uppercase tracking-widest"><span>Edge Opacity</span><SyncInput live={filters.liveUpdate} value={filters.edgeOpacity} onChange={(value: number) => setFilter('edgeOpacity', Math.max(0, Math.min(1, value)))} step="0.05" className={inputClass} /></label>
       </div>}
+
     </section>
   );
 }
