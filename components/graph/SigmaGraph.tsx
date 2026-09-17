@@ -140,8 +140,8 @@ export default function SigmaGraph({
 
   // Dynamic Global Label Gating
   const shouldRenderLabels = useMemo(() => {
-    return shouldRenderSigmaLabels(showNodeLabels, selectedElement, clickedNode, searchQuery);
-  }, [showNodeLabels, selectedElement, clickedNode, searchQuery]);
+    return shouldRenderSigmaLabels(showNodeLabels, selectedElement, clickedNode, searchQuery, hoveredCommunityId);
+  }, [showNodeLabels, selectedElement, clickedNode, searchQuery, hoveredCommunityId]);
 
   useEffect(() => {
     if (selectedElement) {

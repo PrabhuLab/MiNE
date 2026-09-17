@@ -1,3 +1,4 @@
+import { hoveredLegendLabelVisible } from '@/services/graphPresentation/legendLabels';
 import type { RawEdge, RawNode } from '@/store/useStore';
 import { isSecondaryNode } from '@/services/graphPresentation/visibility';
 import type { LegendVisibilityResult } from '@/services/graphPresentation/legendVisibility';
@@ -138,9 +139,10 @@ export function getD3NodePresentation(node: RawNode, context: D3PresentationCont
     else dimmed = true;
   }
 
-  const labelVisible = focused
-    || neighbor
-    || (activeCommunity ? communityMember : context.showNodeLabels);
+  const labelVisible = hoveredLegendLabelVisible(
+    context.hoveredCommunityId, String(node.id), context.displayMap[node.id] ?? -1,
+    node.type, isSecondaryNode(node, context.bipartite), context.legendNodeMembership,
+  ) ?? (focused || neighbor || (activeCommunity ? communityMember : context.showNodeLabels));
   return {
     hidden: false,
     dimmed,

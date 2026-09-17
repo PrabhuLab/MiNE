@@ -1,3 +1,5 @@
+import { hoveredLegendLabelVisible } from '../services/graphPresentation/legendLabels.ts';
+import { shouldRenderSigmaLabels } from '../components/graph/sigma/labels.ts';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { UndirectedGraph } from 'graphology';
@@ -322,4 +324,21 @@ test('combined filters exclude nodes that lose their last connection', () => {
   assert.deepEqual(filterDisconnectedNodes(nodes, [{ source: 'a', target: 'missing' }]), { validNodes: [], validEdges: [] });
   assert.deepEqual(filterDisconnectedNodes(nodes, [{ source: 'a', target: 'a' }]).validNodes, [nodes[0]]);
   assert.deepEqual(filterDisconnectedNodes(nodes, edges).validNodes, nodes);
+});
+
+
+test('legend hover restricts labels to members and releases control on mouse leave', () => {
+  const membership = new Map([['attribute:node:Year:2024', new Set(['a'])]]);
+  const visible = (hover, node = 'a') => hoveredLegendLabelVisible(hover, node, 0, 'A', false, membership);
+  assert.equal(visible('attribute:node:Year:2024'), true);
+  assert.equal(visible('attribute:node:Year:2024', 'b'), false);
+  assert.equal(visible('community:0'), true);
+  assert.equal(visible('community:1'), false);
+  assert.equal(visible('type:A'), true);
+  assert.equal(visible('type:B'), false);
+  assert.equal(visible('element:standard'), true);
+  assert.equal(visible('element:bipartite'), false);
+  assert.equal(visible(null), null);
+  assert.equal(shouldRenderSigmaLabels(false, null, null, '', 'community:0'), true);
+  assert.equal(shouldRenderSigmaLabels(false, null, null, ''), false);
 });

@@ -1,3 +1,4 @@
+import { hoveredLegendLabelVisible } from '@/services/graphPresentation/legendLabels';
 import type Graph from 'graphology';
 import type { MutableRefObject } from 'react';
 
@@ -89,7 +90,12 @@ export function createSigmaNodeReducer(styleRefs: MutableRefObject<any>) {
     result.opacity = dimmed ? (data.opacity ?? 1) * 0.1 : (data.opacity ?? 1);
     result.label = data.rawNode?.name || data.rawNode?.label || nodeKey;
 
-    if (focused || neighbor) result.labelVisibility = 'visible';
+    const hoveredLabel = hoveredLegendLabelVisible(
+      hoveredCommunityId, nodeKey, displayIndex, data.rawNode?.type,
+      Boolean(isSecondary), legendNodeMembership,
+    );
+    if (hoveredLabel !== null) result.labelVisibility = hoveredLabel ? 'visible' : 'hidden';
+    else if (focused || neighbor) result.labelVisibility = 'visible';
     else if (activeCommunity) result.labelVisibility = communityMember ? (showNodeLabels ? 'auto' : 'visible') : 'hidden';
     else if (showNodeLabels) result.labelVisibility = 'auto';
     return result;

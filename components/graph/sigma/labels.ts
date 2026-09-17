@@ -3,6 +3,7 @@ export function shouldRenderSigmaLabels(
   selectedElement: string | null,
   clickedNode: unknown,
   searchQuery: string,
+  hoveredLegendId: string | null = null,
 ): boolean {
-  return Boolean(showNodeLabels || selectedElement || clickedNode || searchQuery.trim());
+  return Boolean(hoveredLegendId || showNodeLabels || selectedElement || clickedNode || searchQuery.trim());
 }
