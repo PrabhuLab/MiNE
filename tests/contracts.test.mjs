@@ -13,7 +13,7 @@ import { graphSettings, liveNumericValue } from '../services/graphStyles/liveUpd
 import { viewportRasterDimensions } from '../lib/exportUtils.ts';
 import { staleCalculationIds } from '../services/metrics/validity.ts';
 import { degreeByNode, logarithmicNodeSize } from '../services/graphStyles/size.ts';
-import { filterNetworkByCommunity, computeActiveNetwork, computeCommunityMetrics, computeTableDataEdges, computeTableDataNodes, filterNetworkByEdgeMetric, filterNetworkByNodeMetric } from '../lib/workspaceUtils.ts';
+import { filterDisconnectedNodes, filterNetworkByCommunity, computeActiveNetwork, computeCommunityMetrics, computeTableDataEdges, computeTableDataNodes, filterNetworkByEdgeMetric, filterNetworkByNodeMetric } from '../lib/workspaceUtils.ts';
 import { detectCustomAttributeType } from '../services/graphIO/customAttributes.ts';
 
 test('large-graph boundaries prefer Cloud for auto routing without disabling Browser', () => {
@@ -308,4 +308,18 @@ test('numeric years can be explicitly interpreted as categories', () => {
   const [descriptor] = buildAttributeRegistry({ nodes, edges: [], metadata: [{ name: 'Year', scope: 'node', detectedType, selectedType: 'nominal' }] });
   assert.equal(descriptor.categorical, true);
   assert.equal(descriptor.numeric, false);
+});
+
+
+test('combined filters exclude nodes that lose their last connection', () => {
+  const nodes = [{ id: 'a', community: 0 }, { id: 'b', community: 1 }, { id: 'c', community: 1 }, { id: 'd', community: 2 }];
+  const edges = [{ source: 'a', target: 'b' }, { source: 'c', target: 'd' }];
+  const filtered = filterNetworkByCommunity(nodes, edges, { attribute: 'community', excludedValues: ['0'] }, []);
+  const connected = filterDisconnectedNodes(filtered.validNodes, filtered.validEdges);
+  assert.deepEqual(connected.validNodes.map(node => node.id), ['c', 'd']);
+  assert.deepEqual(connected.validEdges, [edges[1]]);
+  assert.deepEqual(filterDisconnectedNodes(nodes, []), { validNodes: [], validEdges: [] });
+  assert.deepEqual(filterDisconnectedNodes(nodes, [{ source: 'a', target: 'missing' }]), { validNodes: [], validEdges: [] });
+  assert.deepEqual(filterDisconnectedNodes(nodes, [{ source: 'a', target: 'a' }]).validNodes, [nodes[0]]);
+  assert.deepEqual(filterDisconnectedNodes(nodes, edges).validNodes, nodes);
 });

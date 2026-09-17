@@ -19,7 +19,7 @@ import { useGraphLayouts } from '@/hooks/useGraphLayouts';
 import { numericExtent } from '@/lib/utils';
 import { resolveComputeEngine } from '@/services/cloud/config';
 import { degreeByNode, logarithmicNodeSize } from '@/services/graphStyles/size';
-import { filterNetworkByCommunity, filterNetworkByEdgeMetric, filterNetworkByNodeMetric } from '@/lib/workspaceUtils';
+import { filterDisconnectedNodes, filterNetworkByCommunity, filterNetworkByEdgeMetric, filterNetworkByNodeMetric } from '@/lib/workspaceUtils';
 import { effectiveRenderer } from '@/services/engines/policy';
 import { WorkspaceStatusCards } from '@/components/workspace/WorkspaceStatusCards';
 
@@ -90,8 +90,12 @@ export default function Workspace() {
     () => filterNetworkByCommunity(edgeMetricFilteredNetwork.validNodes, edgeMetricFilteredNetwork.validEdges, appliedFilters.communityFilter, networkMetrics),
     [edgeMetricFilteredNetwork, appliedFilters.communityFilter, networkMetrics],
   );
-  const displayNodes = communityFilteredNetwork.validNodes;
-  const displayEdges = communityFilteredNetwork.validEdges;
+  const connectedNetwork = useMemo(
+    () => filterDisconnectedNodes(communityFilteredNetwork.validNodes, communityFilteredNetwork.validEdges),
+    [communityFilteredNetwork],
+  );
+  const displayNodes = connectedNetwork.validNodes;
+  const displayEdges = connectedNetwork.validEdges;
   const edgeMetricMap = useMemo(() => new Map(edgeMetrics.map((metric: any) => [String(metric.key), metric])), [edgeMetrics]);
   const presentationEdges = useMemo(() => displayEdges.map((edge) => {
     const key = String(edge.key ?? `${edge.source}->${edge.target}`);

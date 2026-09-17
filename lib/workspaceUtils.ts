@@ -280,3 +280,15 @@ export function filterNetworkByCommunity(
   const ids = new Set(validNodes.map((node) => String(node.id)));
   return { validNodes, validEdges: edges.filter((edge) => ids.has(String(edge.source)) && ids.has(String(edge.target))) };
 }
+
+/** Remove nodes with no surviving incident edges after all filters are combined. */
+export function filterDisconnectedNodes(nodes: any[], edges: any[]) {
+  const nodeIds = new Set(nodes.map((node) => String(node.id)));
+  const validEdges = edges.filter((edge) => nodeIds.has(String(edge.source)) && nodeIds.has(String(edge.target)));
+  const connectedIds = new Set<string>();
+  validEdges.forEach((edge) => {
+    connectedIds.add(String(edge.source));
+    connectedIds.add(String(edge.target));
+  });
+  return { validNodes: nodes.filter((node) => connectedIds.has(String(node.id))), validEdges };
+}
