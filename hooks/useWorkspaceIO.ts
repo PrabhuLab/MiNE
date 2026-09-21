@@ -169,16 +169,25 @@ export function useWorkspaceIO(options: WorkspaceIOOptions) {
           const pixelRatio = window.devicePixelRatio || 1;
           const rasterDimensions = viewportRasterDimensions(dimensions.width, dimensions.height, pixelRatio);
           const { toBlob } = await import('@sigma/export-image');
-          const blob = await toBlob(renderer, {
-            format,
-            fileName: options.projectName,
-            backgroundColor: format === 'png' ? 'transparent' : options.isDarkMode ? '#141414' : '#ffffff',
-            // Sigma applies the device pixel ratio internally. Scale its
-            // temporary viewport so the final raster is at least 10×.
-            width: rasterDimensions.exportWidth / pixelRatio,
-            height: rasterDimensions.exportHeight / pixelRatio,
-            cameraState,
-          });
+          let blob: Blob | null = null;
+          for (let attempt = 0; attempt < 4; attempt++) {
+            try {
+              blob = await toBlob(renderer, {
+                format,
+                fileName: options.projectName,
+                backgroundColor: format === 'png' ? 'transparent' : options.isDarkMode ? '#141414' : '#ffffff',
+                // Sigma applies device pixel ratio internally; halve each
+                // dimension on retries to reduce canvas memory by 75%.
+                width: Math.max(1, Math.floor(rasterDimensions.exportWidth / 2 ** attempt)) / pixelRatio,
+                height: Math.max(1, Math.floor(rasterDimensions.exportHeight / 2 ** attempt)) / pixelRatio,
+                cameraState,
+              });
+              break;
+            } catch (error) {
+              if (attempt === 3 || (error instanceof DOMException && error.name === 'SecurityError')) throw error;
+            }
+          }
+          if (!blob) throw new Error('The graph image could not be encoded.');
           downloadBlobAsFile(blob, `${options.projectName}.${format === 'jpeg' ? 'jpg' : 'png'}`);
         } else {
           await exportImage(

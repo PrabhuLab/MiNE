@@ -23,6 +23,7 @@ export const downloadBlobAsFile = (blob: Blob, filename: string) => {
 
 export const exportElementAsImage = async (element: HTMLElement | null, filename: string) => {
   if (!element) return;
+  await document.fonts.ready;
   const { default: html2canvas } = await import('html2canvas');
   const canvas = await html2canvas(element, {
     backgroundColor: null,
@@ -70,7 +71,29 @@ export const exportElementAsImage = async (element: HTMLElement | null, filename
           clonedNode.style.setProperty('background-image', 'none', 'important');
         }
       });
+      // Export the full legend, independent of viewport clipping and UI collapse state.
+      legendClone.querySelectorAll<HTMLElement>('[data-legend-export-section]').forEach((section) => {
+        section.hidden = false;
+      });
+      legendClone.querySelectorAll<HTMLElement>('.mine-scroll-container').forEach((section) => {
+        section.style.setProperty('max-height', 'none', 'important');
+        section.style.setProperty('overflow', 'visible', 'important');
+        section.scrollTop = 0;
+        section.scrollLeft = 0;
+      });
+      legendClone.querySelectorAll<HTMLElement>('.truncate').forEach((label) => {
+        label.style.setProperty('white-space', 'normal', 'important');
+        label.style.setProperty('overflow', 'visible', 'important');
+        label.style.setProperty('overflow-wrap', 'anywhere', 'important');
+        label.style.setProperty('min-width', '0', 'important');
+      });
+      legendClone.style.setProperty('position', 'relative', 'important');
+      legendClone.style.setProperty('inset', 'auto', 'important');
+      legendClone.style.setProperty('width', '360px', 'important');
+      legendClone.style.setProperty('max-height', 'none', 'important');
+      legendClone.style.setProperty('backdrop-filter', 'none', 'important');
       legendClone.style.setProperty('background', 'transparent', 'important');
+      documentClone.body.appendChild(legendClone);
       // Remove color pickers only after original and cloned nodes have been
       // matched; removing them earlier shifts every subsequent style mapping.
       legendClone.querySelectorAll('input[type="color"]').forEach((input) => input.remove());
@@ -115,12 +138,18 @@ export const exportSvg = (svgElement: SVGSVGElement | null, filename: string) =>
 export const viewportRasterDimensions = (width: number, height: number, pixelRatio: number) => {
   const viewportWidth = Math.max(1, Math.round(width));
   const viewportHeight = Math.max(1, Math.round(height));
-  const scale = Math.max(10, pixelRatio || 1);
+  // Bound both area and side length: 10× on a large viewport can exhaust
+  // canvas memory before the browser can encode the image.
+  const scale = Math.min(
+    Math.max(10, pixelRatio || 1),
+    16384 / Math.max(viewportWidth, viewportHeight),
+    Math.sqrt(24_000_000 / (viewportWidth * viewportHeight)),
+  );
   return {
     viewportWidth,
     viewportHeight,
-    exportWidth: Math.round(viewportWidth * scale),
-    exportHeight: Math.round(viewportHeight * scale),
+    exportWidth: Math.max(1, Math.floor(viewportWidth * scale)),
+    exportHeight: Math.max(1, Math.floor(viewportHeight * scale)),
   };
 };
 
@@ -178,20 +207,23 @@ export const exportImage = async (svgElement: SVGSVGElement | null, format: 'png
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('A canvas could not be created for the graph export.');
 
-    if (format === 'jpeg') {
-      ctx.fillStyle = isDarkMode ? '#141414' : '#ffffff';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-    }
-    ctx.drawImage(img, 0, 0, exportWidth, exportHeight);
-
-    const blob = await new Promise<Blob | null>((resolve, reject) => {
-      try {
-        canvas.toBlob(resolve, `image/${format}`, 1);
-      } catch (error) {
-        reject(error);
+    let blob: Blob | null = null;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      if (format === 'jpeg') {
+        ctx.fillStyle = isDarkMode ? '#141414' : '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
       }
-    });
-    if (!blob) throw new Error(`The graph could not be encoded as ${format.toUpperCase()}.`);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      blob = await new Promise<Blob | null>((resolve) => {
+        canvas.toBlob(resolve, `image/${format}`, 0.95);
+      });
+      if (blob) break;
+      // Re-render from the source at lower resolution if encoding runs out of memory.
+      canvas.width = Math.max(1, Math.floor(canvas.width / 2));
+      canvas.height = Math.max(1, Math.floor(canvas.height / 2));
+    }
+    canvas.width = canvas.height = 0;
+    if (!blob) throw new Error(`The graph could not be encoded as ${format.toUpperCase()}. Try a smaller browser window or export SVG.`);
     downloadBlobAsFile(blob, filename);
   } finally {
     URL.revokeObjectURL(url);

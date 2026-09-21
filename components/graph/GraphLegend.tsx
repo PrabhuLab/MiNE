@@ -166,8 +166,9 @@ export default function GraphLegend({
         </button>
       </div>
 
-      {!isLegendMinimized && (
-        <div
+      <div
+          data-legend-export-section
+          hidden={isLegendMinimized}
           className={`mine-scroll-container max-h-[70vh] p-3 pt-2 text-[10px] space-y-3 ${
             isDarkMode ? 'border-[#333]' : 'border-[#d0d0d0]'
           } border-t`}
@@ -316,7 +317,7 @@ export default function GraphLegend({
                 <span>{category.title}</span>
                 {collapsedSections.has(category.title) ? <ChevronDown size={12} /> : <ChevronUp size={12} />}
               </button>
-              {!collapsedSections.has(category.title) && <div className="mine-scroll-container max-h-[160px] space-y-1 pr-1">
+              <div data-legend-export-section hidden={collapsedSections.has(category.title)} className="mine-scroll-container max-h-[160px] space-y-1 pr-1">
                 {category.items.map((item, i) => {
                   const isIsolated = isolatedCommunityId === item.id || isolatedLegendItem === item.id;
                   const isHidden = hiddenItems.has(item.id);
@@ -361,7 +362,7 @@ export default function GraphLegend({
                     </div>
                   );
                 })}
-              </div>}
+              </div>
             </div>
           ))}
           {metricScales.length > 0 && <div>
@@ -381,7 +382,7 @@ export default function GraphLegend({
               <span>{visualScalesSection}</span>
               {collapsedSections.has(visualScalesSection) ? <ChevronDown size={12} /> : <ChevronUp size={12} />}
             </button>
-            {!collapsedSections.has(visualScalesSection) && <div className="space-y-3">
+            <div data-legend-export-section hidden={collapsedSections.has(visualScalesSection)} className="space-y-3">
               {metricScales.map((metricScale) => (
                 <div className="group/scale pt-1" key={`${metricScale.visual || 'color'}:${metricScale.title}`}>
                   <div className="flex items-center justify-between opacity-50 uppercase font-bold mb-1.5">
@@ -408,10 +409,9 @@ export default function GraphLegend({
                   </div> : null}
                 </div>
               ))}
-            </div>}
+            </div>
           </div>}
         </div>
-      )}
     </div>
   );
 }
