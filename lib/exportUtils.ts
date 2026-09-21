@@ -21,11 +21,11 @@ export const downloadBlobAsFile = (blob: Blob, filename: string) => {
   URL.revokeObjectURL(url);
 };
 
-export const exportElementAsImage = async (element: HTMLElement | null, filename: string, isDarkMode = false) => {
+export const exportElementAsImage = async (element: HTMLElement | null, filename: string) => {
   if (!element) return;
   const { default: html2canvas } = await import('html2canvas');
   const canvas = await html2canvas(element, {
-    backgroundColor: isDarkMode ? '#141414' : '#ffffff',
+    backgroundColor: null,
     scale: Math.max(2, window.devicePixelRatio || 1),
     logging: false,
     useCORS: true,
@@ -70,6 +70,7 @@ export const exportElementAsImage = async (element: HTMLElement | null, filename
           clonedNode.style.setProperty('background-image', 'none', 'important');
         }
       });
+      legendClone.style.setProperty('background', 'transparent', 'important');
       // Remove color pickers only after original and cloned nodes have been
       // matched; removing them earlier shifts every subsequent style mapping.
       legendClone.querySelectorAll('input[type="color"]').forEach((input) => input.remove());
@@ -177,8 +178,10 @@ export const exportImage = async (svgElement: SVGSVGElement | null, format: 'png
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('A canvas could not be created for the graph export.');
 
-    ctx.fillStyle = isDarkMode ? '#141414' : '#ffffff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (format === 'jpeg') {
+      ctx.fillStyle = isDarkMode ? '#141414' : '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
     ctx.drawImage(img, 0, 0, exportWidth, exportHeight);
 
     const blob = await new Promise<Blob | null>((resolve, reject) => {

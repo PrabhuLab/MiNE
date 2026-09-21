@@ -152,7 +152,7 @@ export function useWorkspaceIO(options: WorkspaceIOOptions) {
     }
     if (format === 'legend') {
       try {
-        await exportElementAsImage(document.getElementById('graph-legend'), `${options.projectName}_legend.png`, options.isDarkMode);
+        await exportElementAsImage(document.getElementById('graph-legend'), `${options.projectName}_legend.png`);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         console.error('Legend image export failed:', error);
@@ -172,7 +172,7 @@ export function useWorkspaceIO(options: WorkspaceIOOptions) {
           const blob = await toBlob(renderer, {
             format,
             fileName: options.projectName,
-            backgroundColor: options.isDarkMode ? '#141414' : '#ffffff',
+            backgroundColor: format === 'png' ? 'transparent' : options.isDarkMode ? '#141414' : '#ffffff',
             // Sigma applies the device pixel ratio internally. Scale its
             // temporary viewport so the final raster is at least 10×.
             width: rasterDimensions.exportWidth / pixelRatio,
