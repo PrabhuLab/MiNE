@@ -9,7 +9,8 @@ import { useGraphColorScales } from '@/hooks/graphStyles/useGraphColorScales';
 import { numericExtent } from '@/lib/utils';
 import type { LegendMetricScale } from '@/services/graphStyles/types';
 import { isCategoricalSemanticType } from '@/services/attributes/registry';
-import { legendItemId } from '@/services/graphPresentation/legendVisibility';
+import { degreeByNode } from '@/services/graphStyles/size';
+import { buildLegendCategories } from '@/services/graphStyles/categories';
 export type { LegendMetricScale } from '@/services/graphStyles/types';
 
 const metricLabel = (metric: string) => ({
@@ -87,75 +88,6 @@ export function useGraphStyles({
   const customNodeSizeAttribute = useStore((state) => state.filters.customNodeSizeAttribute);
   const customAttributes = useStore((state) => state.customAttributes);
   const legendColorOverrides = useStore((state) => state.legendColorOverrides);
-  // Legacy `shown` cards are intentionally ignored: one selected visual source owns each channel.
-  const shownNodeAttributes = useMemo(() => [] as typeof customAttributes, []);
-  const shownEdgeAttributes = useMemo(() => [] as typeof customAttributes, []);
-  const shownContinuousScales = useMemo(() => {
-    const scales = new Map<string, { min: number; max: number; scale: (value: number) => string }>();
-    [...shownNodeAttributes, ...shownEdgeAttributes].forEach((attribute) => {
-      if (attribute.selectedType !== 'continuous') return;
-      const entities = attribute.scope === 'node' ? nodes : edges;
-      const [min, rawMax] = numericExtent(entities.map((entity) => Number(entity[attribute.name]))) || [0, 1];
-      const max = rawMax === min ? min + 1 : rawMax;
-      const key = `${attribute.scope}:${attribute.name}`;
-      const minColor = legendColorOverrides[`scale:${key}:min`] || '#440154';
-      const maxColor = legendColorOverrides[`scale:${key}:max`] || '#fde725';
-      scales.set(key, { min, max, scale: d3.scaleSequential(d3.interpolateRgb(minColor, maxColor)).domain([min, max]) });
-    });
-    return scales;
-  }, [edges, legendColorOverrides, nodes, shownEdgeAttributes, shownNodeAttributes]);
-  const attributeStates = useCallback((entity: Record<string, any>, scopeAttributes: typeof customAttributes) => scopeAttributes.flatMap((attribute) => {
-    const value = entity[attribute.name];
-    if (value === undefined || value === null || String(value).trim() === '') return [];
-    const state = attribute.selectedType === 'continuous' ? attribute.name : `${attribute.name}=${String(value)}`;
-    return [{ state, label: attribute.selectedType === 'continuous' ? attribute.name : `${attribute.name}: ${String(value)}`, value, attribute }];
-  }), []);
-  const attributeOrder = useMemo(() => new Map(customAttributes.map((attribute, index) => [`${attribute.scope}:${attribute.name}`, index])), [customAttributes]);
-  const effectiveStates = useCallback((states: ReturnType<typeof attributeStates>) => {
-    const ordered = [...states].sort((left, right) =>
-      (attributeOrder.get(`${left.attribute.scope}:${left.attribute.name}`) ?? Number.MAX_SAFE_INTEGER)
-      - (attributeOrder.get(`${right.attribute.scope}:${right.attribute.name}`) ?? Number.MAX_SAFE_INTEGER));
-    return ordered.slice(0, 1);
-  }, [attributeOrder]);
-  const derivedEdgeNodeStateMap = useMemo(() => {
-    const valuesByNode = new Map<string, Map<string, { attribute: (typeof customAttributes)[number]; values: unknown[] }>>();
-    shownEdgeAttributes.filter((attribute) => attribute.edgeNodeTarget && attribute.edgeNodeTarget !== 'none').forEach((attribute) => {
-      edges.forEach((edge) => {
-        const rawValue = edge[attribute.name];
-        if (rawValue === undefined || rawValue === null || String(rawValue).trim() === '') return;
-        const nodeId = String(attribute.edgeNodeTarget === 'source' ? edge.source : edge.target);
-        const byAttribute = valuesByNode.get(nodeId) || new Map();
-        const entry = byAttribute.get(attribute.name) || { attribute, values: [] };
-        entry.values.push(rawValue);
-        byAttribute.set(attribute.name, entry);
-        valuesByNode.set(nodeId, byAttribute);
-      });
-    });
-    return new Map(Array.from(valuesByNode.entries()).map(([nodeId, entries]) => [nodeId, Array.from(entries.values()).map(({ attribute, values }) => {
-      const numericValues = values.map(Number).filter(Number.isFinite);
-      const value = attribute.selectedType === 'continuous' && numericValues.length
-        ? numericValues.reduce((sum, current) => sum + current, 0) / numericValues.length
-        : Array.from(new Set(values.map(String))).sort().join(' + ');
-      const targetLabel = attribute.edgeNodeTarget === 'source' ? 'Source' : 'Target';
-      const state = attribute.selectedType === 'continuous' ? `${attribute.name} (${targetLabel})` : `${attribute.name} (${targetLabel})=${String(value)}`;
-      return { state, label: attribute.selectedType === 'continuous' ? state : `${attribute.name} (${targetLabel}): ${String(value)}`, value, attribute };
-    })]));
-  }, [edges, shownEdgeAttributes]);
-  const shownNodeStateMap = useMemo(() => new Map(nodes.map((node) => [
-    String(node.id),
-    effectiveStates([...attributeStates(node, shownNodeAttributes), ...(derivedEdgeNodeStateMap.get(String(node.id)) || [])]),
-  ])), [attributeStates, derivedEdgeNodeStateMap, effectiveStates, nodes, shownNodeAttributes]);
-  const shownEdgeStateMap = useMemo(() => new Map(edges.map((edge) => [String(edge.key ?? `${edge.source}->${edge.target}`), effectiveStates(attributeStates(edge, shownEdgeAttributes))])), [attributeStates, edges, effectiveStates, shownEdgeAttributes]);
-  const overlayColor = useCallback((states: ReturnType<typeof attributeStates>) => {
-    if (!states.length) return null;
-    if (states.length === 1) {
-      const continuous = shownContinuousScales.get(`${states[0].attribute.scope}:${states[0].attribute.name}`);
-      if (continuous && Number.isFinite(Number(states[0].value))) return continuous.scale(Number(states[0].value));
-      const colorKey = `attribute:${states[0].state}`;
-      return legendColorOverrides[colorKey] ?? getCommunityColor(colorKey);
-    }
-    return null;
-  }, [legendColorOverrides, shownContinuousScales]);
   const selectedCustomMetadata = customAttributes.find((attribute) => attribute.scope === 'node' && attribute.name === customNodeAttribute);
   const customIsNumeric = Boolean(selectedCustomMetadata && ['discrete', 'continuous'].includes(selectedCustomMetadata.selectedType));
   const {
@@ -207,10 +139,6 @@ export function useGraphStyles({
 
   const customColorMap = communityColorMap;
   const nodeById = useMemo(() => new Map(nodes.map((node) => [String(node.id), node])), [nodes]);
-
-  const typeLabels = useMemo(() => {
-    return Array.from(new Set(nodes.map((n) => n.type).filter(Boolean))) as string[];
-  }, [nodes]);
 
   const typeColorScale = useMemo(() => d3.scaleOrdinal(d3.schemeCategory10), []);
 
@@ -290,179 +218,28 @@ export function useGraphStyles({
     ]
   );
 
-  const communitiesShown = nodeColorBase === 'louvain' || nodeColorBase === 'community'
-    || (edgeColorBase === 'nodeMetric' && edgeColorNodeMetric === 'louvain');
   const communityColor = useCallback((rawId: string | number) =>
     legendColorOverrides[`community:${String(rawId)}`] ?? getCommunityColor(rawId), [legendColorOverrides]);
-  const legendCategories = useMemo(() => {
-    const stateEntries = new Map<string, { label: string; color: string; colorKey: string; nodes: string[]; nodeIds: string[]; edgeIds: string[] }>();
-    const addStateEntry = (key: string, label: string, color: string, colorKey: string, node?: RawNode, edgeId?: string) => {
-      const current = stateEntries.get(key) || { label, color, colorKey, nodes: [], nodeIds: [], edgeIds: [] };
-      if (node) {
-        current.nodes.push(String(node.label || node.name || node.id));
-        current.nodeIds.push(String(node.id));
-      }
-      if (edgeId) current.edgeIds.push(edgeId);
-      stateEntries.set(key, current);
-    };
-    nodes.forEach((node) => {
-      const states = shownNodeStateMap.get(String(node.id)) || [];
-      if (!states.length) return;
-      states.filter((state) => state.attribute.selectedType !== 'continuous').forEach((state) => {
-        const colorKey = `attribute:${state.state}`;
-        addStateEntry(colorKey, state.label, overlayColor([state])!, colorKey, node);
-      });
-    });
-    edges.forEach((edge) => {
-      const states = shownEdgeStateMap.get(String(edge.key ?? `${edge.source}->${edge.target}`)) || [];
-      if (!states.length) return;
-      if (states.length === 1 && states[0].attribute.selectedType === 'continuous') return;
-      const stateKey = states.map((item) => item.state).sort().join('|');
-      const key = `edge:${stateKey}`;
-      const label = `${states.length === 1 ? states[0].label : states.map((item) => item.attribute.name).sort().join(' + ')} (Edge)`;
-      const colorKey = `attribute:${states[0].state}`;
-      addStateEntry(key, label, overlayColor(states)!, colorKey, undefined, String(edge.key ?? `${edge.source}->${edge.target}`));
-    });
-    const sections = [];
-    if (stateEntries.size > 0) {
-      const items = Array.from(stateEntries.entries()).map(([key, entry]) => ({ label: entry.label, id: `attribute:${key}`, color: entry.color, colorKey: entry.colorKey, nodes: entry.nodes, nodeIds: entry.nodeIds, edgeIds: entry.edgeIds, allIds: [] as string[] }));
-      const allIds = items.map((item) => item.id);
-      items.forEach((item) => { item.allIds = allIds; });
-      sections.push({ title: 'Custom Attributes', items });
-    }
-    if (
-      communitiesShown &&
-      Object.keys(communityDisplay.rawToDisplayMap).length > 0
-    ) {
-      const sortedDispIndices = Object.values(communityDisplay.rawToDisplayMap).sort((a, b) => a - b);
-      sections.push({
-        title: edgeColorBase === 'nodeMetric' && edgeColorNodeMetric === 'louvain'
-          ? `Communities · Edge color from ${edgeColorNodeTarget} node`
-          : 'Communities',
-        items: sortedDispIndices.map((dispIdx) => {
-          const rawId = communityDisplay.displayToRawMap[dispIdx];
-          const color = communityColor(rawId);
-          const memberNodes = nodes
-            .filter((n) => displayMap[n.id] === dispIdx)
-            .map((n) => n.label || n.name || n.id);
-
-          return {
-            label: `Community ${dispIdx}`,
-            id: `community:${dispIdx}`,
-            color,
-            colorKey: `community:${rawId}`,
-            nodes: memberNodes,
-            nodeIds: nodes.filter((n) => displayMap[n.id] === dispIdx).map((n) => String(n.id)),
-            edgeIds: [] as string[],
-            allIds: sortedDispIndices.map((i) => `community:${i}`),
-          };
-        }),
-      });
-    } else if ((nodeColorBase === 'type' || (edgeColorBase === 'nodeMetric' && edgeColorNodeMetric === 'type')) && typeLabels.length > 0) {
-      sections.push({
-        title: edgeColorBase === 'nodeMetric' && edgeColorNodeMetric === 'type'
-          ? `Types · Edge color from ${edgeColorNodeTarget} node`
-          : 'Types',
-        items: typeLabels.map((label) => ({
-          label,
-          id: `type:${label}`,
-          color: legendColorOverrides[`type:${label}`] ?? typeColorScale(label),
-          colorKey: `type:${label}`,
-          nodes: nodes.filter((n) => n.type === label).map((n) => n.label || n.name || n.id),
-          nodeIds: nodes.filter((n) => n.type === label).map((n) => String(n.id)),
-          edgeIds: [] as string[],
-          allIds: typeLabels.map((t) => `type:${t}`),
-        })),
-      });
-    }
-    if (edgeColorBase === 'nodeMetric' && edgeColorNodeMetric.startsWith('custom:')) {
-      const attribute = edgeColorNodeMetric.slice('custom:'.length);
-      const metadata = customAttributes.find((item) => item.scope === 'node' && item.name === attribute);
-      const valueForNode = (node: RawNode) => netMap.get(String(node.id))?.[attribute] ?? node[attribute];
-      const values = Array.from(new Set(nodes.map(valueForNode).filter((value) => value !== undefined && value !== null && String(value).trim() !== '').map(String)));
-      if (values.length && metadata && isCategoricalSemanticType(metadata.selectedType)) {
-        sections.push({
-          title: `Edge Color · ${attribute} (${edgeColorNodeTarget} node)`,
-          items: values.map((value) => {
-            const colorKey = `attribute:${attribute}=${value}`;
-            return {
-              label: value,
-              id: legendItemId('node', attribute, value),
-              color: legendColorOverrides[colorKey] ?? getCommunityColor(colorKey),
-              colorKey,
-              nodeIds: nodes.filter((node) => String(valueForNode(node)) === value).map((node) => String(node.id)),
-              edgeIds: [] as string[],
-              allIds: values.map((item) => legendItemId('node', attribute, item)),
-            };
-          }),
-        });
-      }
-    }
-    const addSelectedAttributeCategory = (scope: 'node' | 'edge', attribute: string, title: string) => {
-      const entities = scope === 'node'
-        ? nodes.map((node) => ({ ...node, ...(netMap.get(String(node.id)) || {}) }))
-        : edges;
-      const metadata = customAttributes.find((item) => item.scope === scope && item.name === attribute);
-      const values = Array.from(new Set(entities.map((entity) => entity[attribute]).filter((value) => value !== undefined && value !== null && String(value).trim() !== '').map(String)));
-      if (!values.length || !metadata || !isCategoricalSemanticType(metadata.selectedType)) return;
-      sections.push({
-        title,
-        items: values.map((value) => {
-          const colorKey = `attribute:${attribute}=${value}`;
-          return {
-            label: value,
-            id: legendItemId(scope, attribute, value),
-            color: legendColorOverrides[colorKey] ?? getCommunityColor(colorKey),
-            colorKey,
-            nodeIds: scope === 'node' ? entities.filter((node) => String(node[attribute]) === value).map((node) => String(node.id)) : [],
-            edgeIds: scope === 'edge' ? edges.filter((edge) => String(edge[attribute]) === value).map((edge) => String(edge.key ?? `${edge.source}->${edge.target}`)) : [],
-            allIds: values.map((item) => legendItemId(scope, attribute, item)),
-          };
-        }),
-      });
-    };
-    const selectedNodeAttributeShown = shownNodeAttributes.some((attribute) => attribute.name === customNodeAttribute);
-    if (nodeColorBase === 'custom' && customNodeAttribute && !selectedNodeAttributeShown) {
-      addSelectedAttributeCategory('node', customNodeAttribute, `Node Color · ${customNodeAttribute}`);
-    }
-    if (edgeColorBase.startsWith('edge:')) {
-      const attribute = edgeColorBase.slice('edge:'.length);
-      if (!shownEdgeAttributes.some((item) => item.name === attribute)) addSelectedAttributeCategory('edge', attribute, `Edge Color · ${attribute}`);
-    }
-    return sections;
-  }, [
-    nodeColorBase,
-    communityDisplay,
-    displayMap,
+  const legendCategories = useMemo(() => buildLegendCategories({
     nodes,
-    netMap,
-    typeLabels,
-    typeColorScale,
     edges,
-    overlayColor,
-    shownEdgeStateMap,
-    shownNodeStateMap,
-    communitiesShown,
-    communityColor,
+    communityDisplay,
+    netMap,
+    nodeColorBase,
     edgeColorBase,
     edgeColorNodeMetric,
     edgeColorNodeTarget,
     customAttributes,
     legendColorOverrides,
     customNodeAttribute,
-    shownNodeAttributes,
-    shownEdgeAttributes,
-  ]);
+    typeColorScale,
+  }), [nodes, edges, communityDisplay, netMap, nodeColorBase, edgeColorBase, edgeColorNodeMetric, edgeColorNodeTarget, customAttributes, legendColorOverrides, customNodeAttribute, typeColorScale]);
+
   const legendNodeMembership = useMemo(() => new Map(legendCategories.flatMap((category) => category.items.map((item) => [item.id, new Set(item.nodeIds || [])] as const))), [legendCategories]);
   const legendEdgeMembership = useMemo(() => new Map(legendCategories.flatMap((category) => category.items.map((item) => [item.id, new Set(item.edgeIds || [])] as const))), [legendCategories]);
 
   const getNodeColor = useCallback(
     (d: any) => {
-      const shownStates = shownNodeStateMap.get(String(d.id)) || [];
-      if (shownStates.length) {
-        const shownColor = overlayColor(shownStates);
-        if (shownColor) return shownColor;
-      }
       const net = netMap.get(d.id);
       const defaultNodeColor = isDarkMode ? '#E4E3E0' : '#141414';
       if (nodeColorBase === 'uniform') {
@@ -560,8 +337,6 @@ export function useGraphStyles({
       degreeCentColorScale,
       netMap,
       communityDisplay.displayToRawMap,
-      overlayColor,
-      shownNodeStateMap,
       communityColor,
       legendColorOverrides,
     ]
@@ -634,10 +409,6 @@ export function useGraphStyles({
 
   const getEdgeColor = useCallback(
     (d: any) => {
-      const edgeIdentity = String(d.key ?? `${typeof d.source === 'object' ? d.source.id : d.source}->${typeof d.target === 'object' ? d.target.id : d.target}`);
-      const directStates = effectiveStates(attributeStates(d, shownEdgeAttributes));
-      const shownColor = overlayColor(shownEdgeStateMap.get(edgeIdentity) || directStates);
-      if (shownColor) return shownColor;
       if (edgeColorBase === 'nodeMetric' && edgeColorNodeMetric) {
         const targetId =
           edgeColorNodeTarget === 'source' ? d.source.id || d.source : d.target.id || d.target;
@@ -694,9 +465,6 @@ export function useGraphStyles({
           return legendColorOverrides[colorKey] ?? getCommunityColor(colorKey);
         }
       }
-      if (edgeColorBase === 'uniform') {
-        return legendColorOverrides['element:edges'] ?? uniformEdgeColor;
-      }
       return legendColorOverrides['element:edges'] ?? uniformEdgeColor;
     },
     [
@@ -717,11 +485,6 @@ export function useGraphStyles({
       secColorScale,
       isDarkMode,
       communityDisplay.displayToRawMap,
-      attributeStates,
-      effectiveStates,
-      overlayColor,
-      shownEdgeAttributes,
-      shownEdgeStateMap,
       legendColorOverrides,
       communityColor,
       uniformEdgeColor,
@@ -734,14 +497,7 @@ export function useGraphStyles({
 
   const getEdgeOpacity = useCallback(() => Math.max(0, Math.min(1, edgeOpacity)), [edgeOpacity]);
 
-  const degreeByNode = useMemo(() => {
-    const result = new Map<string, number>();
-    edges.forEach((edge) => {
-      result.set(String(edge.source), (result.get(String(edge.source)) || 0) + 1);
-      result.set(String(edge.target), (result.get(String(edge.target)) || 0) + 1);
-    });
-    return result;
-  }, [edges]);
+  const degrees = useMemo(() => degreeByNode(nodes, edges), [nodes, edges]);
   const legendMetricScales = useMemo(() => {
     const result: LegendMetricScale[] = [];
     if (legendMetricScale) result.push(legendMetricScale);
@@ -760,7 +516,7 @@ export function useGraphStyles({
       const selectedName = nodeSizeBase === 'custom' ? customNodeSizeAttribute : nodeSizeBase;
       const values = nodes.map((node) => {
         if (nodeSizeBase === 'custom') return Number(customNodeSizeAttribute ? netMap.get(String(node.id))?.[customNodeSizeAttribute] ?? node[customNodeSizeAttribute] : Number.NaN);
-        if (nodeSizeBase === 'degree') return degreeByNode.get(String(node.id)) ?? 0;
+        if (nodeSizeBase === 'degree') return degrees[String(node.id)] ?? 0;
         return Number(netMap.get(String(node.id))?.[nodeSizeBase] ?? node[nodeSizeBase]);
       });
       addNumeric(`Node size · ${metricLabel(selectedName || 'custom')}`, 'size', values, 'Larger circles represent larger values.');
@@ -784,7 +540,7 @@ export function useGraphStyles({
     }
     if (selectedEdgeColorAttribute && selectedEdgeColorNumeric) addColor(`Edge color · ${metricLabel(selectedEdgeColorAttribute)}`, customEdgeColorExtent.min, customEdgeColorExtent.max, customEdgeColorScale, customEdgeScaleKey, customEdgeColors);
     return Array.from(new Map(result.map((entry) => [`${entry.visual}:${entry.title}`, entry])).values());
-  }, [customAttributes, customEdgeColorExtent, customEdgeColorScale, customEdgeColors, customEdgeScaleKey, customNodeSizeAttribute, degreeByNode, edgeColorBase, edgeColorNodeMetric, edgeColorNodeTarget, edgeWeightBase, edges, legendMetricScale, maxRaw, maxSec, netMap, nodeEdgeMetricColors, nodeEdgeMetricKey, nodeMetricColorScale, nodeMetricExtent, nodeSizeBase, nodes, rawColorScale, rawColors, secColorScale, secondaryColors, selectedEdgeColorAttribute, selectedEdgeColorNumeric]);
+  }, [customAttributes, customEdgeColorExtent, customEdgeColorScale, customEdgeColors, customEdgeScaleKey, customNodeSizeAttribute, degrees, edgeColorBase, edgeColorNodeMetric, edgeColorNodeTarget, edgeWeightBase, edges, legendMetricScale, maxRaw, maxSec, netMap, nodeEdgeMetricColors, nodeEdgeMetricKey, nodeMetricColorScale, nodeMetricExtent, nodeSizeBase, nodes, rawColorScale, rawColors, secColorScale, secondaryColors, selectedEdgeColorAttribute, selectedEdgeColorNumeric]);
 
   return {
     customColorMap,

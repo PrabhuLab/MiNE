@@ -3,7 +3,8 @@
 import { useEffect, useRef, useCallback, useMemo } from 'react';
 import * as d3 from 'd3';
 import type Graph from 'graphology';
-import { useStore, RawNode, RawEdge } from '@/store/useStore';
+import type { RawNode, RawEdge } from '@/store/useStore';
+import { edgePath } from '@/components/graph/d3/edgePath';
 import type { TooltipData } from '@/services/graphInteraction/types';
 import {
   getD3EdgePresentation,
@@ -21,33 +22,16 @@ interface UseGraphSimulationProps {
   nodes: RawNode[];
   edges: RawEdge[];
   communityMap: Record<string, string>;
-  networkMetrics?: any[];
-  nodeSizeMult: number;
-  bipartiteNodeSizeMult?: number;
-  nodeSizeBase?: string;
-  nodeColorBase?: string;
-  uniformNodeColor?: string;
-  uniformEdgeColor?: string;
-  edgeWeightMult?: number;
-  edgeWeightBase?: string;
-  edgeColorBase?: string;
-  edgeColorNodeMetric?: string;
-  edgeColorNodeTarget?: 'source' | 'target';
   nodeOpacity?: number;
-  edgeOpacity?: number;
-  edgeOpacityBase?: string;
-  forceStrength: number;
   directed: boolean;
   bipartite: boolean;
   livePhysics?: boolean;
   isDarkMode?: boolean;
   refreshKey?: number;
   layoutRevision?: number;
-  onRefresh?: () => void;
   onElementDoubleClick?: (id: string, type: 'node' | 'edge') => void;
   onClearSelection?: () => void;
   searchQuery?: string;
-  selectedElement?: string | null;
   hiddenItems: Set<string>;
   isolatedLegendItem: string | null;
   selectedCommunityId: string | null;
@@ -64,8 +48,6 @@ interface UseGraphSimulationProps {
   legendNodeMembership: Map<string, Set<string>>;
   legendEdgeMembership: Map<string, Set<string>>;
   legendVisibility: LegendVisibilityResult;
-  maxRaw: number;
-  maxSec: number;
   clickedNode: RawNode | null;
   setClickedNode: React.Dispatch<React.SetStateAction<RawNode | null>>;
   clickedEdge: RawEdge | null;
@@ -74,13 +56,11 @@ interface UseGraphSimulationProps {
   setClickedEdge: React.Dispatch<React.SetStateAction<RawEdge | null>>;
   setClickedDegree: (deg: number) => void;
   setTooltip: React.Dispatch<React.SetStateAction<TooltipData | null>>;
-  isCalculatingLayout: boolean;
   setIsCalculatingLayout: (val: boolean) => void;
   registerD3TickListener?: (cb: () => void) => () => void;
   beginDrag?: (id: string, x: number, y: number) => void;
   movePinnedNode?: (id: string, x: number, y: number) => void;
   endDrag?: (id: string) => void;
-  d3NodesRef?: React.RefObject<any[]>;
   d3LinksRef?: React.RefObject<any[]>;
   d3NodesMapRef?: React.RefObject<Map<string, any>>;
 }
@@ -92,14 +72,6 @@ export function useGraphSimulation({
   nodes,
   edges,
   communityMap,
-  networkMetrics = [],
-  nodeSizeMult = 3,
-  bipartiteNodeSizeMult = 2,
-  nodeSizeBase = 'degree',
-  edgeWeightMult = 1,
-  edgeWeightBase = 'weight_raw',
-  maxRaw = 1,
-  maxSec = 1,
   nodeOpacity = 1,
   directed,
   bipartite,
@@ -139,14 +111,11 @@ export function useGraphSimulation({
   beginDrag,
   movePinnedNode,
   endDrag,
-  d3NodesRef,
   d3LinksRef,
   d3NodesMapRef,
 }: UseGraphSimulationProps) {
   const zoomGroupRef = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null);
   const zoomBehaviorRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
-  const nodeGroupRef = useRef<d3.Selection<SVGGElement, any, SVGGElement, unknown> | null>(null);
-  const edgeGroupRef = useRef<d3.Selection<SVGPathElement, any, SVGGElement, unknown> | null>(null);
   const tickDrawRef = useRef<(() => void) | null>(null);
   const lastTopologyKeyRef = useRef<string | null>(null);
   const currentTransformRef = useRef<d3.ZoomTransform>(d3.zoomIdentity);
@@ -522,7 +491,6 @@ export function useGraphSimulation({
         setTooltip(null);
       });
 
-    edgeGroupRef.current = link as any;
 
     const nodeGroup = zoomGroup
       .append('g')
@@ -533,7 +501,6 @@ export function useGraphSimulation({
       .style('display', (d: any) => nodePresentation.get(String(d.id))?.hidden ? 'none' : null)
       .attr('transform', (d: any) => `translate(${d.x},${d.y})`);
 
-    nodeGroupRef.current = nodeGroup as any;
 
     const strokeColor = isDarkMode ? '#444444' : '#141414';
 
@@ -639,52 +606,7 @@ export function useGraphSimulation({
     const tickDraw = () => {
       nodeGroup.attr('transform', (d: any) => `translate(${d.x},${d.y})`);
 
-      link.attr('d', (d: any) => {
-        const sx = d.source.x;
-        const sy = d.source.y;
-        const tx = d.target.x;
-        const ty = d.target.y;
-
-        if (directed) {
-          const dx = tx - sx;
-          const dy = ty - sy;
-          const dist = Math.hypot(dx, dy);
-          if (dist > 0) {
-            // A quadratic curve gives a stable tangent at each endpoint. Trim
-            // both ends along those tangents so the arrow tip terminates at
-            // the target node boundary instead of its center.
-            const normalX = -dy / dist;
-            const normalY = dx / dist;
-            const bend = Math.min(80, Math.max(12, dist * 0.2));
-            const controlX = (sx + tx) / 2 + normalX * bend;
-            const controlY = (sy + ty) / 2 + normalY * bend;
-
-            const sourceTangentX = controlX - sx;
-            const sourceTangentY = controlY - sy;
-            const sourceTangentLength = Math.hypot(sourceTangentX, sourceTangentY) || 1;
-            const targetTangentX = tx - controlX;
-            const targetTangentY = ty - controlY;
-            const targetTangentLength = Math.hypot(targetTangentX, targetTangentY) || 1;
-            const boundaryDistance = (node: any, tangentX: number, tangentY: number, tangentLength: number) => {
-              const radius = Math.max(0, Number(node.currentRadius) || 0) + 1;
-              const isSquare = isSecondaryNode(node, bipartite);
-              if (!isSquare) return radius;
-              const unitX = Math.abs(tangentX / tangentLength);
-              const unitY = Math.abs(tangentY / tangentLength);
-              return radius / Math.max(unitX, unitY, 0.0001);
-            };
-            const sourceRadius = boundaryDistance(d.source, sourceTangentX, sourceTangentY, sourceTangentLength);
-            const targetRadius = boundaryDistance(d.target, targetTangentX, targetTangentY, targetTangentLength);
-            const startX = sx + (sourceTangentX / sourceTangentLength) * sourceRadius;
-            const startY = sy + (sourceTangentY / sourceTangentLength) * sourceRadius;
-            const endX = tx - (targetTangentX / targetTangentLength) * targetRadius;
-            const endY = ty - (targetTangentY / targetTangentLength) * targetRadius;
-
-            return `M${startX},${startY}Q${controlX},${controlY} ${endX},${endY}`;
-          }
-        }
-        return `M${sx},${sy}L${tx},${ty}`;
-      });
+      link.attr('d', (d: any) => edgePath(d, directed, bipartite));
     };
 
     tickDrawRef.current = tickDraw;

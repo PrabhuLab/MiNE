@@ -1,3 +1,4 @@
+import { isLargeGraph } from '@/services/engines/policy';
 import type { ResolvedComputeEngine } from '@/services/cloud/config';
 import { computeCommunityInBrowser, computeCommunityInCloud } from './engine';
 import type { CommunityComputationResult, CommunityRequest } from './types';
@@ -17,7 +18,7 @@ export async function computeCommunityRouted(request: CommunityRequest, engine: 
     if (request.settings.algorithm !== 'louvain') {
       throw new Error(`Cloud ${request.settings.algorithm} failed and has no Browser equivalent. Check the Cloud API and try again.`);
     }
-    const large = request.nodes.length >= 7_000 || request.edges.length >= 15_000;
+    const large = isLargeGraph(request.nodes.length, request.edges.length);
     const performance = large ? ' This graph is large, so the browser fallback may be slower.' : '';
     return {
       result: await computeCommunityInBrowser(request),

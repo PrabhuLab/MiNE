@@ -10,3 +10,6 @@ coverage/
 tsconfig.tsbuildinfo
 tsconfig.tsbuildinfo
 *.tsbuildinfo
+
+# Local generated codebase map and extraction cache
+graphify-out/
