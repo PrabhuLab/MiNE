@@ -58,7 +58,8 @@ export default function SmartUploadWizard() {
     percentagesFile: null,
     singleMatrixFile: null,
     edgesFile: null,
-    nodesFile: null,
+    nodeFiles: [],
+    additionalEdgeFiles: [],
     adjListFile: null,
     jsonFile: null,
     hasAdditionalAttributes: false,
@@ -163,21 +164,6 @@ export default function SmartUploadWizard() {
           }
           return next;
         });
-        if (filesState.nodesFile) {
-          const nodeData = await parseCSVFile(filesState.nodesFile);
-          dataParts.push({ nodes: nodeData });
-          setMapping((prev) => {
-            const next = { ...prev };
-            if (nodeData[0]) {
-              const headers = nodeData[0];
-              next.nodeIdCol = detectNodeIdColumn(headers);
-              next.nodeLabelCol = detectNodeLabelColumn(headers);
-              next.nodePartitionCol = topology === 'Bipartite' ? headers.find((header: string) => /^(partition|bipartite|set)$/i.test(header)) || '' : '';
-              next.nodeCommunityCol = headers.find((header: string) => /^(community|group|cluster)$/i.test(header)) || '';
-            }
-            return next;
-          });
-        }
       } else if (isFormatAdjList) {
         const adjList = await parseCSVFile(filesState.adjListFile!);
         dataParts.push({ adjList });
@@ -186,35 +172,33 @@ export default function SmartUploadWizard() {
         }
       }
 
-      if (filesState.hasAdditionalAttributes) {
-        if (!isFormatEdgeList && filesState.edgesFile) {
-          const edgeData = await parseCSVFile(filesState.edgesFile);
-          dataParts.push({ additionalEdges: edgeData });
-          if (edgeData[0]) {
-            const headers = edgeData[0];
-            setMapping((prev) => ({
-              ...prev,
+      if (isFormatEdgeList || filesState.hasAdditionalAttributes) {
+        const uploads = [
+          ...filesState.nodeFiles.map((file) => ({ file, kind: 'nodes' as const })),
+          ...filesState.additionalEdgeFiles.map((file) => ({ file, kind: 'edges' as const })),
+        ];
+        const metadataTables = await Promise.all(uploads.map(async ({ file, kind }) => {
+          const data = await parseCSVFile(file);
+          const headers = data[0] || [];
+          if (!headers.length) throw new Error(`${file.name} is empty.`);
+          return {
+            name: file.name,
+            kind,
+            data,
+            mapping: {
+              ...mapping,
               sourceCol: headers.find((header: string) => /^(source|from|src|origin)$/i.test(header)) || headers[0] || '',
               targetCol: headers.find((header: string) => /^(target|to|dst|destination)$/i.test(header)) || headers[1] || '',
               weightRawCol: headers.find((header: string) => /^(weight_raw|raw_weight|absolute|count|weight)$/i.test(header)) || '',
               weightSecCol: headers.find((header: string) => /^(weight_secondary|secondary_weight|conditional|percentage|percent|pct|log1p)$/i.test(header)) || '',
-            }));
-          }
-        }
-        if (filesState.nodesFile) {
-          const nodeData = await parseCSVFile(filesState.nodesFile);
-          dataParts.push({ nodes: nodeData });
-          if (nodeData[0]) {
-            const headers = nodeData[0];
-            setMapping((prev) => ({
-              ...prev,
               nodeIdCol: detectNodeIdColumn(headers),
               nodeLabelCol: detectNodeLabelColumn(headers),
               nodePartitionCol: topology === 'Bipartite' ? headers.find((header: string) => /^(partition|bipartite|set)$/i.test(header)) || '' : '',
               nodeCommunityCol: headers.find((header: string) => /(?:^|_)community$|^(group|cluster)$/i.test(header)) || '',
-            }));
-          }
-        }
+            },
+          };
+        }));
+        dataParts.push({ metadataTables });
       }
 
       setParsedData(Object.assign({}, ...dataParts));
@@ -460,6 +444,7 @@ export default function SmartUploadWizard() {
             isDarkMode={isDarkMode}
             format={format}
             parsedData={parsedData}
+            setParsedData={setParsedData}
             mapping={mapping}
             setMapping={setMapping}
             previewGraph={previewGraph}

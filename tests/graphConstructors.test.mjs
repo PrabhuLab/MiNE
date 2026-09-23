@@ -100,3 +100,32 @@ test('secondary weights remain absent unless the input explicitly supplies them'
   }, false, 'Unipartite', true);
   assert.equal(edgeList.edges[0].weight_secondary, 0.25);
 });
+
+test('multiple metadata lists use independent mappings and preserve bipartite topology', () => {
+  const metadataTables = [
+    { name: 'left.csv', kind: 'nodes', data: [['left_id', 'title', 'role'], ['a', 'Alpha', 'producer']], mapping: { ...baseMapping, nodeIdCol: 'left_id', nodeLabelCol: 'title' } },
+    { name: 'right.csv', kind: 'nodes', data: [['right_id', 'name', 'category'], ['b', 'Beta', 'mineral']], mapping: { ...baseMapping, nodeIdCol: 'right_id', nodeLabelCol: 'name' } },
+    { name: 'labels.csv', kind: 'nodes', data: [['key', 'label', 'role'], ['a', '', 'updated']], mapping: { ...baseMapping, nodeIdCol: 'key', nodeLabelCol: 'label' } },
+    { name: 'weights.csv', kind: 'edges', data: [['from', 'to', 'strength'], ['a', 'b', 5]], mapping: { ...baseMapping, sourceCol: 'from', targetCol: 'to', weightRawCol: 'strength' } },
+    { name: 'confidence.csv', kind: 'edges', data: [['src', 'dst', 'confidence', 'weight'], ['b', 'a', 'high', ''], ['x', 'y', 'ignored', 9]], mapping: { ...baseMapping, sourceCol: 'src', targetCol: 'dst', weightRawCol: 'weight' } },
+  ];
+  for (const [format, data] of [
+    ['Incidence Matrix', { matrix: [['id', 'b'], ['a', 1]] }],
+    ['Bipartite Edge List', { edges: [['source', 'target'], ['a', 'b']] }],
+  ]) {
+    const graph = constructGraph({ ...data, metadataTables }, format, { ...baseMapping, sourceCol: 'source', targetCol: 'target' }, false, 'Bipartite', true);
+    assert.equal(graph.nodes.length, 2);
+    assert.equal(graph.edges.length, 1);
+    assert.equal(graph.nodes.find((node) => node.id === 'a').label, 'Alpha');
+    assert.equal(graph.nodes.find((node) => node.id === 'a').role, 'updated');
+    assert.equal(graph.nodes.find((node) => node.id === 'a').partition, 'A');
+    assert.equal(graph.nodes.find((node) => node.id === 'b').label, 'Beta');
+    assert.equal(graph.nodes.find((node) => node.id === 'b').category, 'mineral');
+    assert.equal(graph.nodes.find((node) => node.id === 'b').partition, 'B');
+    assert.equal(graph.edges[0].weight_raw, 5);
+    assert.equal(graph.edges[0].confidence, 'high');
+  }
+  const directed = constructGraph({ edges: [['source', 'target'], ['a', 'b']], metadataTables }, 'Directed Bipartite Edge List', { ...baseMapping, sourceCol: 'source', targetCol: 'target' }, true, 'Bipartite', true);
+  assert.equal(directed.edges[0].weight_raw, 5);
+  assert.equal(directed.edges[0].confidence, undefined);
+});

@@ -344,8 +344,11 @@ export function constructGraph(
       }
     }
 
-    if (parsedData.additionalEdges) {
-      const edgeData = parsedData.additionalEdges;
+    const edgeTables = [
+      ...(parsedData.additionalEdges ? [{ data: parsedData.additionalEdges, mapping }] : []),
+      ...(parsedData.metadataTables || []).filter((table) => table.kind === 'edges'),
+    ];
+    for (const { data: edgeData, mapping: { sourceCol, targetCol, weightRawCol, weightSecCol } } of edgeTables) {
       const eHeaders = edgeData[0] || [];
       const sIdx = eHeaders.indexOf(sourceCol);
       const tIdx = eHeaders.indexOf(targetCol);
@@ -381,8 +384,11 @@ export function constructGraph(
       }
     }
 
-    if (parsedData.nodes) {
-      const nodeData = parsedData.nodes;
+    const nodeTables = [
+      ...(parsedData.nodes ? [{ data: parsedData.nodes, mapping }] : []),
+      ...(parsedData.metadataTables || []).filter((table) => table.kind === 'nodes'),
+    ];
+    for (const { data: nodeData, mapping: { nodeIdCol, nodeLabelCol, nodePartitionCol, nodeCommunityCol } } of nodeTables) {
       const nHeaders = nodeData[0] || [];
       const idIdx = nHeaders.indexOf(nodeIdCol);
       const lblIdx = nHeaders.indexOf(nodeLabelCol);

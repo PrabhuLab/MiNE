@@ -140,7 +140,7 @@ export const StepFileFormat: React.FC<StepFileFormatProps> = ({
           )}
 
           {isFormatEdgeList && (
-            <div className="grid grid-cols-2 gap-6">
+            <div>
               <div>
                 <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
                   Edges (CSV) *
@@ -155,23 +155,6 @@ export const StepFileFormat: React.FC<StepFileFormatProps> = ({
                     className="hidden"
                     accept=".csv"
                     onChange={(e) => setFilesState((prev) => ({ ...prev, edgesFile: e.target.files?.[0] || null }))}
-                  />
-                </label>
-              </div>
-              <div>
-                <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
-                  Nodes (CSV) [Optional Metadata]
-                </label>
-                <label className={dropzoneClass}>
-                  <div className="flex flex-col items-center justify-center">
-                    <p className="text-[10px] font-bold tracking-widest uppercase">Select File</p>
-                    <p className="text-[10px] font-mono opacity-60 mt-1">{filesState.nodesFile?.name || '---'}</p>
-                  </div>
-                  <input
-                    type="file"
-                    className="hidden"
-                    accept=".csv"
-                    onChange={(e) => setFilesState((prev) => ({ ...prev, nodesFile: e.target.files?.[0] || null }))}
                   />
                 </label>
               </div>
@@ -201,56 +184,55 @@ export const StepFileFormat: React.FC<StepFileFormatProps> = ({
 
         {format !== 'Standard JSON' && (
           <div className="mt-6 border-t border-dashed pt-6" style={{ borderColor: isDarkMode ? '#333' : '#d0d0d0' }}>
-            <label className="flex items-center space-x-2 cursor-pointer mb-4">
-              <input
-                type="checkbox"
-                checked={filesState.hasAdditionalAttributes}
-                onChange={(e) => setFilesState((prev) => ({ ...prev, hasAdditionalAttributes: e.target.checked }))}
-                className="accent-[#141414] dark:accent-[#E4E3E0]"
-              />
-              <span className={`text-[10px] font-bold uppercase tracking-widest ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
-                Upload Additional Node/Edge Attributes
-              </span>
-            </label>
-            {filesState.hasAdditionalAttributes && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {!isFormatEdgeList && (
-                  <div>
-                    <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
-                      Additional Edges (CSV) [Optional]
-                    </label>
-                    <label className={dropzoneClass}>
-                      <div className="flex flex-col items-center justify-center">
-                        <p className="text-[10px] font-bold tracking-widest uppercase">Select File</p>
-                        <p className="text-[10px] font-mono opacity-60 mt-1">{filesState.edgesFile?.name || '---'}</p>
-                      </div>
-                      <input
-                        type="file"
-                        className="hidden"
-                        accept=".csv"
-                        onChange={(e) => setFilesState((prev) => ({ ...prev, edgesFile: e.target.files?.[0] || null }))}
-                      />
-                    </label>
-                  </div>
-                )}
-                <div>
-                  <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
-                    Additional Nodes (CSV) [Optional]
-                  </label>
-                  <label className={dropzoneClass}>
-                    <div className="flex flex-col items-center justify-center">
-                      <p className="text-[10px] font-bold tracking-widest uppercase">Select File</p>
-                      <p className="text-[10px] font-mono opacity-60 mt-1">{filesState.nodesFile?.name || '---'}</p>
+            {!isFormatEdgeList && (
+              <label className="flex items-center space-x-2 cursor-pointer mb-4">
+                <input
+                  type="checkbox"
+                  checked={filesState.hasAdditionalAttributes}
+                  onChange={(e) => setFilesState((prev) => ({ ...prev, hasAdditionalAttributes: e.target.checked }))}
+                />
+                <span className="text-[10px] font-bold uppercase tracking-widest">Upload Additional Node/Edge Attributes</span>
+              </label>
+            )}
+            {(isFormatEdgeList || filesState.hasAdditionalAttributes) && (
+              <>
+                <p className="text-xs font-mono mb-4">Add multiple optional lists, including one node list per bipartite set. Map each file separately in the next step. Later non-empty values override earlier metadata.</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {(['nodeFiles', 'additionalEdgeFiles'] as const).map((key) => (
+                    <div key={key}>
+                      <label className={`${dropzoneClass} focus-within:outline focus-within:outline-2`}>
+                        <span className="text-[10px] font-bold uppercase tracking-widest">
+                          Add {key === 'nodeFiles' ? 'Node' : 'Edge'} Lists (CSV) [Optional]
+                        </span>
+                        <input
+                          type="file"
+                          multiple
+                          accept=".csv"
+                          className="sr-only"
+                          onChange={(e) => {
+                            const files = Array.from(e.target.files || []);
+                            setFilesState((prev) => ({ ...prev, [key]: [...prev[key], ...files] }));
+                            e.target.value = '';
+                          }}
+                        />
+                      </label>
+                      <ul className="mt-2 space-y-2 text-xs font-mono">
+                        {filesState[key].map((file, index) => (
+                          <li key={index} className="flex items-center justify-between gap-2">
+                            <span className="break-all">{file.name}</span>
+                            <button
+                              type="button"
+                              aria-label={`Remove ${file.name}`}
+                              onClick={() => setFilesState((prev) => ({ ...prev, [key]: prev[key].filter((_, i) => i !== index) }))}
+                              className="underline"
+                            >Remove</button>
+                          </li>
+                        ))}
+                      </ul>
                     </div>
-                    <input
-                      type="file"
-                      className="hidden"
-                      accept=".csv"
-                      onChange={(e) => setFilesState((prev) => ({ ...prev, nodesFile: e.target.files?.[0] || null }))}
-                    />
-                  </label>
+                  ))}
                 </div>
-              </div>
+              </>
             )}
           </div>
         )}

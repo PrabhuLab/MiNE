@@ -4,6 +4,7 @@ import { BaseStepProps, ColumnMappingState, ParsedDataState, TopologyType } from
 interface StepDataMappingProps extends BaseStepProps {
   format: string;
   parsedData: ParsedDataState;
+  setParsedData: React.Dispatch<React.SetStateAction<ParsedDataState>>;
   mapping: ColumnMappingState;
   setMapping: React.Dispatch<React.SetStateAction<ColumnMappingState>>;
   previewGraph: { nodes: any[]; edges: any[] };
@@ -17,6 +18,7 @@ export const StepDataMapping: React.FC<StepDataMappingProps> = ({
   isDarkMode,
   format,
   parsedData,
+  setParsedData,
   mapping,
   setMapping,
   previewGraph,
@@ -35,12 +37,12 @@ export const StepDataMapping: React.FC<StepDataMappingProps> = ({
     setMapping((prev) => ({ ...prev, [key]: value }));
   };
 
-  const renderDropdown = (label: string, value: string, key: keyof ColumnMappingState, options: any[]) => (
+  const renderDropdown = (label: string, value: string, key: keyof ColumnMappingState, options: any[], onChange = updateMappingField) => (
     <div>
       <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>{label}</label>
       <select
         value={value}
-        onChange={(e) => updateMappingField(key, e.target.value)}
+        onChange={(e) => onChange(key, e.target.value)}
         className={`w-full border px-3 py-2 text-[10px] font-mono outline-none ${
           isDarkMode ? 'border-[#333] bg-[#1a1a1a] text-[#E4E3E0]' : 'border-[#141414] bg-white text-[#141414]'
         }`}
@@ -189,6 +191,28 @@ export const StepDataMapping: React.FC<StepDataMappingProps> = ({
             <p className="text-[10px] font-mono opacity-60">All unused node columns will be preserved automatically as custom attributes.</p>
           </div>
         )}
+
+        {parsedData.metadataTables?.map((table, index) => (
+          <div key={index} className="space-y-4 mb-6">
+            {renderTablePreview(table.data, `${table.kind === 'nodes' ? 'Node' : 'Edge'} Attributes: ${table.name}`)}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              {(table.kind === 'nodes'
+                ? [['Node ID Col', 'nodeIdCol'], ['Label Col', 'nodeLabelCol'], ['Partition Col', 'nodePartitionCol'], ['Community Col', 'nodeCommunityCol']]
+                : [['Source Col', 'sourceCol'], ['Target Col', 'targetCol'], ['Weight Col', 'weightRawCol'], ['Weight (Sec)', 'weightSecCol']]
+              ).map(([label, field]) => (
+                <React.Fragment key={field}>
+                  {renderDropdown(label, String(table.mapping[field as keyof ColumnMappingState]), field as keyof ColumnMappingState, table.data[0] || [], (key, value) => {
+                    setParsedData((prev) => ({
+                      ...prev,
+                      metadataTables: prev.metadataTables?.map((entry, i) => i === index ? { ...entry, mapping: { ...entry.mapping, [key]: value } } : entry),
+                    }));
+                  })}
+                </React.Fragment>
+              ))}
+            </div>
+            <p className="text-[10px] font-mono opacity-60">Unused columns are preserved as custom attributes.</p>
+          </div>
+        ))}
 
         {isFormatDualMatrix && (
           <>
