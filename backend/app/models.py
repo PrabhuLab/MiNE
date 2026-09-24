@@ -27,6 +27,9 @@ class CommunitySpec(ApiModel):
     steps: int = Field(default=4, ge=1, le=1000)
     seed: int = 42
     clusters: int = Field(default=5, ge=2, le=100)
+    column_clusters: int | None = Field(default=None, ge=2, le=100)
+    block_selection: Literal["manual", "icl"] = "manual"
+    max_clusters: int = Field(default=15, ge=2, le=100)
 
 
 class AnalyzeRequest(ApiModel):

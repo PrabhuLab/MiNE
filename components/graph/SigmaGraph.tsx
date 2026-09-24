@@ -67,7 +67,6 @@ export default function SigmaGraph({
   const containerRef = useRef<HTMLDivElement>(null);
   const sigmaRef = useRef<Sigma | null>(null);
   const styledSigmaRef = useRef<Sigma | null>(null);
-  const lastIndexationSignatureRef = useRef('');
   const hasInitialFitRef = useRef(false);
   const sigmaConstructionStartedRef = useRef(0);
 
@@ -531,16 +530,6 @@ export default function SigmaGraph({
     // extent on this effect's first run for a new renderer.
     if (styledSigmaRef.current !== sigma) {
       styledSigmaRef.current = sigma;
-      lastIndexationSignatureRef.current = JSON.stringify({
-        clickedNode: clickedNode?.id ?? null,
-        clickedEdge: clickedEdge ? `${clickedEdge.source}->${clickedEdge.target}` : null,
-        selectedElement,
-        focus: focusRequest?.requestId ?? null,
-        isolatedLegendItem,
-        selectedCommunityId,
-        isolatedCommunityId,
-        showArrowheads,
-      });
       return;
     }
 
@@ -552,30 +541,13 @@ export default function SigmaGraph({
       // setSetting performs the one required scheduled reprocessing itself.
       sigma.setSetting('renderLabels', shouldRenderLabels);
     } else {
-      const indexationSignature = JSON.stringify({
-        clickedNode: clickedNode?.id ?? null,
-        clickedEdge: clickedEdge ? `${clickedEdge.source}->${clickedEdge.target}` : null,
-        selectedElement,
-        focus: focusRequest?.requestId ?? null,
-        isolatedLegendItem,
-        selectedCommunityId,
-        isolatedCommunityId,
-        showArrowheads,
-      });
-      const needsIndexation = lastIndexationSignatureRef.current !== indexationSignature;
-      lastIndexationSignatureRef.current = indexationSignature;
-      // Re-run reducers and rebuild the label grid without clearing the frozen
-      // extent. This is one scheduled request for each logical UI change.
+      // Hidden edges have no program slot, so repainting every edge with
+      // skipIndexation can throw. Let Sigma rebuild indices for style changes.
       sigma.scheduleRefresh({
         partialGraph: {
           nodes: graph.nodes(),
           edges: graph.edges(),
         },
-        // Arrowheads and straight/curved paths select different v4 primitive
-        // programs. They must be re-indexed rather than repainted in-place.
-        // Hidden nodes remain valid transparent slots in the node reducer, so
-        // element isolation does not reintroduce the old zero-index ghost.
-        skipIndexation: !needsIndexation,
       });
     }
   }, [

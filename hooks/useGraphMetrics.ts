@@ -205,7 +205,17 @@ export function useGraphMetrics(
       [result.resultId]: community,
     })));
     setCommunityMap(result.memberships);
-    setGraphMetrics((current) => ({ ...current, [`${result.resultId}_quality`]: result.quality }));
+    setGraphMetrics((current) => {
+      const next = Object.fromEntries(Object.entries(current).filter(([key]) => !key.startsWith(`${result.resultId}_`)));
+      next[`${result.resultId}_quality`] = result.quality;
+      if (result.algorithm === 'sbm') next[`${result.resultId}_blocks`] = result.provenance.selectedClusters;
+      if (result.algorithm === 'lbm') {
+        next[`${result.resultId}_type1_blocks`] = result.provenance.rowClusters;
+        next[`${result.resultId}_type2_blocks`] = result.provenance.columnClusters;
+      }
+      if (result.provenance.blockSelection === 'icl') next[`${result.resultId}_icl`] = result.provenance.icl;
+      return next;
+    });
     const resultEngine = result.provenance.engine === 'graphology' ? 'browser' : 'cloud';
     setMetricValidity((current) => ({ ...current, [result.resultId]: {
       ...validity,

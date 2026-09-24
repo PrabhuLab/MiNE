@@ -91,7 +91,19 @@ export function CalculationControls(props: CalculationControlsProps) {
           {selectedCommunityAlgorithm === 'louvain' && <NumberField label="Resolution" value={communitySettings.resolution} min={0.01} step={0.1} onChange={(value) => updateCommunity('resolution', value)} />}
           {selectedCommunityAlgorithm === 'infomap' && <NumberField label="Trials" value={communitySettings.trials} min={1} onChange={(value) => updateCommunity('trials', value)} />}
           {selectedCommunityAlgorithm === 'walktrap' && <NumberField label="Walk Steps" value={communitySettings.steps} min={1} onChange={(value) => updateCommunity('steps', value)} />}
-          {['sbm', 'lbm'].includes(selectedCommunityAlgorithm) && <NumberField label={selectedCommunityAlgorithm === 'lbm' ? 'Blocks per partition' : 'Blocks'} value={communitySettings.clusters} min={2} onChange={(value) => updateCommunity('clusters', Math.max(2, Math.round(value)))} />}
+          {['sbm', 'lbm'].includes(selectedCommunityAlgorithm) && <>
+            <label className="block text-[9px] font-bold uppercase tracking-widest">Block selection
+              <select value={communitySettings.blockSelection} onChange={(event) => updateCommunity('blockSelection', event.target.value as CommunitySettings['blockSelection'])} className={`mt-2 w-full border bg-transparent p-2 text-[10px] font-mono ${isDarkMode ? 'border-[#444] [&>option]:bg-[#181818]' : 'border-[#141414] [&>option]:bg-white'}`}>
+                <option value="manual">Manual</option><option value="icl">Automatic (ICL)</option>
+              </select>
+            </label>
+            {communitySettings.blockSelection === 'icl'
+              ? <NumberField label={selectedCommunityAlgorithm === 'lbm' ? 'Maximum total blocks' : 'Maximum blocks'} value={communitySettings.maxClusters} min={2} onChange={(value) => updateCommunity('maxClusters', Math.max(2, Math.round(value)))} />
+              : <>
+                <NumberField label={selectedCommunityAlgorithm === 'lbm' ? 'Node Type 1 Blocks' : 'Blocks'} value={communitySettings.clusters} min={2} onChange={(value) => updateCommunity('clusters', Math.max(2, Math.round(value)))} />
+                {selectedCommunityAlgorithm === 'lbm' && <NumberField label="Node Type 2 Blocks" value={communitySettings.columnClusters} min={2} onChange={(value) => updateCommunity('columnClusters', Math.max(2, Math.round(value)))} />}
+              </>}
+          </>}
           <NumberField label="Seed" value={communitySettings.seed} onChange={(value) => updateCommunity('seed', value)} />
           <button onClick={() => props.runCommunity({ ...communitySettings, algorithm: selectedCommunityAlgorithm, weightChannel: ['sbm', 'lbm'].includes(selectedCommunityAlgorithm) ? 'unweighted' : communitySettings.weightChannel })} disabled={props.metricsLoading || !props.metricContext.hasEdges || !communityOptions.length} className="w-full border py-2 text-[10px] font-bold uppercase tracking-widest disabled:opacity-40">{props.metricsLoading ? 'Computing…' : 'Run Communities'}</button>
         </div>

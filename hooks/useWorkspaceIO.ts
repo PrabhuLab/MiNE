@@ -54,7 +54,7 @@ export function useWorkspaceIO(options: WorkspaceIOOptions) {
       rendererEngine: state.rendererEngine,
       enginePolicyVersion: ENGINE_POLICY_VERSION,
       effectiveEngine: effectiveComputationEngine(options.rawNodes.length, options.rawEdges.length, state.computeEngine),
-      effectiveRenderer: effectiveRenderer(state.rendererEngine, effectiveComputationEngine(options.rawNodes.length, options.rawEdges.length, state.computeEngine)),
+      effectiveRenderer: effectiveRenderer(state.rendererEngine, effectiveComputationEngine(options.rawNodes.length, options.rawEdges.length, state.computeEngine), options.rawNodes.length, options.rawEdges.length),
       graphMode: {
         directed: options.directed,
         bipartite: options.bipartite,

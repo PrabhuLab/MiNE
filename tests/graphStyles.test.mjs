@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildLegendCategories } from '../services/graphStyles/categories.ts';
+import { UndirectedGraph } from 'graphology';
+import { updateGraphColors } from '../services/graphStyles/colors.ts';
 import { edgePath } from '../components/graph/d3/edgePath.ts';
 
 const options = {
@@ -22,7 +24,7 @@ test('categorical legends follow selected channels, preserve membership and hono
   assert.deepEqual(buildLegendCategories(options), []);
   const communities = buildLegendCategories({ ...options, nodeColorBase: 'louvain' });
   assert.deepEqual(communities[0].items[0], {
-    label: 'Community 0', id: 'community:0', color: '#123456', colorKey: 'community:42',
+    label: 'Community 1', id: 'community:0', color: '#123456', colorKey: 'community:42',
     nodes: ['Alpha'], nodeIds: ['a'], edgeIds: [], allIds: ['community:0', 'community:1'],
   });
   const types = buildLegendCategories({ ...options, edgeColorBase: 'nodeMetric', edgeColorNodeMetric: 'type', edgeColorNodeTarget: 'target' });
@@ -44,6 +46,18 @@ test('categorical legends follow selected channels, preserve membership and hono
   assert.deepEqual(buildLegendCategories({ ...options, nodes: [], edges: [], nodeColorBase: 'type' }), []);
 });
 
+test('computed bipartite communities appear by node type in the legend', () => {
+  const labels = ['Node Type 1 Community 1', 'Node Type 2 Community 1'];
+  const categories = buildLegendCategories({
+    ...options,
+    netMap: new Map([['a', { community_lbm: labels[0] }], ['b', { community_lbm: labels[1] }]]),
+    customAttributes: [{ name: 'community_lbm', label: 'Sparse LBM Communities', scope: 'node', origin: 'community', selectedType: 'nominal' }],
+    nodeColorBase: 'custom', customNodeAttribute: 'community_lbm',
+  });
+  assert.equal(categories[0].title, 'Node Color · Sparse LBM Communities');
+  assert.deepEqual(categories[0].items.map((item) => item.label), labels);
+});
+
 test('D3 paths retain straight edges, finite coincident paths and circle/square boundary trimming', () => {
   const source = { x: 0, y: 0, currentRadius: 9 };
   const target = { x: 100, y: 0, currentRadius: 9, partition: 'B' };
@@ -57,4 +71,31 @@ test('D3 paths retain straight edges, finite coincident paths and circle/square 
   assert.ok(Math.abs(Math.max(Math.abs(100 - square[4]), Math.abs(square[5])) - 10) < 1e-10);
   const reverse = coordinates(edgePath({ source: target, target: source }, true, true));
   assert.ok(reverse[3] < 0 && square[3] > 0); // Reciprocal edges bend to opposite sides.
+});
+
+
+test('theme repaint batches notifications and preserves graph positions and identity', () => {
+  const graph = new UndirectedGraph();
+  for (let i = 0; i < 100; i++) graph.addNode(String(i), { x: i, y: -i, size: 5, rawNode: { id: String(i) } });
+  for (let i = 1; i < 100; i++) graph.addEdge(String(i - 1), String(i), { size: 2, rawEdge: { weight_raw: i } });
+  let individualUpdates = 0;
+  const batches = [];
+  graph.on('nodeAttributesUpdated', () => individualUpdates++);
+  graph.on('edgeAttributesUpdated', () => individualUpdates++);
+  graph.on('eachNodeAttributesUpdated', ({ hints }) => batches.push(hints.attributes));
+  graph.on('eachEdgeAttributesUpdated', ({ hints }) => batches.push(hints.attributes));
+  const edges = graph.edges();
+  updateGraphColors(graph, true, (node) => node.id === '0' ? '#abcabc' : '#ffffff', () => '#888888');
+  assert.equal(individualUpdates, 0);
+  assert.deepEqual(batches, [['color', 'borderColor', 'labelColor'], ['color']]);
+  assert.deepEqual(graph.edges(), edges);
+  assert.equal(graph.getNodeAttribute('99', 'x'), 99);
+  assert.equal(graph.getNodeAttribute('99', 'y'), -99);
+  assert.equal(graph.getNodeAttribute('99', 'size'), 5);
+  assert.equal(graph.getNodeAttribute('0', 'color'), '#abcabc');
+  assert.equal(graph.getNodeAttribute('0', 'borderColor'), '#ffffff');
+  assert.equal(graph.getEdgeAttribute(edges[0], 'color'), '#888888');
+  updateGraphColors(graph, false, () => '#141414', () => '#333333');
+  assert.equal(graph.getNodeAttribute('0', 'borderColor'), '#141414');
+  assert.equal(graph.getNodeAttribute('0', 'color'), '#141414');
 });

@@ -19,6 +19,9 @@ export interface CloudCommunitySpec {
   steps?: number;
   seed?: number;
   clusters?: number;
+  columnClusters?: number;
+  blockSelection?: 'manual' | 'icl';
+  maxClusters?: number;
 }
 
 export interface CloudCommunityResult {

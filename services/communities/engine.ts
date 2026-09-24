@@ -3,6 +3,7 @@ import { requestCloudAnalysis } from '@/services/cloud/coordinator';
 import { buildCloudAnalyzeRequest } from '@/services/cloud/request';
 import type { CommunityComputationResult, CommunityRequest } from './types';
 import { computeCommunityMetrics } from '@/lib/workspaceUtils';
+import { communityMembershipLabels } from './labels';
 
 const resultIdOf = (algorithm: string) => `community_${algorithm}`;
 const labelOf = (algorithm: string) => ({
@@ -28,7 +29,7 @@ export async function computeCommunityInBrowser(request: CommunityRequest): Prom
     signal: request.signal,
   });
   if (!result.louvain) throw new Error(result.warnings.louvain || 'Louvain did not return a result.');
-  const memberships = Object.fromEntries(result.louvain.nodeMetrics.map((entry) => [String(entry.id), `Cluster ${Number(entry.community) + 1}`]));
+  const memberships = Object.fromEntries(result.louvain.nodeMetrics.map((entry) => [String(entry.id), `Community ${Number(entry.community) + 1}`]));
   return {
     resultId: resultIdOf('louvain'),
     algorithm: 'louvain',
@@ -62,7 +63,7 @@ export async function computeCommunityInCloud(request: CommunityRequest): Promis
     const response = await requestCloudAnalysis(legacyRequest, request.signal);
     const memberships = response.nodeMetrics.louvain;
     if (!memberships || memberships.length !== legacyRequest.nodeIds.length) throw new Error('Cloud Louvain response did not include aligned memberships.');
-    const membershipMap = Object.fromEntries(legacyRequest.nodeIds.map((id, index) => [id, `Cluster ${Number(memberships[index]) + 1}`]));
+    const membershipMap = Object.fromEntries(legacyRequest.nodeIds.map((id, index) => [id, `Community ${Number(memberships[index]) + 1}`]));
     // Derive the aligned node rows locally as well. This keeps the browser
     // client compatible with older deployed backends that return membership
     // and Q but predate node-level modularity fields.
@@ -100,7 +101,12 @@ export async function computeCommunityInCloud(request: CommunityRequest): Promis
       trials: request.settings.trials,
       steps: request.settings.steps,
       seed: request.settings.seed,
-      clusters: request.settings.clusters,
+      ...(['sbm', 'lbm'].includes(request.settings.algorithm) ? {
+        clusters: request.settings.clusters,
+        blockSelection: request.settings.blockSelection,
+        maxClusters: request.settings.maxClusters,
+        ...(request.settings.algorithm === 'lbm' ? { columnClusters: request.settings.columnClusters } : {}),
+      } : {}),
     },
   });
   cloudRequest.graphRevision = request.graphRevision;
@@ -110,8 +116,8 @@ export async function computeCommunityInCloud(request: CommunityRequest): Promis
     resultId: resultIdOf(response.community.algorithm),
     algorithm: response.community.algorithm,
     label: response.community.label || labelOf(response.community.algorithm),
-    memberships: Object.fromEntries(cloudRequest.nodeIds.map((id, index) => [id, `Cluster ${Number(response.community!.membership[index]) + 1}`])),
-    quality: Number.isFinite(Number(response.community.quality)) ? Number(response.community.quality) : null,
+    memberships: communityMembershipLabels(cloudRequest.nodeIds, response.community.membership, response.community.algorithm, cloudRequest.partitions, response.community.provenance),
+    quality: response.community.quality != null && Number.isFinite(Number(response.community.quality)) ? Number(response.community.quality) : null,
     provenance: response.community.provenance || { engine: 'python-igraph' },
     calculatedAt: new Date().toISOString(),
   };

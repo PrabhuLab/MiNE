@@ -2,6 +2,7 @@ import type {NextConfig} from 'next';
 
 const nextConfig: NextConfig = {
   output: 'export',
+  outputFileTracingRoot: __dirname,
   reactStrictMode: true,
   eslint: {
     ignoreDuringBuilds: true,

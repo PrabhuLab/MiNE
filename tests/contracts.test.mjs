@@ -17,6 +17,7 @@ import { staleCalculationIds } from '../services/metrics/validity.ts';
 import { degreeByNode, logarithmicNodeSize } from '../services/graphStyles/size.ts';
 import { filterDisconnectedNodes, filterNetworkByCommunity, computeActiveNetwork, computeCommunityMetrics, computeTableDataEdges, computeTableDataNodes, filterNetworkByEdgeMetric, filterNetworkByNodeMetric } from '../lib/workspaceUtils.ts';
 import { detectCustomAttributeType } from '../services/graphIO/customAttributes.ts';
+import { getCommunityDisplayMap } from '../lib/communityUtils.ts';
 
 test('large-graph boundaries prefer Cloud for auto routing without disabling Browser', () => {
   assert.equal(effectiveComputationEngine(6_999, 14_999, 'browser'), 'browser');
@@ -41,6 +42,19 @@ test('rendering is independent from the resolved computation engine', () => {
   assert.equal(effectiveRenderer('d3', 'cloud'), 'd3');
   assert.equal(effectiveRenderer('auto', 'browser'), 'd3');
   assert.equal(effectiveRenderer('auto', 'cloud'), 'sigma');
+  assert.equal(effectiveRenderer('auto', 'browser', 1_000, 0), 'sigma');
+  assert.equal(effectiveRenderer('auto', 'browser', 0, 2_000), 'sigma');
+  assert.equal(effectiveRenderer('auto', 'browser', 999, 1_999), 'd3');
+  assert.equal(effectiveRenderer('d3', 'browser', 5_000, 10_000), 'd3');
+});
+
+test('community display mapping joins metric rows by node id regardless of order', () => {
+  const result = getCommunityDisplayMap(
+    [{ id: 'a' }, { id: 'b' }, { id: 'c' }], {},
+    [{ id: 'c', louvain: 'Community 2' }, { id: 'a', louvain: 'Community 1' }, { id: 'b', louvain: 'Community 1' }],
+    'louvain',
+  );
+  assert.deepEqual(result.displayMap, { a: 0, b: 0, c: 1 });
 });
 
 test('workspace migration maps legacy renderer and first edge filter', () => {

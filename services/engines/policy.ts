@@ -1,5 +1,7 @@
 export const CLOUD_NODE_CUTOFF = 7_000;
 export const CLOUD_EDGE_CUTOFF = 15_000;
+export const SIGMA_NODE_CUTOFF = 1_000;
+export const SIGMA_EDGE_CUTOFF = 2_000;
 export const ENGINE_POLICY_VERSION = 2 as const;
 
 export type ComputationEngine = 'browser' | 'cloud';
@@ -27,8 +29,9 @@ export function rendererForEngine(engine: ComputationEngine): Renderer {
   return engine === 'cloud' ? 'sigma' : 'd3';
 }
 
-export function effectiveRenderer(preference: RendererPreference, engine: ComputationEngine): Renderer {
-  return preference === 'd3' || preference === 'sigma' ? preference : rendererForEngine(engine);
+export function effectiveRenderer(preference: RendererPreference, engine: ComputationEngine, nodeCount = 0, edgeCount = 0): Renderer {
+  if (preference === 'd3' || preference === 'sigma') return preference;
+  return nodeCount >= SIGMA_NODE_CUTOFF || edgeCount >= SIGMA_EDGE_CUTOFF ? 'sigma' : rendererForEngine(engine);
 }
 
 export function legacyRendererToPreference(

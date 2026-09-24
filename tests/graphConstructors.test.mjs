@@ -129,3 +129,20 @@ test('multiple metadata lists use independent mappings and preserve bipartite to
   assert.equal(directed.edges[0].weight_raw, 5);
   assert.equal(directed.edges[0].confidence, undefined);
 });
+
+
+test('ignored mappings do not read an unnamed CSV column as partition, community, or weight', () => {
+  const mapping = { ...baseMapping, nodeIdCol: 'id', nodeLabelCol: '', sourceCol: 'source', targetCol: 'target' };
+  const graph = constructGraph({
+    matrix: [['id', 'p1', 'p2'], ['Quartz', 1, 1]],
+    metadataTables: [
+      { kind: 'nodes', data: [['id', ''], ['p1', '2'], ['p2', '7']], mapping },
+      { kind: 'edges', data: [['source', 'target', ''], ['Quartz', 'p1', '99']], mapping },
+    ],
+  }, 'Incidence Matrix', mapping, false, 'Bipartite', false);
+  assert.deepEqual(graph.nodes.map((node) => node.partition), ['B', 'B', 'A']);
+  assert.equal(graph.nodes[0].name, 'p1');
+  assert.equal(graph.nodes[0].community, undefined);
+  assert.equal(graph.edges[0].weight_raw, 1);
+  assert.equal(graph.edges[0].weight_secondary, undefined);
+});

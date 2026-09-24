@@ -16,7 +16,7 @@ export async function computeCommunityRouted(request: CommunityRequest, engine: 
   } catch (error: any) {
     if (error?.name === 'AbortError' || request.signal?.aborted) throw error;
     if (request.settings.algorithm !== 'louvain') {
-      throw new Error(`Cloud ${request.settings.algorithm} failed and has no Browser equivalent. Check the Cloud API and try again.`);
+      throw new Error(`Cloud ${request.settings.algorithm} failed: ${error instanceof Error ? error.message : String(error)}`);
     }
     const large = isLargeGraph(request.nodes.length, request.edges.length);
     const performance = large ? ' This graph is large, so the browser fallback may be slower.' : '';

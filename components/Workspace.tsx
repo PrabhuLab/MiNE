@@ -58,7 +58,7 @@ export default function Workspace() {
   }), [validNodes]);
 
   const effectiveEngine = resolveComputeEngine(rawNodes.length, rawEdges.length, computeEngine);
-  const activeRenderer = effectiveRenderer(rendererEngine, effectiveEngine);
+  const activeRenderer = effectiveRenderer(rendererEngine, effectiveEngine, rawNodes.length, rawEdges.length);
   const useSigma = activeRenderer === 'sigma';
 
   const {
@@ -549,7 +549,7 @@ export default function Workspace() {
             <div className={`flex-1 w-full h-full overflow-hidden ${activeTab === "data" ? "block" : "hidden"}`}>
               {dataTab === 'modularity'
                 ? <ModularityTables rows={tableData} graphMetrics={graphMetrics} onNodeDoubleClick={handleElementDoubleClick} />
-                : <WorkspaceDataTable dataTab={dataTab} tableData={tableData} tableDataEdges={tableDataEdges} edgeMetrics={edgeMetrics} handleSort={handleSort} sortConfig={sortConfig} handleElementDoubleClick={handleElementDoubleClick} />}
+                : <WorkspaceDataTable active={activeTab === 'data'} dataTab={dataTab} tableData={tableData} tableDataEdges={tableDataEdges} edgeMetrics={edgeMetrics} handleSort={handleSort} sortConfig={sortConfig} handleElementDoubleClick={handleElementDoubleClick} />}
             </div>
           </>
         ) : (

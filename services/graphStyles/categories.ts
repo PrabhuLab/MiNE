@@ -57,7 +57,7 @@ export function buildLegendCategories({
           .map((n) => n.label || n.name || n.id);
 
         return {
-          label: `Community ${dispIdx}`,
+          label: /^(Node Type \d+ )?Community \d+$/.test(rawId) ? rawId : `Community ${dispIdx + 1}`,
           id: `community:${dispIdx}`,
           color,
           colorKey: `community:${rawId}`,
@@ -92,7 +92,7 @@ export function buildLegendCategories({
     const values = Array.from(new Set(nodes.map(valueForNode).filter((value) => value !== undefined && value !== null && String(value).trim() !== '').map(String)));
     if (values.length && metadata && isCategoricalSemanticType(metadata.selectedType)) {
       sections.push({
-        title: `Edge Color · ${attribute} (${edgeColorNodeTarget} node)`,
+        title: `Edge Color · ${metadata.origin === 'community' ? metadata.label || attribute : attribute} (${edgeColorNodeTarget} node)`,
         items: values.map((value) => {
           const colorKey = `attribute:${attribute}=${value}`;
           return {
@@ -132,7 +132,8 @@ export function buildLegendCategories({
     });
   };
   if (nodeColorBase === 'custom' && customNodeAttribute) {
-    addSelectedAttributeCategory('node', customNodeAttribute, `Node Color · ${customNodeAttribute}`);
+    const metadata = customAttributes.find((item) => item.scope === 'node' && item.name === customNodeAttribute);
+    addSelectedAttributeCategory('node', customNodeAttribute, `Node Color · ${metadata?.origin === 'community' ? metadata.label || customNodeAttribute : customNodeAttribute}`);
   }
   if (edgeColorBase.startsWith('edge:')) {
     const attribute = edgeColorBase.slice('edge:'.length);

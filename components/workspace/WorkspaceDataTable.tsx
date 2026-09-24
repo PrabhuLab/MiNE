@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useStore } from '@/store/useStore';
 
 interface WorkspaceDataTableProps {
+  active: boolean;
   dataTab: 'nodes' | 'edges';
   tableData: any[];
   tableDataEdges: any[];
@@ -32,24 +33,39 @@ function orderedColumns(rows: any[], preferred: string[]): string[] {
   return [...preferred.filter((key) => keys.delete(key)), ...Array.from(keys).sort()];
 }
 
-export const WorkspaceDataTable = ({ dataTab, tableData, tableDataEdges, edgeMetrics, handleSort, sortConfig, handleElementDoubleClick }: WorkspaceDataTableProps) => {
+const PAGE_SIZE = 100;
+
+export const WorkspaceDataTable = ({ active, dataTab, tableData, tableDataEdges, edgeMetrics, handleSort, sortConfig, handleElementDoubleClick }: WorkspaceDataTableProps) => {
   const { isDarkMode, directed, selectedElement, setSelectedElement } = useStore();
+  const [page, setPage] = useState(0);
   const edgeMetricMap = useMemo(() => new Map(edgeMetrics.map((metric) => [String(metric.key), metric])), [edgeMetrics]);
-  const edgeRows = useMemo(() => tableDataEdges.map((edge) => {
+  const edgeRows = useMemo(() => dataTab === 'edges' ? tableDataEdges.map((edge) => {
     const direct = `${edge.source}${directed ? '->' : '--'}${edge.target}`;
     const reverse = `${edge.target}--${edge.source}`;
     return { ...edge, ...(edgeMetricMap.get(String(edge.key)) || edgeMetricMap.get(direct) || edgeMetricMap.get(reverse) || {}) };
-  }), [directed, edgeMetricMap, tableDataEdges]);
+  }) : [], [dataTab, directed, edgeMetricMap, tableDataEdges]);
   const rows = dataTab === 'nodes' ? tableData : edgeRows;
   const columns = useMemo(() => orderedColumns(rows, dataTab === 'nodes' ? preferredNodeColumns : preferredEdgeColumns), [dataTab, rows]);
+  const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount - 1);
+  const visibleRows = rows.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
 
   useEffect(() => {
-    if (!selectedElement) return;
+    if (!active || !selectedElement) return;
+    const selectedIndex = rows.findIndex((row) => dataTab === 'nodes'
+      ? String(row.id) === selectedElement
+      : `${row.source}-${row.target}` === selectedElement || `${row.target}-${row.source}` === selectedElement);
+    if (selectedIndex >= 0) setPage(Math.floor(selectedIndex / PAGE_SIZE));
+  }, [active, dataTab, rows, selectedElement]);
+
+  useEffect(() => {
+    if (!active || !selectedElement) return;
     document.getElementById(`row-${selectedElement}`)?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
-  }, [selectedElement]);
+  }, [active, currentPage, selectedElement]);
 
   return (
-    <div className="mine-scroll-container flex-1 w-full h-full overflow-x-auto">
+    <div className="flex h-full min-h-0 w-full flex-col">
+      <div className="mine-scroll-container flex-1 overflow-auto">
       <table className={`min-w-max w-full text-left text-xs border-collapse ${isDarkMode ? 'text-[#ddd]' : 'text-[#333]'}`}>
         <thead className={`sticky top-0 shadow-sm z-20 ${isDarkMode ? 'bg-[#222] border-b border-[#444]' : 'bg-[#f0f0f0] border-b border-[#ccc]'}`}>
           <tr>
@@ -61,7 +77,7 @@ export const WorkspaceDataTable = ({ dataTab, tableData, tableDataEdges, edgeMet
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, index) => {
+          {visibleRows.map((row, index) => {
             const id = dataTab === 'nodes' ? String(row.id) : `${row.source}-${row.target}`;
             const selected = selectedElement === id || (dataTab === 'edges' && selectedElement === `${row.target}-${row.source}`);
             return (
@@ -75,6 +91,12 @@ export const WorkspaceDataTable = ({ dataTab, tableData, tableDataEdges, edgeMet
           })}
         </tbody>
       </table>
+      </div>
+      {pageCount > 1 && <div className="flex items-center justify-between border-t px-3 py-1 text-[10px] font-mono">
+        <button type="button" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)} className="disabled:opacity-40">Previous</button>
+        <span>{currentPage * PAGE_SIZE + 1}–{Math.min((currentPage + 1) * PAGE_SIZE, rows.length)} of {rows.length}</span>
+        <button type="button" disabled={currentPage === pageCount - 1} onClick={() => setPage(currentPage + 1)} className="disabled:opacity-40">Next</button>
+      </div>}
     </div>
   );
 };

@@ -38,5 +38,9 @@ export function GraphMetricCarousel({ metrics }: { metrics: Record<string, any> 
 
 function labelFallback(id: string): string {
   if (id === 'community_louvain_quality' || id.endsWith('_louvain_quality')) return 'Louvain Modularity';
+  if (id.endsWith('_icl')) return 'ICL';
+  if (id.endsWith('_type1_blocks')) return 'Node Type 1 Blocks';
+  if (id.endsWith('_type2_blocks')) return 'Node Type 2 Blocks';
+  if (id.endsWith('_blocks')) return 'Selected Blocks';
   return id.replace(/_/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, (letter) => letter.toUpperCase());
 }

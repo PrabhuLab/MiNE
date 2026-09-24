@@ -6,6 +6,7 @@ import { useEffect, useCallback, useState, useMemo, useRef } from 'react';
 import Graph from 'graphology';
 import { RawNode, RawEdge } from '@/store/useStore';
 import { computeForceDirectedLayout } from '@/lib/layoutUtils';
+import { updateGraphColors } from '@/services/graphStyles/colors';
 import { isSecondaryNode } from '@/services/graphPresentation/visibility';
 import { computeGraphRevisions } from '@/services/cloud/revision';
 import { shouldUseCloud, type ComputeEngine } from '@/services/cloud/config';
@@ -156,7 +157,14 @@ export function useSharedGraph({
       }, 0);
       return () => clearTimeout(timeout);
     }
-  }, [graph, nodes, edges, directed, bipartite, isDarkMode, getNodeColor, getNodeSize, getEdgeColor, getEdgeSize, getEdgeOpacity, getShouldShowArrowhead, nodeOpacity, applyD3StaticLayout, topologyKey]);
+    // Color changes use the batched effect below. Selection-dependent arrowheads
+    // are handled by renderer reducers, so they must not rebuild every edge.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [graph, nodes, edges, directed, bipartite, getNodeSize, getEdgeSize, getEdgeOpacity, nodeOpacity, applyD3StaticLayout, topologyKey]);
+
+  useEffect(() => {
+    updateGraphColors(graph, Boolean(isDarkMode), getNodeColor, getEdgeColor);
+  }, [graph, nodes, edges, isDarkMode, getNodeColor, getEdgeColor]);
 
   useEffect(() => {
     if (!isReady) return;

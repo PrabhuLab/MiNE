@@ -53,7 +53,7 @@ export const cloudMetricsEngine: MetricsEngine = {
       const membership = Object.fromEntries(cloudRequest.nodeIds.map((id, index) => [id, String(louvainValues[index])]));
       const graph = createMetricsGraph({ nodes: request.nodes, edges: request.edges, directed: false, weightAttribute: request.weightAttribute });
       const nodeMetrics = computeCommunityMetrics(graph, membership, false, request.resolution).map((entry) => {
-        const label = `Cluster ${Number(entry.community) + 1}`;
+        const label = `Community ${Number(entry.community) + 1}`;
         return { ...entry, louvain: label, community: label };
       });
       return { nodeMetrics, modularity: Number(result.graphMetrics.louvainModularity ?? 0) };

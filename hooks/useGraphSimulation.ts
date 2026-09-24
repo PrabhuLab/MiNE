@@ -643,7 +643,6 @@ export function useGraphSimulation({
     svgRef,
     fitD3NodeSet,
     nodeOpacity,
-    isDarkMode,
     searchQuery,
     hiddenItems,
     isolatedLegendItem,
@@ -653,8 +652,6 @@ export function useGraphSimulation({
     showArrowheads,
     showNodeLabels,
     getShouldShowArrowhead,
-    getNodeColor,
-    getEdgeColor,
     getEdgeOpacity,
     displayMap,
     legendNodeMembership,
@@ -665,6 +662,22 @@ export function useGraphSimulation({
     focusedEdgeNodeSet,
     fitNodeIds,
   ]);
+
+  // Colors do not change topology: preserve SVG elements, handlers, and camera.
+  useEffect(() => {
+    if (!svgRef.current) return;
+    const svg = d3.select(svgRef.current);
+    svg.selectAll<SVGElement, any>('.node-shape')
+      .attr('fill', (node) => getNodeColor(node))
+      .attr('stroke', isDarkMode ? '#444444' : '#141414');
+    svg.selectAll<SVGPathElement, any>('.graph-link')
+      .attr('stroke', (edge) => getEdgeColor(edge.rawEdge || edge));
+    svg.selectAll('.node-label')
+      .attr('fill', (node: any) => node.currentRadius >= 14 ? (isDarkMode ? '#222' : '#fff') : isDarkMode ? '#ddd' : '#141414');
+    svg.selectAll('#arrowhead path')
+      .attr('fill', isDarkMode ? '#eeeeee' : '#141414')
+      .attr('opacity', isDarkMode ? 0.9 : 0.6);
+  }, [svgRef, isDarkMode, getNodeColor, getEdgeColor]);
 
   // Fast Node Sizing & Edge Thickness Update
   // Updates SVG attributes directly without tearing down the DOM, preventing visual snap on slider changes.

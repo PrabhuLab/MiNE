@@ -13,17 +13,26 @@ COMMUNITY_CAPABILITIES: list[dict[str, Any]] = [
     {"id": "infomap", "label": "Infomap", "directed": True, "weighted": True, "parameters": ["trials", "seed"]},
     {"id": "labelPropagation", "label": "Label Propagation", "directed": True, "weighted": True, "parameters": ["seed"]},
     {"id": "walktrap", "label": "Walktrap", "directed": False, "weighted": True, "parameters": ["steps", "seed"]},
-    {"id": "sbm", "label": "Sparse SBM", "directed": False, "weighted": False, "bipartite": False, "parameters": ["clusters", "seed"]},
-    {"id": "lbm", "label": "Sparse LBM", "directed": False, "weighted": False, "bipartite": True, "parameters": ["clusters", "seed"]},
+    {"id": "sbm", "label": "Sparse SBM", "directed": False, "weighted": False, "bipartite": False, "parameters": ["clusters", "blockSelection", "maxClusters", "seed"]},
+    {"id": "lbm", "label": "Sparse LBM", "directed": False, "weighted": False, "bipartite": True, "parameters": ["clusters", "columnClusters", "blockSelection", "maxClusters", "seed"]},
 ]
 if hasattr(ig.Graph, "community_fastgreedy"):
     COMMUNITY_CAPABILITIES.append({"id": "fastGreedy", "label": "Fast Greedy", "directed": False, "weighted": True, "parameters": ["seed"]})
 
 
-def _compute_sparse_sbm(request: AnalyzeRequest) -> list[int]:
+def _best_icl_model(selection, max_blocks: int):
+    # SparseBM's exploration may fit models just beyond n_clusters_max.
+    candidates = [model for key, model in selection.items()
+                  if (sum(key) if isinstance(key, tuple) else key) <= max_blocks and model.trained_successfully_]
+    if not candidates:
+        raise incompatible("icl_convergence", "ICL model selection did not produce a converged model within the block limit. Try another seed or a higher limit.")
+    return max(candidates, key=lambda model: model.get_ICL())
+
+
+def _compute_sparse_sbm(request: AnalyzeRequest) -> tuple[list[int], dict[str, Any]]:
     import numpy as np
     from scipy.sparse import coo_matrix
-    from sparsebm import SBM
+    from sparsebm import SBM, ModelSelection
 
     node_count = len(request.node_ids)
     if request.bipartite:
@@ -35,26 +44,34 @@ def _compute_sparse_sbm(request: AnalyzeRequest) -> list[int]:
     columns = request.edge_targets + request.edge_sources
     adjacency = coo_matrix((np.ones(len(rows), dtype=np.float64), (rows, columns)), shape=(node_count, node_count)).tocsr()
     np.random.seed(request.community.seed)
-    model = SBM(
-        cluster_count, max_iter=1000, n_init=10, n_init_total_run=1,
-        n_iter_early_stop=10, verbosity=0, use_gpu=False,
-    )
-    model.fit(adjacency, symmetric=True)
+    if request.community.block_selection == "icl":
+        max_blocks = min(request.community.max_clusters, node_count)
+        selection = ModelSelection("SBM", n_clusters_max=max_blocks, use_gpu=False, plot=False).fit(adjacency, symmetric=True)
+        model = _best_icl_model(selection, max_blocks)
+    else:
+        model = SBM(
+            cluster_count, max_iter=1000, n_init=10, n_init_total_run=1,
+            n_iter_early_stop=10, verbosity=0, use_gpu=False,
+        )
+        model.fit(adjacency, symmetric=True)
     if not model.trained_successfully_:
         raise incompatible("sbm_convergence", "Sparse SBM did not converge for this graph and block count. Try fewer blocks or another seed.")
-    return [int(value) for value in model.labels]
+    provenance = {"selectedClusters": int(model.n_clusters)}
+    if request.community.block_selection == "icl":
+        provenance.update(icl=float(model.get_ICL()), exploredModels=len(selection.items()))
+    return [int(value) for value in model.labels], provenance
 
 
-def _compute_sparse_lbm(request: AnalyzeRequest) -> tuple[list[int], dict[str, int]]:
+def _compute_sparse_lbm(request: AnalyzeRequest) -> tuple[list[int], dict[str, Any]]:
     import numpy as np
     from scipy.sparse import coo_matrix
-    from sparsebm import LBM
+    from sparsebm import LBM, ModelSelection
 
     if not request.bipartite:
         raise incompatible("lbm_graph_type", "Sparse LBM is available for bipartite graphs only.")
     if request.partitions is None:
         raise incompatible("lbm_partitions", "Sparse LBM requires one partition value for every node.")
-    partition_values = list(dict.fromkeys(str(value) for value in request.partitions))
+    partition_values = sorted(set(str(value) for value in request.partitions))
     if len(partition_values) != 2:
         raise incompatible("lbm_partitions", "Sparse LBM requires exactly two non-empty node partitions.")
     row_nodes = [index for index, value in enumerate(request.partitions) if str(value) == partition_values[0]]
@@ -77,20 +94,31 @@ def _compute_sparse_lbm(request: AnalyzeRequest) -> tuple[list[int], dict[str, i
         shape=(len(row_nodes), len(column_nodes)),
     ).tocsr()
     row_clusters = min(request.community.clusters, len(row_nodes))
-    column_clusters = min(request.community.clusters, len(column_nodes))
+    column_clusters = min(request.community.column_clusters or request.community.clusters, len(column_nodes))
     np.random.seed(request.community.seed)
-    model = LBM(
-        row_clusters, column_clusters, max_iter=1000, n_init=10,
-        n_init_total_run=1, n_iter_early_stop=10, verbosity=0, use_gpu=False,
-    )
-    model.fit(matrix)
+    if request.community.block_selection == "icl":
+        max_blocks = min(request.community.max_clusters, len(row_nodes) + len(column_nodes))
+        selection = ModelSelection("LBM", n_clusters_max=max_blocks, use_gpu=False, plot=False).fit(matrix)
+        model = _best_icl_model(selection, max_blocks)
+    else:
+        model = LBM(
+            row_clusters, column_clusters, max_iter=1000, n_init=10,
+            n_init_total_run=1, n_iter_early_stop=10, verbosity=0, use_gpu=False,
+        )
+        model.fit(matrix)
     if not model.trained_successfully_:
         raise incompatible("lbm_convergence", "Sparse LBM did not converge for this graph and block count. Try fewer blocks or another seed.")
     memberships = [0] * len(request.node_ids)
     for node, label in zip(row_nodes, model.row_labels): memberships[node] = int(label)
     column_offset = max((int(value) for value in model.row_labels), default=-1) + 1
     for node, label in zip(column_nodes, model.column_labels): memberships[node] = column_offset + int(label)
-    return memberships, {"rowClusters": row_clusters, "columnClusters": column_clusters}
+    provenance = {
+        "rowClusters": int(model.n_row_clusters), "columnClusters": int(model.n_column_clusters),
+        "rowPartition": partition_values[0], "columnPartition": partition_values[1],
+    }
+    if request.community.block_selection == "icl":
+        provenance.update(icl=float(model.get_ICL()), exploredModels=len(selection.items()))
+    return memberships, provenance
 
 
 def compute_community(graph: ig.Graph, request: AnalyzeRequest) -> tuple[CommunityResult | None, float]:
@@ -112,7 +140,7 @@ def compute_community(graph: ig.Graph, request: AnalyzeRequest) -> tuple[Communi
     try:
         sparse_provenance: dict[str, Any] = {}
         if spec.algorithm == "sbm":
-            memberships = _compute_sparse_sbm(request)
+            memberships, sparse_provenance = _compute_sparse_sbm(request)
             clustering = None
         elif spec.algorithm == "lbm":
             memberships, sparse_provenance = _compute_sparse_lbm(request)
@@ -155,6 +183,9 @@ def compute_community(graph: ig.Graph, request: AnalyzeRequest) -> tuple[Communi
             "steps": spec.steps,
             "seed": spec.seed,
             "clusters": spec.clusters,
+            "columnClusters": spec.column_clusters,
+            "blockSelection": spec.block_selection,
+            "maxClusters": spec.max_clusters if spec.block_selection == "icl" else None,
             **sparse_provenance,
         },
     )

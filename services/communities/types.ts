@@ -10,6 +10,9 @@ export interface CommunitySettings {
   steps: number;
   seed: number;
   clusters: number;
+  columnClusters: number;
+  blockSelection: 'manual' | 'icl';
+  maxClusters: number;
 }
 
 export interface CommunityRequest {
@@ -43,6 +46,9 @@ export const DEFAULT_COMMUNITY_SETTINGS: CommunitySettings = {
   steps: 4,
   seed: 42,
   clusters: 5,
+  columnClusters: 5,
+  blockSelection: 'manual',
+  maxClusters: 15,
 };
 
 /** One normalized post-success style update shared by Browser and Cloud community results. */
