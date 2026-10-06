@@ -48,7 +48,7 @@ export const DEFAULT_COMMUNITY_SETTINGS: CommunitySettings = {
   clusters: 5,
   columnClusters: 5,
   blockSelection: 'manual',
-  maxClusters: 15,
+  maxClusters: 25,
 };
 
 /** One normalized post-success style update shared by Browser and Cloud community results. */
