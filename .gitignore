@@ -13,3 +13,6 @@ tsconfig.tsbuildinfo
 
 # Local generated codebase map and extraction cache
 graphify-out/
+/.agents
+/notes
+skills-lock.json

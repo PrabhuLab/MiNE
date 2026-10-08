@@ -74,6 +74,7 @@ class CommunityResult(ApiModel):
     membership: list[int]
     quality: float | None = None
     provenance: dict[str, Any] = Field(default_factory=dict)
+    diagnostics: dict[str, Any] | None = None
 
 
 class AnalyzeResponse(ApiModel):

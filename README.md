@@ -30,6 +30,24 @@ MiNE supports:
 
 Secondary Weight remains absent unless it was explicitly supplied by the source. An uploaded field named `abundance` is preserved as ordinary numeric metadata; degree is the built-in topology size field.
 
+## Retained SBM/LBM results
+
+Run Sparse SBM (unipartite) or Sparse LBM (bipartite) in Cloud mode. Every successful run retains:
+
+- The fitted block probability matrix, soft node memberships, group proportions, and raw model labels.
+- Candidate group counts, the variational fit score, each penalty term, ICL, and the difference from the selected ICL. Candidates beyond the requested limit remain in the history with `withinLimit: false`.
+- The ordered node identifiers and edge arrays, LBM row/column identifiers and partitions, a SHA-256 fingerprint of the binary network input, requested and fitted settings, and software versions.
+
+Change **Seed** and run again to retain another fit. MiNE keeps earlier runs while the latest controls the graph's colors. Each new run includes adjusted Rand comparisons to earlier fits of the same algorithm on the same input, with separate mineral/row and mode/column comparisons for LBM. This comparison handles arbitrary group numbering. Filtering or editing the input changes its fingerprint and prevents comparisons between different inputs.
+
+Use **Export → Block Model Results JSON** for the complete run archive, or **All-in-One JSON** to save the archive with the network and restore it on import. Graphology JSON, GraphML, GEXF, and CSV ZIP also carry it in metrics metadata. CSV ZIP additionally includes `block_model_candidates.csv`. Save an export before closing or replacing the workspace. Workspace Settings JSON contains settings only.
+
+Arrays in `diagnostics.selectedModel` use zero-based model group indices (`labelBase: 0`). LBM rows follow `input.rowNodeIds` and columns follow `input.columnNodeIds`. `rowSoftMemberships`/`columnSoftMemberships` describe individual nodes, while `rowGroupProportions`/`columnGroupProportions` describe the fitted population proportions. Displayed community labels use one-based numbering.
+
+Selection history records the initial model, every split/merge proposal, early-stop screening fits, fully-refitted candidates, and final retained models. The `phase` field distinguishes provisional scores from fully-refitted scores; compare resolutions using fully-refitted scores. This capture uses local hooks in pinned SparseBM 1.6.7 and has a regression test against the real library. `trainedSuccessfully` reports the library's flag rather than independently verifying EM convergence, and a stable search does not guarantee a global optimum.
+
+These results require the updated backend. Older saved files cannot supply fitted probabilities or selection history that they did not retain.
+
 ## Local development
 
 ### Frontend

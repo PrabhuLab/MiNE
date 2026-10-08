@@ -5,6 +5,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useStore } from '@/store/useStore';
+import { restoreBlockModelRuns } from '@/services/communities/diagnostics';
 import { resetCommunityColorCache } from '@/lib/communityUtils';
 import { TopologyType, WizardFilesState, ColumnMappingState, ParsedDataState } from './types';
 import { parseCSVFile } from './utils/parseHelpers';
@@ -240,6 +241,7 @@ export default function SmartUploadWizard() {
   };
 
   const applyParsedNetwork = (parsed: ParsedNetwork, restoreVisualization = Boolean(parsed.workspace)) => {
+    const communityRuns = restoreBlockModelRuns(parsed.metrics?.metadata?.communityRuns);
     const { nodes, edges } = graphToRaw(parsed.graph);
     const workspace = parsed.workspace;
     const inferredCustomAttributes = [...inferCustomNodeAttributes(nodes), ...inferCustomEdgeAttributes(edges)];
@@ -267,6 +269,7 @@ export default function SmartUploadWizard() {
       directed: workspace?.graphMode.directed ?? parsed.directed,
       bipartite: workspace?.graphMode.bipartite ?? parsed.bipartite,
       importedMetrics: parsed.metrics,
+      communityRuns,
       restoredVisualization: restoreVisualization,
       projectName: workspace?.projectName || parsed.projectName || networkFiles[0]?.name.replace(/\.[^.]+$/, '') || 'NEW_PROJECT_NAME',
       computeEngine: migrateComputationPreference(workspace, nodes.length, edges.length),

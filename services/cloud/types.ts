@@ -1,4 +1,5 @@
 import type { ComputeEngine } from './config';
+import type { BlockModelDiagnostics } from '../communities/diagnostics';
 
 export interface CloudLayoutSpec {
   algorithm: 'auto' | 'drl' | 'fruchtermanReingold' | 'kamadaKawai' | 'circular' | 'random' | 'bipartite' | 'sugiyama';
@@ -30,6 +31,7 @@ export interface CloudCommunityResult {
   membership: number[];
   quality?: number | null;
   provenance: Record<string, unknown>;
+  diagnostics?: BlockModelDiagnostics | null;
 }
 
 export interface CloudAnalyzeRequest {

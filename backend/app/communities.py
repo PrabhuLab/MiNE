@@ -6,6 +6,7 @@ import igraph as ig
 
 from .errors import incompatible
 from .models import AnalyzeRequest, CommunityResult
+from .block_model_diagnostics import fit_selection, fitted_diagnostics
 
 
 COMMUNITY_CAPABILITIES: list[dict[str, Any]] = [
@@ -29,10 +30,10 @@ def _best_icl_model(selection, max_blocks: int):
     return max(candidates, key=lambda model: model.get_ICL())
 
 
-def _compute_sparse_sbm(request: AnalyzeRequest) -> tuple[list[int], dict[str, Any]]:
+def _compute_sparse_sbm(request: AnalyzeRequest) -> tuple[list[int], dict[str, Any], dict[str, Any]]:
     import numpy as np
     from scipy.sparse import coo_matrix
-    from sparsebm import SBM, ModelSelection
+    from sparsebm import SBM
 
     node_count = len(request.node_ids)
     if request.bipartite:
@@ -44,9 +45,10 @@ def _compute_sparse_sbm(request: AnalyzeRequest) -> tuple[list[int], dict[str, A
     columns = request.edge_targets + request.edge_sources
     adjacency = coo_matrix((np.ones(len(rows), dtype=np.float64), (rows, columns)), shape=(node_count, node_count)).tocsr()
     np.random.seed(request.community.seed)
+    max_blocks, candidates = None, []
     if request.community.block_selection == "icl":
         max_blocks = min(request.community.max_clusters, node_count)
-        selection = ModelSelection("SBM", n_clusters_max=max_blocks, use_gpu=False, plot=False).fit(adjacency, symmetric=True)
+        selection, candidates = fit_selection("SBM", adjacency, max_blocks, symmetric=True)
         model = _best_icl_model(selection, max_blocks)
     else:
         model = SBM(
@@ -59,13 +61,14 @@ def _compute_sparse_sbm(request: AnalyzeRequest) -> tuple[list[int], dict[str, A
     provenance = {"selectedClusters": int(model.n_clusters)}
     if request.community.block_selection == "icl":
         provenance.update(icl=float(model.get_ICL()), exploredModels=len(selection.items()))
-    return [int(value) for value in model.labels], provenance
+    diagnostics = fitted_diagnostics(request, model, list(range(node_count)), None, max_blocks, candidates)
+    return [int(value) for value in model.labels], provenance, diagnostics
 
 
-def _compute_sparse_lbm(request: AnalyzeRequest) -> tuple[list[int], dict[str, Any]]:
+def _compute_sparse_lbm(request: AnalyzeRequest) -> tuple[list[int], dict[str, Any], dict[str, Any]]:
     import numpy as np
     from scipy.sparse import coo_matrix
-    from sparsebm import LBM, ModelSelection
+    from sparsebm import LBM
 
     if not request.bipartite:
         raise incompatible("lbm_graph_type", "Sparse LBM is available for bipartite graphs only.")
@@ -96,9 +99,10 @@ def _compute_sparse_lbm(request: AnalyzeRequest) -> tuple[list[int], dict[str, A
     row_clusters = min(request.community.clusters, len(row_nodes))
     column_clusters = min(request.community.column_clusters or request.community.clusters, len(column_nodes))
     np.random.seed(request.community.seed)
+    max_blocks, candidates = None, []
     if request.community.block_selection == "icl":
         max_blocks = min(request.community.max_clusters, len(row_nodes) + len(column_nodes))
-        selection = ModelSelection("LBM", n_clusters_max=max_blocks, use_gpu=False, plot=False).fit(matrix)
+        selection, candidates = fit_selection("LBM", matrix, max_blocks)
         model = _best_icl_model(selection, max_blocks)
     else:
         model = LBM(
@@ -110,15 +114,17 @@ def _compute_sparse_lbm(request: AnalyzeRequest) -> tuple[list[int], dict[str, A
         raise incompatible("lbm_convergence", "Sparse LBM did not converge for this graph and block count. Try fewer blocks or another seed.")
     memberships = [0] * len(request.node_ids)
     for node, label in zip(row_nodes, model.row_labels): memberships[node] = int(label)
-    column_offset = max((int(value) for value in model.row_labels), default=-1) + 1
+    column_offset = int(model.n_row_clusters)
     for node, label in zip(column_nodes, model.column_labels): memberships[node] = column_offset + int(label)
     provenance = {
         "rowClusters": int(model.n_row_clusters), "columnClusters": int(model.n_column_clusters),
         "rowPartition": partition_values[0], "columnPartition": partition_values[1],
+        "columnLabelOffset": column_offset,
     }
     if request.community.block_selection == "icl":
         provenance.update(icl=float(model.get_ICL()), exploredModels=len(selection.items()))
-    return memberships, provenance
+    diagnostics = fitted_diagnostics(request, model, row_nodes, column_nodes, max_blocks, candidates)
+    return memberships, provenance, diagnostics
 
 
 def compute_community(graph: ig.Graph, request: AnalyzeRequest) -> tuple[CommunityResult | None, float]:
@@ -139,11 +145,12 @@ def compute_community(graph: ig.Graph, request: AnalyzeRequest) -> tuple[Communi
     started = time.perf_counter()
     try:
         sparse_provenance: dict[str, Any] = {}
+        diagnostics = None
         if spec.algorithm == "sbm":
-            memberships, sparse_provenance = _compute_sparse_sbm(request)
+            memberships, sparse_provenance, diagnostics = _compute_sparse_sbm(request)
             clustering = None
         elif spec.algorithm == "lbm":
-            memberships, sparse_provenance = _compute_sparse_lbm(request)
+            memberships, sparse_provenance, diagnostics = _compute_sparse_lbm(request)
             clustering = None
         elif spec.algorithm == "louvain":
             clustering = graph.community_multilevel(weights=weights, resolution=spec.resolution)
@@ -174,6 +181,7 @@ def compute_community(graph: ig.Graph, request: AnalyzeRequest) -> tuple[Communi
         label=definition["label"],
         membership=memberships,
         quality=quality,
+        diagnostics=diagnostics,
         provenance={
             "engine": "sparsebm" if spec.algorithm in {"sbm", "lbm"} else "python-igraph",
             "weightChannel": spec.weight_channel,

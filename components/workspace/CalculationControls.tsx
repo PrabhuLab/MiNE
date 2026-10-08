@@ -43,7 +43,7 @@ const NumberField = ({ label, value, onChange, step = 1, min }: { label: string;
 );
 
 export function CalculationControls(props: CalculationControlsProps) {
-  const { filters, setFilter, isDarkMode, directed, bipartite, computeEngine } = useStore();
+  const { filters, setFilter, isDarkMode, directed, bipartite, computeEngine, communityRuns } = useStore();
   const [activeControlTab, setActiveControlTab] = useState<'communities' | 'metrics' | 'layout'>('communities');
   const [communitySettings, setCommunitySettings] = useState<CommunitySettings>(DEFAULT_COMMUNITY_SETTINGS);
   const compatible = useMemo(() => METRIC_REGISTRY.filter((metric) => isMetricCompatible(metric, props.metricContext)), [props.metricContext]);
@@ -106,6 +106,7 @@ export function CalculationControls(props: CalculationControlsProps) {
           </>}
           <NumberField label="Seed" value={communitySettings.seed} onChange={(value) => updateCommunity('seed', value)} />
           <button onClick={() => props.runCommunity({ ...communitySettings, algorithm: selectedCommunityAlgorithm, weightChannel: ['sbm', 'lbm'].includes(selectedCommunityAlgorithm) ? 'unweighted' : communitySettings.weightChannel })} disabled={props.metricsLoading || !props.metricContext.hasEdges || !communityOptions.length} className="w-full border py-2 text-[10px] font-bold uppercase tracking-widest disabled:opacity-40">{props.metricsLoading ? 'Computing…' : 'Run Communities'}</button>
+          {['sbm', 'lbm'].includes(selectedCommunityAlgorithm) && <p className="text-[10px] leading-relaxed opacity-70">Successful runs retain fitted results for export. Change the seed and run again to compare assignments. {communityRuns.length} runs retained.</p>}
         </div>
       )}
 

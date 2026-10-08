@@ -1,5 +1,7 @@
 import gzip
+import math
 import orjson
+import numpy as np
 
 from conftest import request_payload
 
@@ -104,6 +106,13 @@ def test_sparse_icl_selection_uses_best_model_and_reports_score(client, monkeypa
         trained_successfully_ = True
         n_clusters = 2
         labels = [0, 1, 1]
+        loglikelihood_ = -12.5 + math.log(3) / 2 + 2 * math.log(6)
+        group_connection_probabilities = np.array([[0.1, 0.2], [0.2, 0.3]])
+        predict_proba = np.array([[1, 0], [0, 1], [0, 1]])
+        group_membership_probability = np.array([1 / 3, 2 / 3])
+
+        def get_params(self):
+            return {"n_clusters": self.n_clusters}
 
         def get_ICL(self):
             return -12.5
@@ -146,6 +155,18 @@ def test_sparse_lbm_icl_selects_partition_counts_within_limit(client, monkeypatc
         n_column_clusters = 1
         row_labels = [0, 0, 1, 1]
         column_labels = [0, 0, 0]
+        group_connection_probabilities = np.array([[0.5], [0.25]])
+        row_predict_proba = np.array([[1, 0], [1, 0], [0, 1], [0, 1]])
+        column_predict_proba = np.array([[1], [1], [1]])
+        row_group_membership_probability = np.array([0.5, 0.5])
+        column_group_membership_probability = np.array([1])
+
+        @property
+        def loglikelihood_(self):
+            return self.get_ICL() + (self.n_row_clusters - 1) / 2 * math.log(4) + (self.n_column_clusters - 1) / 2 * math.log(3) + self.n_row_clusters * self.n_column_clusters / 2 * math.log(12)
+
+        def get_params(self):
+            return {"n_row_clusters": self.n_row_clusters, "n_column_clusters": self.n_column_clusters}
 
         def get_ICL(self):
             return -9.0

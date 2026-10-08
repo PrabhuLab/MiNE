@@ -35,7 +35,7 @@ import { isSecondaryNode } from '@/services/graphPresentation/visibility';
 import { LayoutControls } from '@/components/workspace/LayoutControls';
 
 export default function Workspace() {
-  const { rawNodes, rawEdges, filters, communityMap, customAttributes, directed, bipartite, computeEngine, rendererEngine, isDarkMode, selectedElement, setSelectedElement, projectName } = useStore();
+  const { rawNodes, rawEdges, filters, communityMap, communityRuns, customAttributes, directed, bipartite, computeEngine, rendererEngine, isDarkMode, selectedElement, setSelectedElement, projectName } = useStore();
 
   const {
     appliedFilters,
@@ -424,6 +424,7 @@ export default function Workspace() {
                   <button onClick={() => handleExport('graphml')} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>GraphML</button>
                   <button onClick={() => handleExport('gexf')} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>GEXF</button>
                   <button onClick={() => handleExport('csvzip')} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>Node + Edge CSV ZIP</button>
+                  <button onClick={() => handleExport('blockmodels')} disabled={!communityRuns.length} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 disabled:opacity-30 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>Block Model Results JSON ({communityRuns.length} runs)</button>
                   <div className={`h-px w-full ${isDarkMode ? 'bg-[#333]' : 'bg-[#eee]'}`}></div>
                   <button onClick={() => handleExport('settings')} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>Workspace Settings JSON</button>
                   <button onClick={() => handleExport('allinone')} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>All-in-One JSON</button>

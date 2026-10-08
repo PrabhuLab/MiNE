@@ -16,6 +16,10 @@ export function communityMembershipLabels(
     [...new Set(membership.filter((_, index) => String(partitions[index]) === partition))].sort((a, b) => a - b));
   return Object.fromEntries(nodeIds.map((id, index) => {
     const type = String(partitions[index]) === rowPartition ? 0 : 1;
-    return [id, `Node Type ${type + 1} Community ${labelsByType[type].indexOf(membership[index]) + 1}`];
+    const offset = Number(provenance.columnLabelOffset);
+    const label = Number.isInteger(offset) && offset > 0
+      ? membership[index] - (type === 1 ? offset : 0) + 1
+      : labelsByType[type].indexOf(membership[index]) + 1;
+    return [id, `Node Type ${type + 1} Community ${label}`];
   }));
 }

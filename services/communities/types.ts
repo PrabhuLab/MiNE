@@ -1,5 +1,6 @@
 import type { CommunityAlgorithm, CommunityWeightChannel } from '@/services/cloud/types';
 import type { LouvainNodeMetric } from '@/services/metrics/types';
+import type { BlockModelDiagnostics } from './diagnostics';
 
 export interface CommunitySettings {
   algorithm: CommunityAlgorithm;
@@ -34,6 +35,7 @@ export interface CommunityComputationResult {
   louvainNodeMetrics?: LouvainNodeMetric[];
   quality: number | null;
   provenance: Record<string, unknown>;
+  diagnostics?: BlockModelDiagnostics | null;
   calculatedAt: string;
 }
 

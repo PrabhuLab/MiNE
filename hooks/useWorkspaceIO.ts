@@ -146,6 +146,13 @@ export function useWorkspaceIO(options: WorkspaceIOOptions) {
 
   const handleExport = async (format: string) => {
     options.closeExportMenu();
+    if (format === 'blockmodels') {
+      downloadStringAsFile(JSON.stringify({
+        format: 'mine-block-model-runs', version: 1, projectName: options.projectName,
+        runs: useStore.getState().communityRuns,
+      }, null, 2), `${options.projectName}_block_models.json`, 'application/json');
+      return;
+    }
     if (format === 'svg') {
       exportSvg(document.getElementById('network-graph-svg') as SVGSVGElement | null, `${options.projectName}.svg`);
       return;
@@ -210,7 +217,8 @@ export function useWorkspaceIO(options: WorkspaceIOOptions) {
       options.nodeMetrics,
       options.edgeMetrics,
       options.graphMetrics,
-      { selectedMetrics: options.metricsToRun, validity: options.metricValidity, attributeDescriptors: useStore.getState().customAttributes },
+      { selectedMetrics: options.metricsToRun, validity: options.metricValidity, attributeDescriptors: useStore.getState().customAttributes,
+        communityRuns: useStore.getState().communityRuns },
     );
     const exportGraph = canonicalExportGraph(
       options.graph,

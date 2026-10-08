@@ -119,6 +119,7 @@ export async function computeCommunityInCloud(request: CommunityRequest): Promis
     memberships: communityMembershipLabels(cloudRequest.nodeIds, response.community.membership, response.community.algorithm, cloudRequest.partitions, response.community.provenance),
     quality: response.community.quality != null && Number.isFinite(Number(response.community.quality)) ? Number(response.community.quality) : null,
     provenance: response.community.provenance || { engine: 'python-igraph' },
+    diagnostics: response.community.diagnostics,
     calculatedAt: new Date().toISOString(),
   };
 }

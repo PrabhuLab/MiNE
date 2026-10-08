@@ -13,6 +13,7 @@ import { communityResultStyleSelection, DEFAULT_COMMUNITY_SETTINGS, type Communi
 import { resultMetadata } from '@/services/attributes/registry';
 import { automaticLouvainOnce, shouldRunAutomaticLouvain, validSavedLouvainKey } from '@/services/communities/automatic';
 import { staleCalculationIds } from '@/services/metrics/validity';
+import { appendBlockModelRun } from '@/services/communities/diagnostics';
 
 interface GraphMetricAccessors {
   getPositionedNodes?: () => any[];
@@ -170,6 +171,7 @@ export function useGraphMetrics(
       ? Object.fromEntries(Object.entries(importedGraphMetrics).filter(([id]) => (
         validMetricIds.has(id)
         || Array.from(validMetricIds).some((validId) => id === `${validId}_quality`)
+        || Array.from(validMetricIds).some((validId) => validId.startsWith('community_') && id.startsWith(`${validId}_`))
         || (id === 'louvainModularity' && (validMetricIds.has('louvain') || validMetricIds.has('community_louvain')))
       )))
       : importedGraphMetrics);
@@ -192,6 +194,14 @@ export function useGraphMetrics(
     validity: { graphRevision: string; filterRevision: string },
     options: { automatic?: boolean; fallbackNotice?: string } = {},
   ) => {
+    if (result.diagnostics) {
+      const state = useStore.getState();
+      state.setCommunityRuns(appendBlockModelRun(state.communityRuns, {
+        runId: crypto.randomUUID(), calculatedAt: result.calculatedAt,
+        algorithm: result.diagnostics.algorithm, memberships: result.memberships,
+        provenance: result.provenance, diagnostics: result.diagnostics, comparisons: [],
+      }));
+    }
     const louvainMetrics = new Map((result.louvainNodeMetrics || []).map((entry) => [String(entry.id), entry]));
     setNetworkMetrics((current) => current.map((entry) => ({
       ...entry,
@@ -254,7 +264,9 @@ export function useGraphMetrics(
       const styleSelection = communityResultStyleSelection(result.resultId);
       Object.entries(styleSelection).forEach(([key, value]) => setFilter(key as any, value as never));
     }
-    setMetricWarnings((current) => options.fallbackNotice
+    setMetricWarnings((current) => ['sbm', 'lbm'].includes(result.algorithm) && !result.diagnostics
+      ? { ...current, community: 'This backend returned labels only. Update the backend to retain fitted model results.' }
+      : options.fallbackNotice
       ? { ...current, fallback: options.fallbackNotice }
       : Object.fromEntries(Object.entries(current).filter(([key]) => key !== 'community' && key !== 'fallback')));
   }, [setCommunityMap, setCustomAttributes, setFilter]);

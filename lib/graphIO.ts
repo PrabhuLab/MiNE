@@ -19,6 +19,7 @@ import {
   type ParsedNetwork,
 } from '@/services/graphIO/types';
 import { weightChannelMetadata } from '@/services/attributes/weights';
+import type { BlockModelRun } from '@/services/communities/diagnostics';
 
 export {
   GRAPH_IO_VERSION,
@@ -406,6 +407,14 @@ export async function buildCsvZip(graph: Graph, metrics: ImportedMetricsBundle):
   };
   zip.file('nodes.csv', Papa.unparse(withUnifiedFields(raw.nodes)));
   zip.file('edges.csv', Papa.unparse(withUnifiedFields(raw.edges)));
+  const modelRuns = (metrics.metadata.communityRuns || []) as BlockModelRun[];
+  if (modelRuns.length) {
+    zip.file('block_model_candidates.csv', Papa.unparse(withUnifiedFields(modelRuns.flatMap((run) => run.diagnostics.candidates.map((candidate) => ({
+      runId: run.runId, calculatedAt: run.calculatedAt, algorithm: run.algorithm,
+      seed: run.diagnostics.settings.seed, fingerprint: run.diagnostics.input.fingerprint,
+      ...candidate, penaltyTerms: JSON.stringify(candidate.penaltyTerms),
+    }))))));
+  }
   zip.file('metadata.json', JSON.stringify({
     format: 'graphology-csv-zip',
     version: GRAPH_IO_VERSION,

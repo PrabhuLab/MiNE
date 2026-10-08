@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import type { ComputeEnginePreference } from '@/services/cloud/config';
 import { mergeComputeEnginePreference, persistedComputeEnginePreference } from '@/services/cloud/preference';
 import type { RendererPreference } from '@/services/engines/policy';
+import { restoreBlockModelRuns, type BlockModelRun } from '@/services/communities/diagnostics';
 
 export interface RawNode {
   id: string;
@@ -122,6 +123,8 @@ interface AppState {
   setCustomAttributes: (attributes: CustomAttributeMetadata[]) => void;
   importedMetrics: ImportedMetricsBundle | null;
   setImportedMetrics: (metrics: ImportedMetricsBundle | null) => void;
+  communityRuns: BlockModelRun[];
+  setCommunityRuns: (runs: BlockModelRun[]) => void;
   restoredVisualization: boolean;
   setRestoredVisualization: (restored: boolean) => void;
 
@@ -185,7 +188,9 @@ export const useStore = create<AppState>()(persist<AppState, [], [], { computeEn
   customAttributes: [],
   setCustomAttributes: (customAttributes) => set({ customAttributes }),
   importedMetrics: null,
-  setImportedMetrics: (importedMetrics) => set({ importedMetrics }),
+  setImportedMetrics: (importedMetrics) => set({ importedMetrics, communityRuns: restoreBlockModelRuns(importedMetrics?.metadata?.communityRuns) }),
+  communityRuns: [],
+  setCommunityRuns: (communityRuns) => set({ communityRuns }),
   restoredVisualization: false,
   setRestoredVisualization: (restoredVisualization) => set({ restoredVisualization }),
 
@@ -262,6 +267,7 @@ export const useStore = create<AppState>()(persist<AppState, [], [], { computeEn
     rawEdges: [],
     customAttributes: [],
     importedMetrics: null,
+    communityRuns: [],
     restoredVisualization: false,
     communityMap: {},
     legendColorOverrides: {},
