@@ -45,13 +45,15 @@ export function createSigmaNodeReducer(styleRefs: MutableRefObject<any>) {
       focused = true;
       result.highlighted = true;
     }
-    const activeCommunity = selectedCommunityId || isolatedCommunityId
+    const activeCommunity = (selectedCommunityId?.startsWith('community:') ? selectedCommunityId : null) || isolatedCommunityId
       || (isolatedLegendItem?.startsWith('community:') ? isolatedLegendItem : null);
     if (activeCommunity) {
       if (String(displayIndex) === activeCommunity.replace('community:', '')) communityMember = true;
       else dimmed = true;
     }
-    const activeAttribute = isolatedLegendItem?.startsWith('attribute:') ? isolatedLegendItem : null;
+    const activeAttribute = selectedCommunityId && !selectedCommunityId.startsWith('community:')
+      ? selectedCommunityId
+      : isolatedLegendItem?.startsWith('attribute:') ? isolatedLegendItem : null;
     if (activeAttribute) {
       const members = legendNodeMembership.get(activeAttribute);
       if (members?.size) {
@@ -135,7 +137,7 @@ export function createSigmaEdgeReducer(graph: Graph, styleRefs: MutableRefObject
       if ((source === selectedSource && target === selectedTarget) || (!directed && source === selectedTarget && target === selectedSource)) focused = true;
       else dimmed = true;
     } else {
-      const activeCommunity = selectedCommunityId || isolatedCommunityId
+      const activeCommunity = (selectedCommunityId?.startsWith('community:') ? selectedCommunityId : null) || isolatedCommunityId
         || (isolatedLegendItem?.startsWith('community:') ? isolatedLegendItem : null);
       if (activeCommunity) {
         const community = activeCommunity.replace('community:', '');
@@ -144,10 +146,13 @@ export function createSigmaEdgeReducer(graph: Graph, styleRefs: MutableRefObject
         if (sourceCommunity === community && targetCommunity === community) focused = true;
         else if (sourceCommunity !== community && targetCommunity !== community) dimmed = true;
       }
-      const activeAttribute = isolatedLegendItem?.startsWith('attribute:') ? isolatedLegendItem : null;
+      const activeAttribute = selectedCommunityId && !selectedCommunityId.startsWith('community:')
+        ? selectedCommunityId
+        : isolatedLegendItem?.startsWith('attribute:') ? isolatedLegendItem : null;
       const members = activeAttribute ? legendNodeMembership.get(activeAttribute) : null;
-      if (members?.size) {
-        if (members.has(source) || members.has(target)) focused = true;
+      const edgeMembers = activeAttribute ? legendEdgeMembership.get(activeAttribute) : null;
+      if (members?.size || edgeMembers?.size) {
+        if (members?.has(source) || members?.has(target) || edgeMembers?.has(rawEdgeId)) focused = true;
         else dimmed = true;
       }
     }

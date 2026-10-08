@@ -104,27 +104,15 @@ export default function GraphLegend({
     const id = item.id;
 
     if (e.detail === 2) {
-      if (clickTimers.current[id]) {
-        clearTimeout(clickTimers.current[id]);
-        delete clickTimers.current[id];
-      }
       if (onCommunityDoubleClick) {
         onCommunityDoubleClick(id);
       } else if (handleLegendClick) {
         handleLegendClick(e, id, item.allIds);
       }
-    } else {
-      if (clickTimers.current[id]) {
-        clearTimeout(clickTimers.current[id]);
-      }
-      clickTimers.current[id] = setTimeout(() => {
-        delete clickTimers.current[id];
-        if (onCommunitySingleClick) {
-          onCommunitySingleClick(id);
-        } else if (handleLegendClick) {
-          handleLegendClick(e, id, item.allIds);
-        }
-      }, 250);
+    } else if (onCommunitySingleClick) {
+      onCommunitySingleClick(id);
+    } else if (handleLegendClick) {
+      handleLegendClick(e, id, item.allIds);
     }
   };
 
@@ -317,6 +305,7 @@ export default function GraphLegend({
               <div data-legend-export-section hidden={collapsedSections.has(category.title)} className="mine-scroll-container max-h-[160px] space-y-1 pr-1">
                 {category.items.map((item, i) => {
                   const isIsolated = isolatedCommunityId === item.id || isolatedLegendItem === item.id;
+                  const isHighlighted = selectedCommunityId === item.id;
                   const isHidden = hiddenItems.has(item.id);
                   const activeIsolation = isolatedLegendItem || isolatedCommunityId;
                   const isOtherIsolated = activeIsolation !== null && activeIsolation !== item.id;
@@ -329,12 +318,14 @@ export default function GraphLegend({
                           ? 'bg-[#b4ff39]/20 font-bold border border-[#b4ff39]'
                           : isHidden
                           ? 'opacity-40 line-through'
+                          : isHighlighted
+                          ? 'bg-[#b4ff39]/20 font-bold'
                           : isOtherIsolated
                           ? 'opacity-40'
                           : 'opacity-100 hover:bg-black/5 dark:hover:bg-white/10'
                       }`}
                       onClick={(e) => handleCategoryClick(e, item)}
-                      title="Single-click to toggle show/hide, double-click to isolate"
+                      title="Single-click to highlight, double-click to isolate and zoom"
                     >
                       <div
                         className="w-3 h-3 rounded-full flex-shrink-0 border border-black/20 dark:border-white/30"

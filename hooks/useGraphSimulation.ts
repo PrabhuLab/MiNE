@@ -300,6 +300,7 @@ export function useGraphSimulation({
       .zoom<SVGSVGElement, unknown>()
       .extent([[0, 0], [width, height]])
       .scaleExtent([0.02, 100])
+      .clickDistance(4)
       .filter((event) => event.type === 'wheel' || event.type === 'touchstart' || event.button === 0)
       .on('start', (event) => {
         if (event.sourceEvent) {
@@ -316,18 +317,13 @@ export function useGraphSimulation({
     svg.call(zoomBehavior as any);
     svg.on('dblclick.zoom', null);
 
-    zoomGroup
-      .append('rect')
-      .attr('width', width * 100000)
-      .attr('height', height * 100000)
-      .attr('x', -width * 50000)
-      .attr('y', -height * 50000)
-      .style('fill', 'transparent')
-      .on('click', () => {
-        setClickedNode(null);
-        setClickedEdge(null);
-        if (onClearSelection) onClearSelection();
-      });
+    // Listen on the viewport: oversized background rectangles are clipped at high zoom.
+    svg.on('click.selection', (event) => {
+      if (event.defaultPrevented) return;
+      setClickedNode(null);
+      setClickedEdge(null);
+      onClearSelection?.();
+    });
     // O(1) Map lookup for shared simulation node objects
     const sharedD3NodesMap = d3NodesMapRef?.current;
     const graphNodes = nodes.map((d) => {
@@ -595,6 +591,7 @@ export function useGraphSimulation({
     nodeGroup.call(
       d3
         .drag<any, any>()
+        .clickDistance(4)
         .on('start', (e: any, d: any) => {
           if (beginDrag) beginDrag(d.id, d.x, d.y);
         })
@@ -629,6 +626,7 @@ export function useGraphSimulation({
     return () => {
       svg.interrupt();
       svg.on('.zoom', null);
+      svg.on('.selection', null);
     };
 
     /* eslint-disable-next-line react-hooks/exhaustive-deps */

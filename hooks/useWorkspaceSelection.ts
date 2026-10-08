@@ -32,7 +32,12 @@ export function useWorkspaceSelection() {
   };
 
   const clearSelection = () => {
-    setSelectedElement(null);
+    useStore.setState({
+      selectedElement: null,
+      selectedCommunityId: null,
+      isolatedCommunityId: null,
+      isolatedLegendItem: null,
+    });
     setGraphFocusRequest(null);
   };
 

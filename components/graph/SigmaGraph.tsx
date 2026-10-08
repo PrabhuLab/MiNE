@@ -563,13 +563,8 @@ export default function SigmaGraph({
   }, [setHiddenItems]);
 
   const handleCommunitySingleClick = useCallback((id: string) => {
-    setHiddenItems((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, [setHiddenItems]);
+    setSelectedCommunityId(selectedCommunityId === id ? null : id);
+  }, [selectedCommunityId, setSelectedCommunityId]);
 
   const handleElementSingleClick = useCallback((id: string) => {
     setHiddenItems((prev) => {

@@ -39,12 +39,32 @@ export function registerSigmaInteractions({
   setClickedEdge,
   setTooltip,
 }: SigmaInteractionConfig) {
+  let pointerStart: { x: number; y: number } | null = null;
+  let dragged = false;
+  const pointerDown = ({ event }: { event: { x: number; y: number } }) => {
+    pointerStart = { x: event.x, y: event.y };
+    dragged = false;
+  };
+  const pointerMove = ({ event }: { event: { x: number; y: number } }) => {
+    if (pointerStart && Math.hypot(event.x - pointerStart.x, event.y - pointerStart.y) > 4) dragged = true;
+  };
+  const pointerUp = (payload: { event: { x: number; y: number } }) => {
+    pointerMove(payload);
+    pointerStart = null;
+  };
+  for (const target of ['Stage', 'Node', 'Edge'] as const) {
+    sigma.on(`down${target}`, pointerDown);
+    sigma.on(`up${target}`, pointerUp);
+  }
+  // Sigma counts move events; even a pan with only one move must suppress the click.
+  sigma.on('moveBody', pointerMove);
   const isInteractiveNode = (nodeKey: string) => {
     const data = sigma.getNodeDisplayData(nodeKey);
     return Boolean(data && data.visibility !== 'hidden' && (data.opacity ?? 1) > 0);
   };
 
   sigma.on('nodeDragStart', (event) => {
+    dragged = true;
     if (beginDrag && graph.hasNode(event.node) && isInteractiveNode(event.node)) {
       beginDrag(event.node, graph.getNodeAttribute(event.node, 'x'), graph.getNodeAttribute(event.node, 'y'));
     }
@@ -75,6 +95,7 @@ export function registerSigmaInteractions({
   });
   sigma.on('leaveNode', () => setTooltip(null));
   sigma.on('clickNode', (event) => {
+    if (dragged) return;
     const nodeKey = event.node;
     if (!isInteractiveNode(nodeKey)) return;
     if (clickedNodeRef.current?.id === nodeKey) {
@@ -89,12 +110,18 @@ export function registerSigmaInteractions({
   });
   sigma.on('doubleClickNode', (event) => {
     event.preventSigmaDefault();
-    if (!isInteractiveNode(event.node)) return;
+    if (dragged || !isInteractiveNode(event.node)) return;
     onElementDoubleClick?.(event.node, 'node');
   });
-  sigma.on('clickStage', () => {
+  const clearStage = () => {
+    if (dragged) return;
     setClickedNode(null);
     setClickedEdge(null);
     onClearSelection?.();
+  };
+  sigma.on('clickStage', clearStage);
+  sigma.on('doubleClickStage', (event) => {
+    if (dragged) event.preventSigmaDefault();
+    else clearStage();
   });
 }

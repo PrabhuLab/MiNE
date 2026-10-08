@@ -369,12 +369,7 @@ export default function D3Graph({
   };
 
   const handleCommunitySingleClick = (id: string) => {
-    setHiddenItems((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+    setSelectedCommunityId(selectedCommunityId === id ? null : id);
   };
 
   const handleElementSingleClick = (id: string) => {

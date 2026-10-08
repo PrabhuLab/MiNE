@@ -41,13 +41,13 @@ export default function NodeDetailsSidebar({
   if (clickedNode) {
     const net = netMap.get(clickedNode.id);
     return (
-      <div className="absolute bottom-6 right-6 flex space-x-2 z-10">
+      <div role="region" aria-label="Node details" className="absolute bottom-6 right-6 z-10 flex max-h-[min(360px,calc(100%_-_3rem))] max-w-[calc(100%_-_3rem)] flex-col">
         <div
-          className={`p-3 w-56 shadow-none border transition-colors ${
+          className={`p-3 w-56 max-w-full min-h-0 flex flex-col overflow-hidden shadow-none border transition-colors ${
             isDarkMode ? 'bg-[#141414] border-[#333] text-[#E4E3E0]' : 'bg-white border-[#141414] text-[#141414]'
           }`}
         >
-          <div className="flex justify-between items-center mb-2">
+          <div className="flex shrink-0 justify-between items-center mb-2">
             <div
               className={`text-[10px] font-bold uppercase tracking-widest opacity-70 ${
                 isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'
@@ -65,7 +65,7 @@ export default function NodeDetailsSidebar({
               </button>
             )}
           </div>
-          <div className="space-y-1">
+          <div tabIndex={0} aria-label="Node attributes" className="mine-scroll-container min-h-0 flex-1 overflow-y-auto overscroll-contain space-y-1">
             <div className="flex justify-between text-[10px]">
               <span className="opacity-50 uppercase font-bold">NODE</span>
               <span
@@ -231,13 +231,13 @@ export default function NodeDetailsSidebar({
         : clickedEdge.target;
 
     return (
-      <div className="absolute bottom-6 right-6 flex space-x-2 z-10">
+      <div role="region" aria-label="Edge details" className="absolute bottom-6 right-6 z-10 flex max-h-[min(360px,calc(100%_-_3rem))] max-w-[calc(100%_-_3rem)] flex-col">
         <div
-          className={`p-3 w-56 shadow-none border transition-colors ${
+          className={`p-3 w-56 max-w-full min-h-0 flex flex-col overflow-hidden shadow-none border transition-colors ${
             isDarkMode ? 'bg-[#141414] border-[#333] text-[#E4E3E0]' : 'bg-white border-[#141414] text-[#141414]'
           }`}
         >
-          <div className="flex justify-between items-center mb-2">
+          <div className="flex shrink-0 justify-between items-center mb-2">
             <div
               className={`text-[10px] font-bold uppercase tracking-widest opacity-70 ${
                 isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'
@@ -255,7 +255,7 @@ export default function NodeDetailsSidebar({
               </button>
             )}
           </div>
-          <div className="space-y-1">
+          <div tabIndex={0} aria-label="Edge attributes" className="mine-scroll-container min-h-0 flex-1 overflow-y-auto overscroll-contain space-y-1">
             <div className="flex justify-between text-[10px] items-center">
               <span className="opacity-50 uppercase font-bold">SOURCE</span>
               <span
