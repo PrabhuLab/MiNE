@@ -37,7 +37,6 @@ const PAGE_SIZE = 100;
 
 export const WorkspaceDataTable = ({ active, dataTab, tableData, tableDataEdges, edgeMetrics, handleSort, sortConfig, handleElementDoubleClick }: WorkspaceDataTableProps) => {
   const { isDarkMode, directed, selectedElement, setSelectedElement } = useStore();
-  const [page, setPage] = useState(0);
   const edgeMetricMap = useMemo(() => new Map(edgeMetrics.map((metric) => [String(metric.key), metric])), [edgeMetrics]);
   const edgeRows = useMemo(() => dataTab === 'edges' ? tableDataEdges.map((edge) => {
     const direct = `${edge.source}${directed ? '->' : '--'}${edge.target}`;
@@ -46,17 +45,20 @@ export const WorkspaceDataTable = ({ active, dataTab, tableData, tableDataEdges,
   }) : [], [dataTab, directed, edgeMetricMap, tableDataEdges]);
   const rows = dataTab === 'nodes' ? tableData : edgeRows;
   const columns = useMemo(() => orderedColumns(rows, dataTab === 'nodes' ? preferredNodeColumns : preferredEdgeColumns), [dataTab, rows]);
-  const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
-  const currentPage = Math.min(page, pageCount - 1);
-  const visibleRows = rows.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
-
-  useEffect(() => {
-    if (!active || !selectedElement) return;
-    const selectedIndex = rows.findIndex((row) => dataTab === 'nodes'
+  const selectionPage = useMemo(() => {
+    const selectedIndex = active && selectedElement ? rows.findIndex((row) => dataTab === 'nodes'
       ? String(row.id) === selectedElement
-      : `${row.source}-${row.target}` === selectedElement || `${row.target}-${row.source}` === selectedElement);
-    if (selectedIndex >= 0) setPage(Math.floor(selectedIndex / PAGE_SIZE));
+      : `${row.source}-${row.target}` === selectedElement || `${row.target}-${row.source}` === selectedElement) : -1;
+    return { page: selectedIndex >= 0 ? Math.floor(selectedIndex / PAGE_SIZE) : null };
   }, [active, dataTab, rows, selectedElement]);
+  const [pagination, setPagination] = useState({ page: selectionPage.page ?? 0, selectionPage });
+  // Adjust before rendering rows so selection does not trigger a second table commit.
+  if (pagination.selectionPage !== selectionPage) {
+    setPagination({ page: selectionPage.page ?? pagination.page, selectionPage });
+  }
+  const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const currentPage = Math.min(pagination.page, pageCount - 1);
+  const visibleRows = rows.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
 
   useEffect(() => {
     if (!active || !selectedElement) return;
@@ -93,9 +95,9 @@ export const WorkspaceDataTable = ({ active, dataTab, tableData, tableDataEdges,
       </table>
       </div>
       {pageCount > 1 && <div className="flex items-center justify-between border-t px-3 py-1 text-[10px] font-mono">
-        <button type="button" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)} className="disabled:opacity-40">Previous</button>
+        <button type="button" disabled={currentPage === 0} onClick={() => setPagination({ page: currentPage - 1, selectionPage })} className="disabled:opacity-40">Previous</button>
         <span>{currentPage * PAGE_SIZE + 1}–{Math.min((currentPage + 1) * PAGE_SIZE, rows.length)} of {rows.length}</span>
-        <button type="button" disabled={currentPage === pageCount - 1} onClick={() => setPage(currentPage + 1)} className="disabled:opacity-40">Next</button>
+        <button type="button" disabled={currentPage === pageCount - 1} onClick={() => setPagination({ page: currentPage + 1, selectionPage })} className="disabled:opacity-40">Next</button>
       </div>}
     </div>
   );

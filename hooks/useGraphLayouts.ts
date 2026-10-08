@@ -6,7 +6,7 @@ import { graphologyLayoutEngine, isContinuousLayout, type LayoutController } fro
 import { cloudLayoutEngine } from '@/services/layouts/cloudEngine';
 import type { LayoutAlgorithm, LayoutSettings } from '@/services/layouts/types';
 import { isCloudLayoutSupported } from '@/services/cloud/config';
-import { computeForceDirectedLayout } from '@/lib/layoutUtils';
+import { computeForceDirectedLayoutAsync } from '@/services/layouts/d3Worker';
 
 const DEFAULT_SETTINGS: LayoutSettings = {
   random: { center: 0, scale: 100 },
@@ -50,15 +50,22 @@ export function useGraphLayouts(options: UseGraphLayoutsOptions) {
   const [error, setError] = useState<string | null>(null);
   const controllerRef = useRef<LayoutController | null>(null);
   const cloudAbortRef = useRef<AbortController | null>(null);
+  const startTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const stop = useCallback(() => {
+    if (startTimerRef.current !== null) clearTimeout(startTimerRef.current);
+    startTimerRef.current = null;
     controllerRef.current?.stop();
     controllerRef.current = null;
+    cloudAbortRef.current?.abort();
+    cloudAbortRef.current = null;
     setRunning(false);
     options.notifyLayoutChange();
   }, [options]);
 
   const kill = useCallback(() => {
+    if (startTimerRef.current !== null) clearTimeout(startTimerRef.current);
+    startTimerRef.current = null;
     controllerRef.current?.kill();
     controllerRef.current = null;
     cloudAbortRef.current?.abort();
@@ -91,17 +98,25 @@ export function useGraphLayouts(options: UseGraphLayoutsOptions) {
       },
     };
     const begin = () => {
+      startTimerRef.current = null;
       try {
         if (algorithm === 'd3Force') {
+          const controller = new AbortController();
+          cloudAbortRef.current = controller;
           setRunning(true);
-          const forcePositions = computeForceDirectedLayout(options.nodes, options.edges, options.directed, options.forceStrength);
-          options.graph.updateEachNodeAttributes((nodeId, attributes) => {
-            const position = forcePositions.get(nodeId);
-            return position ? { ...attributes, ...position } : attributes;
-          }, { attributes: ['x', 'y'] });
-          options.notifyLayoutChange();
-          options.onLayoutStopped?.();
-          setRunning(false);
+          void computeForceDirectedLayoutAsync(options.nodes, options.edges, options.directed, options.forceStrength, controller.signal).then((forcePositions) => {
+            if (controller.signal.aborted) return;
+            options.graph.updateEachNodeAttributes((nodeId, attributes) => {
+              const position = forcePositions.get(nodeId);
+              return position ? { ...attributes, ...position } : attributes;
+            }, { attributes: ['x', 'y'] });
+            options.notifyLayoutChange();
+            options.onLayoutStopped?.();
+          }).catch((cause) => {
+            if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause));
+          }).finally(() => {
+            if (cloudAbortRef.current === controller) { cloudAbortRef.current = null; setRunning(false); }
+          });
           return;
         }
         const serverAlgorithm = isCloudLayoutSupported(algorithm);
@@ -115,13 +130,13 @@ export function useGraphLayouts(options: UseGraphLayoutsOptions) {
           cloudAbortRef.current = controller;
           setRunning(true);
           void cloudLayoutEngine.compute({ ...request, algorithm: cloudAlgorithm, signal: controller.signal }).then((result) => {
+            if (controller.signal.aborted) return;
             options.applyExternalPositions(result, options.topologyKey);
             options.onLayoutStopped?.();
           }).catch((cause) => {
             if (cause?.name !== 'AbortError') setError(cause instanceof Error ? cause.message : String(cause));
           }).finally(() => {
-            if (cloudAbortRef.current === controller) cloudAbortRef.current = null;
-            setRunning(false);
+            if (cloudAbortRef.current === controller) { cloudAbortRef.current = null; setRunning(false); }
           });
         } else if (isContinuousLayout(algorithm)) {
           const controller = graphologyLayoutEngine.createController(request);
@@ -136,7 +151,7 @@ export function useGraphLayouts(options: UseGraphLayoutsOptions) {
         setError(cause instanceof Error ? cause.message : String(cause));
       }
     };
-    setTimeout(begin, 0);
+    startTimerRef.current = setTimeout(begin, 0);
   }, [algorithm, kill, options, settings]);
 
   const inferForceAtlas2 = useCallback(() => {
@@ -148,8 +163,8 @@ export function useGraphLayouts(options: UseGraphLayoutsOptions) {
   }, [algorithm]);
 
   useEffect(() => {
-    if (options.livePhysics && controllerRef.current) stop();
-  }, [options.livePhysics, stop]);
+    if (options.livePhysics && (controllerRef.current || cloudAbortRef.current || startTimerRef.current !== null)) kill();
+  }, [options.livePhysics, kill]);
 
   useEffect(() => {
     kill();

@@ -85,8 +85,6 @@ export default function SigmaGraph({
     setSelectedCommunityId,
     isolatedCommunityId,
     setIsolatedCommunityId,
-    hoveredCommunityId,
-    setHoveredCommunityId,
     showArrowheads,
     setShowArrowheads,
     showNodeLabels,
@@ -132,15 +130,10 @@ export default function SigmaGraph({
     return matches;
   }, [graph, searchQuery]);
 
-  // Precompute secondary status for all nodes
-  const isSecondaryMap = useMemo(() => {
-    return new Map(nodes.map((node) => [String(node.id), isSecondaryNode(node, bipartite)]));
-  }, [nodes, bipartite]);
-
   // Dynamic Global Label Gating
   const shouldRenderLabels = useMemo(() => {
-    return shouldRenderSigmaLabels(showNodeLabels, selectedElement, clickedNode, searchQuery, hoveredCommunityId);
-  }, [showNodeLabels, selectedElement, clickedNode, searchQuery, hoveredCommunityId]);
+    return shouldRenderSigmaLabels(showNodeLabels, selectedElement, clickedNode, searchQuery);
+  }, [showNodeLabels, selectedElement, clickedNode, searchQuery]);
 
   useEffect(() => {
     if (selectedElement) {
@@ -254,7 +247,6 @@ export default function SigmaGraph({
     isolatedLegendItem,
     selectedCommunityId,
     isolatedCommunityId,
-    hoveredCommunityId,
     displayMap,
     searchQuery,
     clickedNodeRef,
@@ -263,7 +255,6 @@ export default function SigmaGraph({
     showNodeLabels,
     selectedNeighborSet,
     searchMatchSet,
-    isSecondaryMap,
     focusedEdgeNodeSet,
     legendNodeMembership,
     legendEdgeMembership,
@@ -281,7 +272,6 @@ export default function SigmaGraph({
       isolatedLegendItem,
       selectedCommunityId,
       isolatedCommunityId,
-      hoveredCommunityId,
       displayMap,
       searchQuery,
       clickedNodeRef,
@@ -290,7 +280,6 @@ export default function SigmaGraph({
       showNodeLabels,
       selectedNeighborSet,
       searchMatchSet,
-      isSecondaryMap,
       focusedEdgeNodeSet,
       legendNodeMembership,
       legendEdgeMembership,
@@ -306,7 +295,6 @@ export default function SigmaGraph({
     isolatedLegendItem,
     selectedCommunityId,
     isolatedCommunityId,
-    hoveredCommunityId,
     showArrowheads,
     displayMap,
     searchQuery,
@@ -314,7 +302,6 @@ export default function SigmaGraph({
     showNodeLabels,
     selectedNeighborSet,
     searchMatchSet,
-    isSecondaryMap,
     focusedEdgeNodeSet,
     legendNodeMembership,
     legendEdgeMembership,
@@ -366,7 +353,6 @@ export default function SigmaGraph({
     setIsolatedCommunityId(null);
     setSelectedCommunityId(null);
     setIsolatedLegendItem(null);
-    setHoveredCommunityId(null);
     setClickedNode(null);
     setClickedEdge(null);
     onClearSelection?.();
@@ -378,7 +364,6 @@ export default function SigmaGraph({
     setIsolatedCommunityId,
     setSelectedCommunityId,
     setIsolatedLegendItem,
-    setHoveredCommunityId,
     onClearSelection,
     getVisibleNodeIds,
     hiddenItems,
@@ -560,7 +545,6 @@ export default function SigmaGraph({
     isolatedLegendItem,
     selectedCommunityId,
     isolatedCommunityId,
-    hoveredCommunityId,
     showArrowheads,
     showNodeLabels,
     displayMap,
@@ -691,7 +675,6 @@ export default function SigmaGraph({
         onElementDoubleClick={handleElementDoubleClick}
         onCommunitySingleClick={handleCommunitySingleClick}
         onCommunityDoubleClick={(id) => id.startsWith('community:') ? handleCommunityDoubleClick(id) : handleElementDoubleClick(id)}
-        onCommunityHover={setHoveredCommunityId}
         showNodeLabels={showNodeLabels}
         setShowNodeLabels={setShowNodeLabels}
         directed={directed}

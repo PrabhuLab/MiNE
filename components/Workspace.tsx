@@ -293,10 +293,11 @@ export default function Workspace() {
     d3NodesRef,
     d3LinksRef,
     d3NodesMapRef,
+    physicsError,
   } = useSharedPhysics({
     graph,
     topologyKey,
-    livePhysics: appliedFilters.livePhysics,
+    livePhysics: appliedFilters.livePhysics && isReady,
     forceStrength: appliedFilters.forceStrength || -100,
     activeRenderer: useSigma ? 'sigma' : 'd3',
   });
@@ -457,8 +458,8 @@ export default function Workspace() {
                   <span>Switching Renderer Engine...</span>
                 </div>
               )}
-              {positioningError && (
-                <div className={`absolute inset-x-4 top-4 z-50 border px-4 py-3 font-mono text-xs ${isDarkMode ? 'bg-red-950 border-red-500 text-red-100' : 'bg-red-50 border-red-500 text-red-900'}`}>{positioningError}</div>
+              {(positioningError || physicsError) && (
+                <div className={`absolute inset-x-4 top-4 z-50 border px-4 py-3 font-mono text-xs ${isDarkMode ? 'bg-red-950 border-red-500 text-red-100' : 'bg-red-50 border-red-500 text-red-900'}`}>{positioningError || physicsError}</div>
               )}
               {useSigma ? (
                 <SigmaGraph 

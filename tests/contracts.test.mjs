@@ -1,4 +1,3 @@
-import { hoveredLegendLabelVisible } from '../services/graphPresentation/legendLabels.ts';
 import { shouldRenderSigmaLabels } from '../components/graph/sigma/labels.ts';
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -281,19 +280,24 @@ test('automatic graph updates use every draft setting immediately', () => {
   assert.strictEqual(graphSettings(manualDraft, applied), applied);
 });
 
-test('raster graph exports preserve the client viewport aspect ratio at high resolution', () => {
+test('raster graph exports preserve the viewport ratio within the canvas memory limit', () => {
   assert.deepEqual(viewportRasterDimensions(1200, 675, 1), {
     viewportWidth: 1200,
     viewportHeight: 675,
-    exportWidth: 12000,
-    exportHeight: 6750,
+    exportWidth: 6531,
+    exportHeight: 3674,
   });
   assert.deepEqual(viewportRasterDimensions(800.4, 600.4, 3), {
     viewportWidth: 800,
     viewportHeight: 600,
-    exportWidth: 8000,
-    exportHeight: 6000,
+    exportWidth: 5656,
+    exportHeight: 4242,
   });
+  for (const [width, height] of [[100, 50], [4000, 2000]]) {
+    const { exportWidth, exportHeight } = viewportRasterDimensions(width, height, 1);
+    assert.ok(exportWidth * exportHeight <= 24_000_000);
+    assert.ok(Math.abs(exportWidth / exportHeight - width / height) < 0.001);
+  }
 });
 
 test('metric projections flatten node and edge result records for tables', () => {
@@ -341,18 +345,11 @@ test('combined filters exclude nodes that lose their last connection', () => {
 });
 
 
-test('legend hover restricts labels to members and releases control on mouse leave', () => {
-  const membership = new Map([['attribute:node:Year:2024', new Set(['a'])]]);
-  const visible = (hover, node = 'a') => hoveredLegendLabelVisible(hover, node, 0, 'A', false, membership);
-  assert.equal(visible('attribute:node:Year:2024'), true);
-  assert.equal(visible('attribute:node:Year:2024', 'b'), false);
-  assert.equal(visible('community:0'), true);
-  assert.equal(visible('community:1'), false);
-  assert.equal(visible('type:A'), true);
-  assert.equal(visible('type:B'), false);
-  assert.equal(visible('element:standard'), true);
-  assert.equal(visible('element:bipartite'), false);
-  assert.equal(visible(null), null);
-  assert.equal(shouldRenderSigmaLabels(false, null, null, '', 'community:0'), true);
+test('Sigma labels remain gated by explicit labels, selection and search', () => {
   assert.equal(shouldRenderSigmaLabels(false, null, null, ''), false);
+  assert.equal(shouldRenderSigmaLabels(false, null, null, '   '), false);
+  assert.equal(shouldRenderSigmaLabels(true, null, null, ''), true);
+  assert.equal(shouldRenderSigmaLabels(false, 'a', null, ''), true);
+  assert.equal(shouldRenderSigmaLabels(false, null, { id: 'a' }, ''), true);
+  assert.equal(shouldRenderSigmaLabels(false, null, null, 'Alpha'), true);
 });

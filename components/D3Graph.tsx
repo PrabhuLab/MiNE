@@ -122,8 +122,6 @@ export default function D3Graph({
     setSelectedCommunityId,
     isolatedCommunityId,
     setIsolatedCommunityId,
-    hoveredCommunityId,
-    setHoveredCommunityId,
     showArrowheads,
     setShowArrowheads,
     showNodeLabels,
@@ -314,7 +312,6 @@ export default function D3Graph({
     isolatedLegendItem,
     selectedCommunityId,
     isolatedCommunityId,
-    hoveredCommunityId,
     showArrowheads,
     showNodeLabels,
     getShouldShowArrowhead,
@@ -433,7 +430,6 @@ export default function D3Graph({
     setIsolatedCommunityId(null);
     setSelectedCommunityId(null);
     setIsolatedLegendItem(null);
-    setHoveredCommunityId(null);
     setClickedNode(null);
     setClickedEdge(null);
     if (onClearSelection) onClearSelection();
@@ -486,7 +482,6 @@ export default function D3Graph({
         onElementDoubleClick={handleElementDoubleClick}
         onCommunitySingleClick={handleCommunitySingleClick}
         onCommunityDoubleClick={(id) => id.startsWith('community:') ? handleCommunityDoubleClick(id) : handleElementDoubleClick(id)}
-        onCommunityHover={setHoveredCommunityId}
         showNodeLabels={showNodeLabels}
         setShowNodeLabels={setShowNodeLabels}
         directed={directed}

@@ -1,4 +1,3 @@
-import { hoveredLegendLabelVisible } from '@/services/graphPresentation/legendLabels';
 import type Graph from 'graphology';
 import type { MutableRefObject } from 'react';
 
@@ -9,20 +8,17 @@ export function createSigmaNodeReducer(styleRefs: MutableRefObject<any>) {
       isolatedLegendItem,
       selectedCommunityId,
       isolatedCommunityId,
-      hoveredCommunityId,
       displayMap,
       clickedNodeRef,
       showNodeLabels,
       selectedNeighborSet,
       searchMatchSet,
-      isSecondaryMap,
       focusedEdgeNodeSet,
       legendNodeMembership,
       legendVisibility,
     } = styleRefs.current;
 
     const displayIndex = displayMap[nodeKey] ?? -1;
-    const isSecondary = isSecondaryMap.get(nodeKey);
     const result = {
       ...data,
       visibility: data.visibility ?? 'visible',
@@ -49,14 +45,13 @@ export function createSigmaNodeReducer(styleRefs: MutableRefObject<any>) {
       focused = true;
       result.highlighted = true;
     }
-    const activeCommunity = (hoveredCommunityId?.startsWith('community:') ? hoveredCommunityId : null) || selectedCommunityId || isolatedCommunityId
+    const activeCommunity = selectedCommunityId || isolatedCommunityId
       || (isolatedLegendItem?.startsWith('community:') ? isolatedLegendItem : null);
     if (activeCommunity) {
       if (String(displayIndex) === activeCommunity.replace('community:', '')) communityMember = true;
       else dimmed = true;
     }
-    const activeAttribute = (hoveredCommunityId?.startsWith('attribute:') ? hoveredCommunityId : null)
-      || (isolatedLegendItem?.startsWith('attribute:') ? isolatedLegendItem : null);
+    const activeAttribute = isolatedLegendItem?.startsWith('attribute:') ? isolatedLegendItem : null;
     if (activeAttribute) {
       const members = legendNodeMembership.get(activeAttribute);
       if (members?.size) {
@@ -90,12 +85,7 @@ export function createSigmaNodeReducer(styleRefs: MutableRefObject<any>) {
     result.opacity = dimmed ? (data.opacity ?? 1) * 0.1 : (data.opacity ?? 1);
     result.label = data.rawNode?.name || data.rawNode?.label || nodeKey;
 
-    const hoveredLabel = hoveredLegendLabelVisible(
-      hoveredCommunityId, nodeKey, displayIndex, data.rawNode?.type,
-      Boolean(isSecondary), legendNodeMembership,
-    );
-    if (hoveredLabel !== null) result.labelVisibility = hoveredLabel ? 'visible' : 'hidden';
-    else if (focused || neighbor) result.labelVisibility = 'visible';
+    if (focused || neighbor) result.labelVisibility = 'visible';
     else if (activeCommunity) result.labelVisibility = communityMember ? (showNodeLabels ? 'auto' : 'visible') : 'hidden';
     else if (showNodeLabels) result.labelVisibility = 'auto';
     return result;
@@ -111,11 +101,9 @@ export function createSigmaEdgeReducer(graph: Graph, styleRefs: MutableRefObject
       directed,
       selectedCommunityId,
       isolatedCommunityId,
-      hoveredCommunityId,
       isolatedLegendItem,
       displayMap,
       focusedEdgeNodeSet,
-      isSecondaryMap,
       getShouldShowArrowhead,
       legendNodeMembership,
       legendEdgeMembership,
@@ -147,7 +135,7 @@ export function createSigmaEdgeReducer(graph: Graph, styleRefs: MutableRefObject
       if ((source === selectedSource && target === selectedTarget) || (!directed && source === selectedTarget && target === selectedSource)) focused = true;
       else dimmed = true;
     } else {
-      const activeCommunity = (hoveredCommunityId?.startsWith('community:') ? hoveredCommunityId : null) || selectedCommunityId || isolatedCommunityId
+      const activeCommunity = selectedCommunityId || isolatedCommunityId
         || (isolatedLegendItem?.startsWith('community:') ? isolatedLegendItem : null);
       if (activeCommunity) {
         const community = activeCommunity.replace('community:', '');
@@ -156,8 +144,7 @@ export function createSigmaEdgeReducer(graph: Graph, styleRefs: MutableRefObject
         if (sourceCommunity === community && targetCommunity === community) focused = true;
         else if (sourceCommunity !== community && targetCommunity !== community) dimmed = true;
       }
-      const activeAttribute = (hoveredCommunityId?.startsWith('attribute:') ? hoveredCommunityId : null)
-        || (isolatedLegendItem?.startsWith('attribute:') ? isolatedLegendItem : null);
+      const activeAttribute = isolatedLegendItem?.startsWith('attribute:') ? isolatedLegendItem : null;
       const members = activeAttribute ? legendNodeMembership.get(activeAttribute) : null;
       if (members?.size) {
         if (members.has(source) || members.has(target)) focused = true;

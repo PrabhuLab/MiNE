@@ -142,8 +142,6 @@ interface AppState {
   setSelectedCommunityId: (val: string | null) => void;
   isolatedCommunityId: string | null;
   setIsolatedCommunityId: (val: string | null) => void;
-  hoveredCommunityId: string | null;
-  setHoveredCommunityId: (val: string | null) => void;
   
   hiddenLegendItems: string[];
   setHiddenLegendItems: (val: string[]) => void;
@@ -200,8 +198,6 @@ export const useStore = create<AppState>()(persist<AppState, [], [], { computeEn
   setSelectedCommunityId: (val) => set({ selectedCommunityId: val }),
   isolatedCommunityId: null,
   setIsolatedCommunityId: (val) => set({ isolatedCommunityId: val }),
-  hoveredCommunityId: null,
-  setHoveredCommunityId: (val) => set({ hoveredCommunityId: val }),
 
   hiddenLegendItems: [],
   setHiddenLegendItems: (val) => set({ hiddenLegendItems: val }),
@@ -274,7 +270,6 @@ export const useStore = create<AppState>()(persist<AppState, [], [], { computeEn
     selectedElement: null,
     selectedCommunityId: null,
     isolatedCommunityId: null,
-    hoveredCommunityId: null,
     hiddenLegendItems: [],
     isolatedLegendItem: null,
     isLegendMinimized: false,

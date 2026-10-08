@@ -5,7 +5,7 @@
 import { useEffect, useCallback, useState, useMemo, useRef } from 'react';
 import Graph from 'graphology';
 import { RawNode, RawEdge } from '@/store/useStore';
-import { computeForceDirectedLayout } from '@/lib/layoutUtils';
+import { computeForceDirectedLayoutAsync } from '@/services/layouts/d3Worker';
 import { updateGraphColors } from '@/services/graphStyles/colors';
 import { isSecondaryNode } from '@/services/graphPresentation/visibility';
 import { computeGraphRevisions } from '@/services/cloud/revision';
@@ -51,6 +51,7 @@ export function useSharedGraph({
   const [positionSource, setPositionSource] = useState<PositionSource>('local-static');
   const [positioningError, setPositioningError] = useState<string | null>(null);
   const lastStaticForceStrengthRef = useRef<number | null>(null);
+  const layoutAbortRef = useRef<AbortController | null>(null);
   const positionCacheRef = useRef(new Map<string, { x: number; y: number }>());
   const cacheGraphRevisionRef = useRef(graphRevision);
   const topologyRevisionRef = useRef(topologyKey);
@@ -77,13 +78,27 @@ export function useSharedGraph({
   }, [graph]);
 
   const applyD3StaticLayout = useCallback((graphInst: Graph) => {
-    const posMap = computeForceDirectedLayout(nodes, edges, directed, forceStrength);
-    graphInst.updateEachNodeAttributes((nodeId: string, attrs: any) => {
-      const pos = posMap.get(nodeId);
-      return pos ? { ...attrs, x: pos.x, y: pos.y } : attrs;
-    }, { attributes: ['x', 'y'] });
-    setTimeout(() => commitPositions('local-static'), 0);
+    layoutAbortRef.current?.abort();
+    const controller = new AbortController();
+    layoutAbortRef.current = controller;
+    const revision = topologyRevisionRef.current;
+    setPositioningError(null);
+    void computeForceDirectedLayoutAsync(nodes, edges, directed, forceStrength, controller.signal).then((posMap) => {
+      if (controller.signal.aborted || topologyRevisionRef.current !== revision) return;
+      graphInst.updateEachNodeAttributes((nodeId: string, attrs: any) => {
+        const pos = posMap.get(nodeId);
+        return pos ? { ...attrs, x: pos.x, y: pos.y } : attrs;
+      }, { attributes: ['x', 'y'] });
+      commitPositions('local-static');
+    }).catch((cause) => {
+      if (!controller.signal.aborted) setPositioningError(cause instanceof Error ? cause.message : String(cause));
+    }).finally(() => {
+      if (layoutAbortRef.current === controller) layoutAbortRef.current = null;
+    });
+    return controller;
   }, [nodes, edges, directed, forceStrength, commitPositions]);
+
+  useEffect(() => () => layoutAbortRef.current?.abort(), [graph]);
 
   const applyExternalPositions = useCallback((result: LayoutResult, expectedRevision: string): void => {
     if (topologyRevisionRef.current !== expectedRevision || result.filterRevision !== expectedRevision) return;
@@ -120,8 +135,9 @@ export function useSharedGraph({
       if (!graph.hasNode(node.id)) {
         if (!supplied) addedUnpositionedNode = true;
         graph.addNode(node.id, presentation);
-      } else graph.mergeNodeAttributes(node.id, presentation);
+      } else Object.assign(graph.getNodeAttributes(node.id), presentation);
     });
+    graph.updateEachNodeAttributes((_id, attrs) => attrs, { attributes: ['x', 'y', 'size', 'opacity', 'shape'] });
 
     const existingEdges = new Set(graph.edges());
     const targetEdgeKeys = new Set<string>();
@@ -133,10 +149,12 @@ export function useSharedGraph({
         path: directed ? 'curved' : 'straight', curvature: directed ? 0.3 : 0,
         head: getShouldShowArrowhead(edge) ? 'arrow' : 'none', rawEdge: edge,
       };
-      if (existingKey) { targetEdgeKeys.add(existingKey); graph.mergeEdgeAttributes(existingKey, attrs); }
+      if (existingKey) { targetEdgeKeys.add(existingKey); Object.assign(graph.getEdgeAttributes(existingKey), attrs); }
       else { try { targetEdgeKeys.add(graph.addEdge(edge.source, edge.target, attrs)); } catch { /* retain first simple edge */ } }
     });
     existingEdges.forEach((key) => { if (!targetEdgeKeys.has(key) && graph.hasEdge(key)) graph.dropEdge(key); });
+    // Re-index edge slots: hidden edges have no repaint slot in Sigma 4 beta.
+    graph.updateEachEdgeAttributes((_id, attrs) => attrs, { attributes: ['size', 'opacity', 'path', 'head', 'type'] });
     const hasUnpositionedNode = addedUnpositionedNode || graph.someNode((_id, attrs) => !finitePosition(attrs));
 
     setPositioningError(null);
@@ -146,6 +164,7 @@ export function useSharedGraph({
       // graph starts from MiNE's familiar local D3-force layout; Cloud layouts
       // replace it only after the user explicitly applies one.
       applyD3StaticLayout(graph);
+      return () => layoutAbortRef.current?.abort();
     } else {
       setPositionSource((current) => current === 'cloud-static' ? current : 'imported');
       const timeout = setTimeout(() => {
@@ -172,8 +191,9 @@ export function useSharedGraph({
     if (livePhysics) { lastStaticForceStrengthRef.current = repulsion; return; }
     if (lastStaticForceStrengthRef.current === null) { lastStaticForceStrengthRef.current = repulsion; return; }
     if (lastStaticForceStrengthRef.current === repulsion) return;
-    const timer = setTimeout(() => { applyD3StaticLayout(graph); lastStaticForceStrengthRef.current = repulsion; }, 180);
-    return () => clearTimeout(timer);
+    let controller: AbortController | undefined;
+    const timer = setTimeout(() => { controller = applyD3StaticLayout(graph); lastStaticForceStrengthRef.current = repulsion; }, 180);
+    return () => { clearTimeout(timer); controller?.abort(); };
   }, [graph, isReady, livePhysics, forceStrength, applyD3StaticLayout]);
 
   const runRefreshLayout = useCallback(() => {

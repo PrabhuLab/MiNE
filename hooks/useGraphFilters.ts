@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useStore } from '@/store/useStore';
 import { computeActiveNetwork } from '@/lib/workspaceUtils';
 import { graphSettings } from '@/services/graphStyles/liveUpdate';
@@ -8,7 +8,6 @@ export function useGraphFilters() {
   
   const [appliedFilters, setAppliedFilters] = useState(filters);
   const activeFilters = graphSettings(filters, appliedFilters);
-  const [network, setNetwork] = useState(() => computeActiveNetwork(rawNodes, rawEdges, filters));
   
   useEffect(() => {
     if (filters.liveUpdate) {
@@ -18,34 +17,14 @@ export function useGraphFilters() {
   }, [filters]);
 
   const removedNodesStr = activeFilters.removedNodes || '';
-  const edgeFilterStr = JSON.stringify(activeFilters.edgeFilter);
-
-  useEffect(() => {
-    const computed = computeActiveNetwork(rawNodes, rawEdges, activeFilters);
-    
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setNetwork(prev => {
-      const nodesEqual = computed.validNodes.length === prev.validNodes.length &&
-        computed.validNodes.every((n, i) => n.id === prev.validNodes[i]?.id);
-        
-      const edgesEqual = computed.validEdges.length === prev.validEdges.length &&
-        computed.validEdges.every((e, i) => 
-          e.source === prev.validEdges[i]?.source && 
-          e.target === prev.validEdges[i]?.target && 
-          e.weight_raw === prev.validEdges[i]?.weight_raw && 
-          e.weight_secondary === prev.validEdges[i]?.weight_secondary
-        );
-
-      if (nodesEqual && edgesEqual) {
-        return prev;
-      }
-      return computed;
-    });
-  }, [rawNodes, rawEdges, removedNodesStr, edgeFilterStr, activeFilters]);
+  const edgeFilter = activeFilters.edgeFilter;
+  const network = useMemo(() => computeActiveNetwork(rawNodes, rawEdges, {
+    removedNodes: removedNodesStr, edgeFilter,
+  }), [rawNodes, rawEdges, removedNodesStr, edgeFilter]);
 
   // Sync missing variables fallback logic (the one with useEffect)
-  const hasType = rawNodes.some(n => n.type !== undefined);
-  const hasSecondaryWeight = rawEdges.some(e => e.weight_secondary !== undefined);
+  const hasType = useMemo(() => rawNodes.some(n => n.type !== undefined), [rawNodes]);
+  const hasSecondaryWeight = useMemo(() => rawEdges.some(e => e.weight_secondary !== undefined), [rawEdges]);
 
   useEffect(() => {
     if (!hasType && filters.nodeColorBase === 'type') setFilter('nodeColorBase', 'community');

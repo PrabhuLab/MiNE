@@ -22,7 +22,6 @@ export interface GraphLegendProps {
   onElementDoubleClick?: (id: string) => void;
   onCommunitySingleClick?: (id: string) => void;
   onCommunityDoubleClick?: (id: string) => void;
-  onCommunityHover?: (id: string | null) => void;
   showNodeLabels: boolean;
   setShowNodeLabels: (val: boolean) => void;
   directed: boolean;
@@ -48,7 +47,6 @@ export default function GraphLegend({
   onElementDoubleClick,
   onCommunitySingleClick,
   onCommunityDoubleClick,
-  onCommunityHover,
   showNodeLabels,
   setShowNodeLabels,
   directed,
@@ -61,7 +59,6 @@ export default function GraphLegend({
   setIsLegendMinimized,
 }: GraphLegendProps) {
   const clickTimers = useRef<{ [key: string]: NodeJS.Timeout }>({});
-  const [editingColorId, setEditingColorId] = useState<string | null>(null);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set());
   const setLegendColor = useStore((state) => state.setLegendColor);
   const metricScales = sortLegendEntries(
@@ -337,10 +334,6 @@ export default function GraphLegend({
                           : 'opacity-100 hover:bg-black/5 dark:hover:bg-white/10'
                       }`}
                       onClick={(e) => handleCategoryClick(e, item)}
-                      onMouseEnter={() => onCommunityHover && onCommunityHover(item.id)}
-                      onMouseLeave={() => {
-                        if (editingColorId !== item.id) onCommunityHover?.(null);
-                      }}
                       title="Single-click to toggle show/hide, double-click to isolate"
                     >
                       <div
@@ -353,9 +346,7 @@ export default function GraphLegend({
                         type="color"
                         value={item.color}
                         onClick={(event) => event.stopPropagation()}
-                        onPointerDown={(event) => { event.stopPropagation(); setEditingColorId(item.id); onCommunityHover?.(item.id); }}
-                        onFocus={() => { setEditingColorId(item.id); onCommunityHover?.(item.id); }}
-                        onBlur={() => { setEditingColorId(null); onCommunityHover?.(null); }}
+                        onPointerDown={(event) => event.stopPropagation()}
                         onInput={(event) => setLegendColor(item.colorKey!, event.currentTarget.value)}
                         className="h-4 w-4 flex-shrink-0 cursor-pointer border-0 p-0 opacity-0 transition-opacity group-hover/legend-row:opacity-100"
                       /> : null}

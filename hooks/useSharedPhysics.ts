@@ -1,7 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useCallback } from 'react';
-import * as d3 from 'd3';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import type Graph from 'graphology';
 
 interface UseSharedPhysicsProps {
@@ -12,209 +11,145 @@ interface UseSharedPhysicsProps {
   activeRenderer?: 'd3' | 'sigma';
 }
 
-export function useSharedPhysics({
-  graph,
-  topologyKey,
-  livePhysics = false,
-  forceStrength = -100,
-  activeRenderer = 'd3',
-}: UseSharedPhysicsProps) {
-  const simulationRef = useRef<d3.Simulation<any, any> | null>(null);
+export function useSharedPhysics({ graph, topologyKey, livePhysics = false, forceStrength = -100, activeRenderer = 'd3' }: UseSharedPhysicsProps) {
+  const workerRef = useRef<Worker | null>(null);
+  const wakeRef = useRef<() => void>(() => {});
   const d3NodesMapRef = useRef<Map<string, any>>(new Map());
   const d3NodesRef = useRef<any[]>([]);
   const d3LinksRef = useRef<any[]>([]);
   const d3TickListenersRef = useRef<Set<() => void>>(new Set());
   const activeRendererRef = useRef(activeRenderer);
-  const appliedForceStrengthRef = useRef<number | null>(null);
   const forceStrengthRef = useRef(forceStrength);
+  const appliedForceStrengthRef = useRef(forceStrength);
+  const [physicsError, setPhysicsError] = useState<string | null>(null);
 
-  useEffect(() => {
-    forceStrengthRef.current = forceStrength;
-  }, [forceStrength]);
+  useEffect(() => { forceStrengthRef.current = forceStrength; }, [forceStrength]);
 
   const registerD3TickListener = useCallback((listener: () => void) => {
     d3TickListenersRef.current.add(listener);
-    return () => {
-      d3TickListenersRef.current.delete(listener);
-    };
+    return () => { d3TickListenersRef.current.delete(listener); };
   }, []);
 
-  // One-time sync helper
   const syncGraphology = useCallback(() => {
     if (!graph) return;
-    const map = d3NodesMapRef.current;
-    graph.updateEachNodeAttributes(
-      (id: string, attrs: any) => {
-        const simNode = map.get(id);
-        return simNode ? { ...attrs, x: simNode.x, y: simNode.y } : attrs;
-      },
-      { attributes: ['x', 'y'] }
-    );
+    graph.updateEachNodeAttributes((id, attrs) => {
+      const node = d3NodesMapRef.current.get(id);
+      if (node) { attrs.x = node.x; attrs.y = node.y; }
+      return attrs;
+    }, { attributes: ['x', 'y'] });
   }, [graph]);
 
-  // Renderer switching changes only the position consumer. The shared
-  // simulation remains alive across D3/Sigma switches.
   useEffect(() => {
     activeRendererRef.current = activeRenderer;
-    if (graph && livePhysics && activeRenderer === 'sigma') {
-      syncGraphology();
-    }
+    if (graph && workerRef.current && livePhysics && activeRenderer === 'sigma') syncGraphology();
   }, [activeRenderer, livePhysics, graph, syncGraphology]);
 
-  // Create/recreate only for topology or live-physics lifecycle changes.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPhysicsError(null);
     if (!graph || !livePhysics) return;
+    const map = d3NodesMapRef.current;
+    const nodes = graph.mapNodes((id, attrs) => {
+      const node = map.get(id) || { id, x: attrs.x ?? 0, y: attrs.y ?? 0 };
+      node.x = attrs.x ?? 0;
+      node.y = attrs.y ?? 0;
+      node.fx = node.fy = null;
+      node.size = attrs.size ?? 5;
+      map.set(id, node);
+      return node;
+    });
+    for (const id of map.keys()) if (!graph.hasNode(id)) map.delete(id);
+    const links = graph.mapEdges((_id, attrs, source, target) => ({ source, target, rawEdge: attrs.rawEdge }));
+    d3NodesRef.current = nodes;
+    d3LinksRef.current = links;
 
-    const currentForceStrength = forceStrengthRef.current;
-    const repulsionVal = typeof currentForceStrength === 'number' ? currentForceStrength : -100;
-
-    // Build shared D3 nodes array from Graphology graph
-    const d3Nodes: any[] = [];
-    const d3NodesMap = d3NodesMapRef.current;
-
-    graph.forEachNode((nodeId: string, attrs: any) => {
-      let dNode = d3NodesMap.get(nodeId);
-      if (!dNode) {
-        dNode = {
-          id: nodeId,
-          x: attrs.x ?? 0,
-          y: attrs.y ?? 0,
-          vx: 0,
-          vy: 0,
-          size: attrs.size ?? 5,
-        };
-        d3NodesMap.set(nodeId, dNode);
-      } else {
-        dNode.size = attrs.size ?? dNode.size;
+    let worker: Worker;
+    let frame: number | null = null;
+    let pending = false;
+    let running = true;
+    let wakeVersion = 0;
+    let tickWakeVersion = 0;
+    const requestTick = () => {
+      if (!pending && frame === null && running) {
+        pending = true;
+        tickWakeVersion = wakeVersion;
+        worker.postMessage({ type: 'tick' });
       }
-      d3Nodes.push(dNode);
-    });
-
-    for (const nodeId of d3NodesMap.keys()) {
-      if (!graph.hasNode(nodeId)) d3NodesMap.delete(nodeId);
+    };
+    const fail = (message: string) => {
+      running = false;
+      worker.terminate();
+      wakeRef.current = () => {};
+      if (workerRef.current === worker) workerRef.current = null;
+      if (frame !== null) cancelAnimationFrame(frame);
+      frame = null;
+      setPhysicsError(message);
+    };
+    try {
+      worker = new Worker(new URL('../services/layouts/d3.worker.ts', import.meta.url));
+      workerRef.current = worker;
+      wakeRef.current = () => { wakeVersion += 1; running = true; requestTick(); };
+      worker.onmessage = ({ data }) => {
+        pending = false;
+        if (data.error) { fail(data.error); return; }
+        const receivedWakeVersion = tickWakeVersion;
+        // Pull one physics step per painted frame; a slow renderer cannot queue stale frames.
+        frame = requestAnimationFrame(() => {
+          frame = null;
+          nodes.forEach((node, index) => {
+            node.x = node.fx ?? data.positions[index * 2];
+            node.y = node.fy ?? data.positions[index * 2 + 1];
+          });
+          d3TickListenersRef.current.forEach((draw) => draw());
+          if (activeRendererRef.current === 'sigma') syncGraphology();
+          running = data.running || wakeVersion !== receivedWakeVersion;
+          requestTick();
+        });
+      };
+      worker.onerror = (event) => fail(event.message || 'Physics worker failed');
+      appliedForceStrengthRef.current = forceStrengthRef.current;
+      worker.postMessage({ type: 'start', nodes: nodes.map(({ id, x, y, size }) => ({ id, x, y, size })), links: links.map(({ source, target }) => ({ source, target })), forceStrength: forceStrengthRef.current });
+      requestTick();
+    } catch (cause) {
+      workerRef.current?.terminate();
+      workerRef.current = null;
+      setPhysicsError(cause instanceof Error ? cause.message : String(cause));
     }
-
-    d3NodesRef.current = d3Nodes;
-
-    // Build shared D3 links array from Graphology edges
-    const d3Links: any[] = [];
-    graph.forEachEdge((edgeId: string, attrs: any, source: string, target: string) => {
-      d3Links.push({ source, target, weight: attrs.rawEdge?.weight_raw ?? 1, rawEdge: attrs.rawEdge });
-    });
-
-    d3LinksRef.current = d3Links;
-
-    const linkDist = Math.max(35, Math.min(100, 1000 / Math.sqrt(d3Nodes.length || 1)));
-    const manyBody = d3.forceManyBody().strength(repulsionVal);
-    if (d3Nodes.length > 800) manyBody.theta(0.9);
-    appliedForceStrengthRef.current = repulsionVal;
-
-    const sim = d3
-      .forceSimulation(d3Nodes)
-      .force('link', d3.forceLink(d3Links).id((d: any) => d.id).distance(linkDist))
-      .force('charge', manyBody)
-      .force('center', d3.forceCenter(0, 0))
-      .alphaDecay(0.02);
-
-    if (d3Nodes.length <= 800) {
-      sim.force('collide', d3.forceCollide().radius((d: any) => (d.size || 5) + 4).iterations(1));
-    }
-
-    sim.on('tick', () => {
-      // 1. Direct D3 SVG DOM update (D3 reads d.x/d.y directly from simulation objects)
-      d3TickListenersRef.current.forEach((fn) => fn());
-
-      // D3's timer is already animation-frame based. Sigma observes this one
-      // Graphology bulk update directly, without an extra scheduling boundary.
-      if (activeRendererRef.current === 'sigma') {
-        syncGraphology();
-      }
-    });
-
-    sim.alpha(1).restart();
-    simulationRef.current = sim;
-
     return () => {
+      running = false;
+      if (frame !== null) cancelAnimationFrame(frame);
+      worker?.terminate();
+      workerRef.current = null;
+      wakeRef.current = () => {};
       syncGraphology();
-      sim.stop();
-      if (simulationRef.current === sim) {
-        simulationRef.current = null;
-      }
     };
   }, [graph, livePhysics, topologyKey, syncGraphology]);
 
-  // Force-strength changes update and reheat the existing simulation without
-  // rebuilding its nodes, links, or other physics state.
   useEffect(() => {
-    const sim = simulationRef.current;
-    if (!sim || !graph || !livePhysics) return;
+    if (appliedForceStrengthRef.current === forceStrength) return;
+    appliedForceStrengthRef.current = forceStrength;
+    workerRef.current?.postMessage({ type: 'strength', forceStrength });
+    wakeRef.current();
+  }, [forceStrength]);
 
-    const repulsionVal = typeof forceStrength === 'number' ? forceStrength : -100;
-    if (appliedForceStrengthRef.current === repulsionVal) return;
-
-    const manyBody = d3.forceManyBody().strength(repulsionVal);
-    if (sim.nodes().length > 800) manyBody.theta(0.9);
-    sim.force('charge', manyBody);
-    appliedForceStrengthRef.current = repulsionVal;
-    sim.alpha(0.3).restart();
-  }, [forceStrength, graph, livePhysics]);
-
-  // Streamlined Drag Lifecycle: Reheat ONCE on drag start
-  const beginDrag = useCallback((id: string, x: number, y: number) => {
-    const dNode = d3NodesMapRef.current.get(id);
-    if (dNode) {
-      dNode.fx = x;
-      dNode.fy = y;
-      if (simulationRef.current) {
-        simulationRef.current.alphaTarget(0.3).restart();
-      }
-    }
-  }, []);
-
-  // Update fx/fy ONLY on drag move (zero reheating)
   const movePinnedNode = useCallback((id: string, x: number, y: number) => {
-    const dNode = d3NodesMapRef.current.get(id);
-    if (dNode) {
-      dNode.fx = x;
-      dNode.fy = y;
-      if (!simulationRef.current) {
-        dNode.x = x;
-        dNode.y = y;
-        if (graph?.hasNode(id)) {
-          graph.mergeNodeAttributes(id, { x, y });
-        }
-        d3TickListenersRef.current.forEach((fn) => fn());
-      }
-    }
+    const node = d3NodesMapRef.current.get(id);
+    if (!node) return;
+    node.fx = node.x = x;
+    node.fy = node.y = y;
+    workerRef.current?.postMessage({ type: 'pin', id, x, y });
+    wakeRef.current();
+    // The dragged node tracks the pointer immediately while the worker catches up.
+    if (graph?.hasNode(id) && (graph.getNodeAttribute(id, 'x') !== x || graph.getNodeAttribute(id, 'y') !== y)) graph.mergeNodeAttributes(id, { x, y });
+    d3TickListenersRef.current.forEach((draw) => draw());
   }, [graph]);
 
-  // Release pinning on drag end
   const endDrag = useCallback((id: string) => {
-    const dNode = d3NodesMapRef.current.get(id);
-    if (dNode) {
-      dNode.fx = null;
-      dNode.fy = null;
-      if (simulationRef.current) {
-        simulationRef.current.alphaTarget(0);
-      }
-    }
+    const node = d3NodesMapRef.current.get(id);
+    if (node) { node.fx = null; node.fy = null; }
+    workerRef.current?.postMessage({ type: 'release', id });
+    wakeRef.current();
   }, []);
 
-  const reheat = useCallback(() => {
-    if (simulationRef.current) {
-      simulationRef.current.alphaTarget(0.3).restart();
-    }
-  }, []);
-
-  return {
-    registerD3TickListener,
-    beginDrag,
-    movePinnedNode,
-    endDrag,
-    reheat,
-    d3NodesRef,
-    d3LinksRef,
-    d3NodesMapRef,
-    simulationRef,
-  };
+  return { registerD3TickListener, beginDrag: movePinnedNode, movePinnedNode, endDrag, d3NodesRef, d3LinksRef, d3NodesMapRef, physicsError };
 }

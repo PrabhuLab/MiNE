@@ -1,5 +1,5 @@
 import * as d3 from 'd3';
-import { RawNode, RawEdge } from '@/store/useStore';
+import type { RawNode, RawEdge } from '@/store/useStore';
 
 /**
  * Pre-computes 2D node positions using D3 force simulation layout offline.
