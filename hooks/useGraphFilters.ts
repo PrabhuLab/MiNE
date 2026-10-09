@@ -7,7 +7,18 @@ export function useGraphFilters() {
   const { rawNodes, rawEdges, filters, setFilter } = useStore();
   
   const [appliedFilters, setAppliedFilters] = useState(filters);
-  const activeFilters = graphSettings(filters, appliedFilters);
+  const liveFilters = graphSettings(filters, appliedFilters);
+  const [frame, setFrame] = useState({ rawNodes, rawEdges, filters: liveFilters });
+  const frameFilters = frame.rawNodes === rawNodes && frame.rawEdges === rawEdges ? frame.filters : liveFilters;
+  const activeFilters = filters.liveUpdate ? { ...liveFilters,
+    nodeFilter: frameFilters.nodeFilter, edgeFilter: frameFilters.edgeFilter,
+    communityFilter: frameFilters.communityFilter, removedNodes: frameFilters.removedNodes,
+  } : appliedFilters;
+
+  useEffect(() => {
+    const request = requestAnimationFrame(() => setFrame({ rawNodes, rawEdges, filters: liveFilters }));
+    return () => cancelAnimationFrame(request);
+  }, [liveFilters, rawNodes, rawEdges]);
   
   useEffect(() => {
     if (filters.liveUpdate) {
@@ -18,9 +29,19 @@ export function useGraphFilters() {
 
   const removedNodesStr = activeFilters.removedNodes || '';
   const edgeFilter = activeFilters.edgeFilter;
-  const network = useMemo(() => computeActiveNetwork(rawNodes, rawEdges, {
+  const candidate = useMemo(() => computeActiveNetwork(rawNodes, rawEdges, {
     removedNodes: removedNodesStr, edgeFilter,
   }), [rawNodes, rawEdges, removedNodesStr, edgeFilter]);
+  const [retained, setRetained] = useState({ candidate, network: candidate });
+  let network = retained.network;
+  if (retained.candidate !== candidate) {
+    // Preserve analysis inputs when a new cutoff retains exactly the same records.
+    network = candidate.validNodes.length === network.validNodes.length
+      && candidate.validEdges.length === network.validEdges.length
+      && candidate.validNodes.every((node, index) => node === network.validNodes[index])
+      && candidate.validEdges.every((edge, index) => edge === network.validEdges[index]) ? network : candidate;
+    setRetained({ candidate, network });
+  }
 
   // Sync missing variables fallback logic (the one with useEffect)
   const hasType = useMemo(() => rawNodes.some(n => n.type !== undefined), [rawNodes]);

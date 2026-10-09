@@ -14,7 +14,7 @@ import { graphSettings, liveNumericValue } from '../services/graphStyles/liveUpd
 import { viewportRasterDimensions } from '../lib/exportUtils.ts';
 import { staleCalculationIds } from '../services/metrics/validity.ts';
 import { degreeByNode, logarithmicNodeSize } from '../services/graphStyles/size.ts';
-import { filterDisconnectedNodes, filterNetworkByCommunity, computeActiveNetwork, computeCommunityMetrics, computeTableDataEdges, computeTableDataNodes, filterNetworkByEdgeMetric, filterNetworkByNodeMetric } from '../lib/workspaceUtils.ts';
+import { numericFilterValue, filterDisconnectedNodes, filterNetworkByCommunity, computeActiveNetwork, computeCommunityMetrics, computeTableDataEdges, computeTableDataNodes, filterNetworkByEdgeMetric, filterNetworkByNodeMetric } from '../lib/workspaceUtils.ts';
 import { detectCustomAttributeType } from '../services/graphIO/customAttributes.ts';
 import { getCommunityDisplayMap } from '../lib/communityUtils.ts';
 
@@ -352,4 +352,47 @@ test('Sigma labels remain gated by explicit labels, selection and search', () =>
   assert.equal(shouldRenderSigmaLabels(false, 'a', null, ''), true);
   assert.equal(shouldRenderSigmaLabels(false, null, { id: 'a' }, ''), true);
   assert.equal(shouldRenderSigmaLabels(false, null, null, 'Alpha'), true);
+});
+
+test('sparse node attributes retain connection context in bipartite and unipartite networks', () => {
+  for (const partitions of [['A', 'B'], [undefined, undefined]]) {
+    const nodes = [{ id: 'a', partition: partitions[0], score: 5 }, { id: 'b', partition: partitions[1] }, { id: 'c', score: 2 }];
+    const edges = [{ source: 'a', target: 'b' }, { source: 'b', target: 'c' }];
+    const filtered = filterNetworkByNodeMetric(nodes, edges, { attribute: 'score', min: 4, max: 6 }, []);
+    const connected = filterDisconnectedNodes(filtered.validNodes, filtered.validEdges);
+    assert.deepEqual(connected.validNodes.map(node => node.id), ['a', 'b']);
+    assert.deepEqual(connected.validEdges, [edges[0]]);
+    assert.deepEqual(filterNetworkByNodeMetric(nodes, edges, { attribute: 'absent', min: 4, max: 6 }, []), { validNodes: nodes, validEdges: edges });
+  }
+});
+
+test('missing node values are context rather than zero and genuine zero is filtered', () => {
+  const nodes = [undefined, null, '', ' ', 0, 5].map((score, id) => ({ id: String(id), score }));
+  const result = filterNetworkByNodeMetric(nodes, [], { attribute: 'score', min: 4, max: 6 }, []);
+  assert.deepEqual(result.validNodes.map(node => node.id), ['0', '1', '2', '3', '5']);
+});
+
+test('sparse and unavailable edge attributes preserve context without retaining out-of-range values', () => {
+  const nodes = ['a', 'b', 'c', 'd'].map(id => ({ id }));
+  const edges = [
+    { source: 'a', target: 'b', score: 5 },
+    { source: 'b', target: 'c', score: null },
+    { source: 'c', target: 'd', score: 0 },
+  ];
+  const attribute = computeActiveNetwork(nodes, edges, { edgeFilter: { attribute: 'score', min: 4, max: 6 } });
+  assert.deepEqual(attribute.validEdges, edges.slice(0, 2));
+  assert.deepEqual(attribute.validNodes.map(node => node.id), ['a', 'b', 'c']);
+  assert.deepEqual(computeActiveNetwork(nodes, edges, { edgeFilter: { attribute: 'absent', min: 4, max: 6 } }).validEdges, edges);
+  const metric = filterNetworkByEdgeMetric(nodes, edges, { attribute: 'score', min: 4, max: 6, source: 'metric' }, [
+    { key: 'a->b', score: 5 }, { key: 'b->c', score: '' }, { key: 'c->d', score: 0 },
+  ]);
+  assert.deepEqual(metric.validEdges, edges.slice(0, 2));
+});
+
+
+test('numeric filter ranges ignore missing values but keep numeric zero and strings', () => {
+  assert.ok([undefined, null, '', ' ', 'missing'].every(value => Number.isNaN(numericFilterValue(value))));
+  assert.equal(numericFilterValue('0'), 0);
+  assert.equal(numericFilterValue(0), 0);
+  assert.equal(numericFilterValue(' 5.5 '), 5.5);
 });

@@ -45,7 +45,7 @@ export function useSharedGraph({
   const revisions = useMemo(() => computeGraphRevisions(nodes, edges, directed, true, weightAttribute), [nodes, edges, directed, weightAttribute]);
   const topologyKey = revisions.graphRevision;
   const cloudRouted = shouldUseCloud(nodes.length, edges.length, computeEngine);
-  const [readyTopologyKey, setReadyTopologyKey] = useState<string | null>(null);
+  const [readyGraph, setReadyGraph] = useState<Graph | null>(null);
   const [layoutRevision, setLayoutRevision] = useState(0);
   const [staticLayoutRevision, setStaticLayoutRevision] = useState(0);
   const [positionSource, setPositionSource] = useState<PositionSource>('local-static');
@@ -56,13 +56,14 @@ export function useSharedGraph({
   const cacheGraphRevisionRef = useRef(graphRevision);
   const topologyRevisionRef = useRef(topologyKey);
   const committedTopologyRef = useRef<string | null>(null);
-  const isReady = readyTopologyKey === topologyKey && positionSource !== 'pending-cloud';
+  const isReady = readyGraph === graph && positionSource !== 'pending-cloud';
 
   useEffect(() => {
     topologyRevisionRef.current = topologyKey;
     if (cacheGraphRevisionRef.current !== graphRevision) {
       positionCacheRef.current.clear();
       cacheGraphRevisionRef.current = graphRevision;
+      committedTopologyRef.current = null;
     }
   }, [graphRevision, topologyKey]);
 
@@ -72,7 +73,7 @@ export function useSharedGraph({
     });
     setPositionSource(source);
     committedTopologyRef.current = topologyRevisionRef.current;
-    setReadyTopologyKey(topologyRevisionRef.current);
+    setReadyGraph(graph);
     setLayoutRevision((revision) => revision + 1);
     if (source === 'local-static' || source === 'cloud-static' || source === 'imported') setStaticLayoutRevision((revision) => revision + 1);
   }, [graph]);
@@ -159,7 +160,7 @@ export function useSharedGraph({
 
     setPositioningError(null);
     if (hasUnpositionedNode) {
-      setReadyTopologyKey(null);
+      setReadyGraph(null);
       // Rendering is independent from computation routing. Every unpositioned
       // graph starts from MiNE's familiar local D3-force layout; Cloud layouts
       // replace it only after the user explicitly applies one.
@@ -168,8 +169,8 @@ export function useSharedGraph({
     } else {
       setPositionSource((current) => current === 'cloud-static' ? current : 'imported');
       const timeout = setTimeout(() => {
-        setReadyTopologyKey(topologyKey);
-        if (committedTopologyRef.current !== topologyKey) {
+        setReadyGraph(graph);
+        if (committedTopologyRef.current === null) {
           committedTopologyRef.current = topologyKey;
           setStaticLayoutRevision((revision) => revision + 1);
         }
@@ -179,7 +180,7 @@ export function useSharedGraph({
     // Color changes use the batched effect below. Selection-dependent arrowheads
     // are handled by renderer reducers, so they must not rebuild every edge.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graph, nodes, edges, directed, bipartite, getNodeSize, getEdgeSize, getEdgeOpacity, nodeOpacity, applyD3StaticLayout, topologyKey]);
+  }, [graph, nodes, edges, directed, bipartite, getNodeSize, getEdgeSize, getEdgeOpacity, nodeOpacity, applyD3StaticLayout, topologyKey, graphRevision]);
 
   useEffect(() => {
     updateGraphColors(graph, Boolean(isDarkMode), getNodeColor, getEdgeColor);
@@ -197,7 +198,7 @@ export function useSharedGraph({
   }, [graph, isReady, livePhysics, forceStrength, applyD3StaticLayout]);
 
   const runRefreshLayout = useCallback(() => {
-    setReadyTopologyKey(null);
+    setReadyGraph(null);
     applyD3StaticLayout(graph);
   }, [applyD3StaticLayout, graph]);
 
