@@ -10,10 +10,9 @@ export const SyncInput = ({ value, onChange, step, className, live = false }: an
   }, [value]);
 
   const commit = () => {
-    const num = Number(localVal);
-    if (!isNaN(num) && (live || num !== value)) {
-      onChange(num);
-    }
+    const num = liveNumericValue(String(localVal ?? ''), live);
+    if (num === undefined) setLocalVal(value);
+    else if (num !== value) onChange(num);
   };
 
   return (
@@ -40,7 +39,7 @@ export const SyncInput = ({ value, onChange, step, className, live = false }: an
   );
 };
 
-export const SyncTextInput = ({ value, onChange, className, placeholder, list, options, live = false }: any) => {
+export const SyncTextInput = ({ value, onChange, className, placeholder, list, options, ariaLabel, live = false }: any) => {
   const [localVal, setLocalVal] = useState(value);
   const editingRef = useRef(false);
 
@@ -63,6 +62,7 @@ export const SyncTextInput = ({ value, onChange, className, placeholder, list, o
     <>
       <input 
         type="text"
+        aria-label={ariaLabel}
         className={`text-inherit ${className}`}
         value={localVal ?? ''}
         onChange={e => {

@@ -151,11 +151,12 @@ export function getCommunityDisplayMap(
   customNodeAttribute?: string,
 ): CommunityDisplayResult {
   const rawSet = new Set<string>();
+  const metricsById = new Map((networkMetrics || []).map((metric) => [String(metric.id), metric]));
 
   nodes.forEach((n) => {
     let rawVal: string | undefined;
     if (nodeColorBase === 'louvain' || nodeColorBase === 'infomap' || nodeColorBase === 'fast_greedy') {
-      const net = (networkMetrics || []).find((m) => m.id === n.id);
+      const net = metricsById.get(String(n.id));
       if (net && net[nodeColorBase] !== undefined && net[nodeColorBase] !== null && net[nodeColorBase] !== '') rawVal = String(net[nodeColorBase]);
     } else if (nodeColorBase === 'custom' && customNodeAttribute) {
       rawVal = n[customNodeAttribute] !== undefined ? String(n[customNodeAttribute]) : undefined;
@@ -190,7 +191,7 @@ export function getCommunityDisplayMap(
   nodes.forEach((n) => {
     let rawVal: string | undefined;
     if (nodeColorBase === 'louvain' || nodeColorBase === 'infomap' || nodeColorBase === 'fast_greedy') {
-      const net = (networkMetrics || []).find((m) => m.id === n.id);
+      const net = metricsById.get(String(n.id));
       if (net && net[nodeColorBase] !== undefined && net[nodeColorBase] !== null && net[nodeColorBase] !== '') rawVal = String(net[nodeColorBase]);
     } else if (nodeColorBase === 'custom' && customNodeAttribute) {
       rawVal = n[customNodeAttribute] !== undefined ? String(n[customNodeAttribute]) : undefined;

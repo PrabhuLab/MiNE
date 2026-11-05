@@ -67,7 +67,6 @@ export default function SigmaGraph({
   const containerRef = useRef<HTMLDivElement>(null);
   const sigmaRef = useRef<Sigma | null>(null);
   const styledSigmaRef = useRef<Sigma | null>(null);
-  const lastIndexationSignatureRef = useRef('');
   const hasInitialFitRef = useRef(false);
   const sigmaConstructionStartedRef = useRef(0);
 
@@ -86,8 +85,6 @@ export default function SigmaGraph({
     setSelectedCommunityId,
     isolatedCommunityId,
     setIsolatedCommunityId,
-    hoveredCommunityId,
-    setHoveredCommunityId,
     showArrowheads,
     setShowArrowheads,
     showNodeLabels,
@@ -132,11 +129,6 @@ export default function SigmaGraph({
     });
     return matches;
   }, [graph, searchQuery]);
-
-  // Precompute secondary status for all nodes
-  const isSecondaryMap = useMemo(() => {
-    return new Map(nodes.map((node) => [String(node.id), isSecondaryNode(node, bipartite)]));
-  }, [nodes, bipartite]);
 
   // Dynamic Global Label Gating
   const shouldRenderLabels = useMemo(() => {
@@ -255,7 +247,6 @@ export default function SigmaGraph({
     isolatedLegendItem,
     selectedCommunityId,
     isolatedCommunityId,
-    hoveredCommunityId,
     displayMap,
     searchQuery,
     clickedNodeRef,
@@ -264,7 +255,6 @@ export default function SigmaGraph({
     showNodeLabels,
     selectedNeighborSet,
     searchMatchSet,
-    isSecondaryMap,
     focusedEdgeNodeSet,
     legendNodeMembership,
     legendEdgeMembership,
@@ -282,7 +272,6 @@ export default function SigmaGraph({
       isolatedLegendItem,
       selectedCommunityId,
       isolatedCommunityId,
-      hoveredCommunityId,
       displayMap,
       searchQuery,
       clickedNodeRef,
@@ -291,7 +280,6 @@ export default function SigmaGraph({
       showNodeLabels,
       selectedNeighborSet,
       searchMatchSet,
-      isSecondaryMap,
       focusedEdgeNodeSet,
       legendNodeMembership,
       legendEdgeMembership,
@@ -307,7 +295,6 @@ export default function SigmaGraph({
     isolatedLegendItem,
     selectedCommunityId,
     isolatedCommunityId,
-    hoveredCommunityId,
     showArrowheads,
     displayMap,
     searchQuery,
@@ -315,7 +302,6 @@ export default function SigmaGraph({
     showNodeLabels,
     selectedNeighborSet,
     searchMatchSet,
-    isSecondaryMap,
     focusedEdgeNodeSet,
     legendNodeMembership,
     legendEdgeMembership,
@@ -367,7 +353,6 @@ export default function SigmaGraph({
     setIsolatedCommunityId(null);
     setSelectedCommunityId(null);
     setIsolatedLegendItem(null);
-    setHoveredCommunityId(null);
     setClickedNode(null);
     setClickedEdge(null);
     onClearSelection?.();
@@ -379,7 +364,6 @@ export default function SigmaGraph({
     setIsolatedCommunityId,
     setSelectedCommunityId,
     setIsolatedLegendItem,
-    setHoveredCommunityId,
     onClearSelection,
     getVisibleNodeIds,
     hiddenItems,
@@ -531,16 +515,6 @@ export default function SigmaGraph({
     // extent on this effect's first run for a new renderer.
     if (styledSigmaRef.current !== sigma) {
       styledSigmaRef.current = sigma;
-      lastIndexationSignatureRef.current = JSON.stringify({
-        clickedNode: clickedNode?.id ?? null,
-        clickedEdge: clickedEdge ? `${clickedEdge.source}->${clickedEdge.target}` : null,
-        selectedElement,
-        focus: focusRequest?.requestId ?? null,
-        isolatedLegendItem,
-        selectedCommunityId,
-        isolatedCommunityId,
-        showArrowheads,
-      });
       return;
     }
 
@@ -552,30 +526,13 @@ export default function SigmaGraph({
       // setSetting performs the one required scheduled reprocessing itself.
       sigma.setSetting('renderLabels', shouldRenderLabels);
     } else {
-      const indexationSignature = JSON.stringify({
-        clickedNode: clickedNode?.id ?? null,
-        clickedEdge: clickedEdge ? `${clickedEdge.source}->${clickedEdge.target}` : null,
-        selectedElement,
-        focus: focusRequest?.requestId ?? null,
-        isolatedLegendItem,
-        selectedCommunityId,
-        isolatedCommunityId,
-        showArrowheads,
-      });
-      const needsIndexation = lastIndexationSignatureRef.current !== indexationSignature;
-      lastIndexationSignatureRef.current = indexationSignature;
-      // Re-run reducers and rebuild the label grid without clearing the frozen
-      // extent. This is one scheduled request for each logical UI change.
+      // Hidden edges have no program slot, so repainting every edge with
+      // skipIndexation can throw. Let Sigma rebuild indices for style changes.
       sigma.scheduleRefresh({
         partialGraph: {
           nodes: graph.nodes(),
           edges: graph.edges(),
         },
-        // Arrowheads and straight/curved paths select different v4 primitive
-        // programs. They must be re-indexed rather than repainted in-place.
-        // Hidden nodes remain valid transparent slots in the node reducer, so
-        // element isolation does not reintroduce the old zero-index ghost.
-        skipIndexation: !needsIndexation,
       });
     }
   }, [
@@ -588,7 +545,6 @@ export default function SigmaGraph({
     isolatedLegendItem,
     selectedCommunityId,
     isolatedCommunityId,
-    hoveredCommunityId,
     showArrowheads,
     showNodeLabels,
     displayMap,
@@ -607,13 +563,8 @@ export default function SigmaGraph({
   }, [setHiddenItems]);
 
   const handleCommunitySingleClick = useCallback((id: string) => {
-    setHiddenItems((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, [setHiddenItems]);
+    setSelectedCommunityId(selectedCommunityId === id ? null : id);
+  }, [selectedCommunityId, setSelectedCommunityId]);
 
   const handleElementSingleClick = useCallback((id: string) => {
     setHiddenItems((prev) => {
@@ -719,7 +670,6 @@ export default function SigmaGraph({
         onElementDoubleClick={handleElementDoubleClick}
         onCommunitySingleClick={handleCommunitySingleClick}
         onCommunityDoubleClick={(id) => id.startsWith('community:') ? handleCommunityDoubleClick(id) : handleElementDoubleClick(id)}
-        onCommunityHover={setHoveredCommunityId}
         showNodeLabels={showNodeLabels}
         setShowNodeLabels={setShowNodeLabels}
         directed={directed}

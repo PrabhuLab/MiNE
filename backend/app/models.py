@@ -19,7 +19,7 @@ class LayoutSpec(ApiModel):
 
 
 class CommunitySpec(ApiModel):
-    algorithm: Literal["louvain", "infomap", "labelPropagation", "walktrap", "fastGreedy", "sbm", "lbm"]
+    algorithm: Literal["louvain", "biLouvain", "infomap", "labelPropagation", "walktrap", "fastGreedy", "sbm", "lbm"]
     weight_channel: Literal["unweighted", "weight_raw", "weight_secondary"] = "unweighted"
     resolution: float = Field(default=1.0, gt=0)
     iterations: int = Field(default=2, ge=-1, le=1000)
@@ -27,6 +27,9 @@ class CommunitySpec(ApiModel):
     steps: int = Field(default=4, ge=1, le=1000)
     seed: int = 42
     clusters: int = Field(default=5, ge=2, le=100)
+    column_clusters: int | None = Field(default=None, ge=2, le=100)
+    block_selection: Literal["manual", "icl"] = "manual"
+    max_clusters: int = Field(default=15, ge=2, le=100)
 
 
 class AnalyzeRequest(ApiModel):
@@ -71,6 +74,7 @@ class CommunityResult(ApiModel):
     membership: list[int]
     quality: float | None = None
     provenance: dict[str, Any] = Field(default_factory=dict)
+    diagnostics: dict[str, Any] | None = None
 
 
 class AnalyzeResponse(ApiModel):

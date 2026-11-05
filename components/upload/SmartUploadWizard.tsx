@@ -5,6 +5,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useStore } from '@/store/useStore';
+import { restoreBlockModelRuns } from '@/services/communities/diagnostics';
 import { resetCommunityColorCache } from '@/lib/communityUtils';
 import { TopologyType, WizardFilesState, ColumnMappingState, ParsedDataState } from './types';
 import { parseCSVFile } from './utils/parseHelpers';
@@ -62,7 +63,8 @@ export default function SmartUploadWizard() {
     percentagesFile: null,
     singleMatrixFile: null,
     edgesFile: null,
-    nodesFile: null,
+    nodeFiles: [],
+    additionalEdgeFiles: [],
     adjListFile: null,
     jsonFile: null,
     hasAdditionalAttributes: false,
@@ -167,21 +169,6 @@ export default function SmartUploadWizard() {
           }
           return next;
         });
-        if (filesState.nodesFile) {
-          const nodeData = await parseCSVFile(filesState.nodesFile);
-          dataParts.push({ nodes: nodeData });
-          setMapping((prev) => {
-            const next = { ...prev };
-            if (nodeData[0]) {
-              const headers = nodeData[0];
-              next.nodeIdCol = detectNodeIdColumn(headers);
-              next.nodeLabelCol = detectNodeLabelColumn(headers);
-              next.nodePartitionCol = topology === 'Bipartite' ? headers.find((header: string) => /^(partition|bipartite|set)$/i.test(header)) || '' : '';
-              next.nodeCommunityCol = headers.find((header: string) => /^(community|group|cluster)$/i.test(header)) || '';
-            }
-            return next;
-          });
-        }
       } else if (isFormatAdjList) {
         const adjList = await parseCSVFile(filesState.adjListFile!);
         dataParts.push({ adjList });
@@ -190,35 +177,33 @@ export default function SmartUploadWizard() {
         }
       }
 
-      if (filesState.hasAdditionalAttributes) {
-        if (!isFormatEdgeList && filesState.edgesFile) {
-          const edgeData = await parseCSVFile(filesState.edgesFile);
-          dataParts.push({ additionalEdges: edgeData });
-          if (edgeData[0]) {
-            const headers = edgeData[0];
-            setMapping((prev) => ({
-              ...prev,
+      if (isFormatEdgeList || filesState.hasAdditionalAttributes) {
+        const uploads = [
+          ...filesState.nodeFiles.map((file) => ({ file, kind: 'nodes' as const })),
+          ...filesState.additionalEdgeFiles.map((file) => ({ file, kind: 'edges' as const })),
+        ];
+        const metadataTables = await Promise.all(uploads.map(async ({ file, kind }) => {
+          const data = await parseCSVFile(file);
+          const headers = data[0] || [];
+          if (!headers.length) throw new Error(`${file.name} is empty.`);
+          return {
+            name: file.name,
+            kind,
+            data,
+            mapping: {
+              ...mapping,
               sourceCol: headers.find((header: string) => /^(source|from|src|origin)$/i.test(header)) || headers[0] || '',
               targetCol: headers.find((header: string) => /^(target|to|dst|destination)$/i.test(header)) || headers[1] || '',
               weightRawCol: headers.find((header: string) => /^(weight_raw|raw_weight|absolute|count|weight)$/i.test(header)) || '',
               weightSecCol: headers.find((header: string) => /^(weight_secondary|secondary_weight|conditional|percentage|percent|pct|log1p)$/i.test(header)) || '',
-            }));
-          }
-        }
-        if (filesState.nodesFile) {
-          const nodeData = await parseCSVFile(filesState.nodesFile);
-          dataParts.push({ nodes: nodeData });
-          if (nodeData[0]) {
-            const headers = nodeData[0];
-            setMapping((prev) => ({
-              ...prev,
               nodeIdCol: detectNodeIdColumn(headers),
               nodeLabelCol: detectNodeLabelColumn(headers),
               nodePartitionCol: topology === 'Bipartite' ? headers.find((header: string) => /^(partition|bipartite|set)$/i.test(header)) || '' : '',
               nodeCommunityCol: headers.find((header: string) => /(?:^|_)community$|^(group|cluster)$/i.test(header)) || '',
-            }));
-          }
-        }
+            },
+          };
+        }));
+        dataParts.push({ metadataTables });
       }
 
       setParsedData(Object.assign({}, ...dataParts));
@@ -237,9 +222,9 @@ export default function SmartUploadWizard() {
 
   const handleFinalize = () => {
     setIsProcessing(true);
+    const canonical = graphToRaw(graphFromRaw(previewGraph.nodes, previewGraph.edges, isDirected, topology === 'Bipartite'));
     resetCommunityColorCache();
     clearStore();
-    const canonical = graphToRaw(graphFromRaw(previewGraph.nodes, previewGraph.edges, isDirected, topology === 'Bipartite'));
     setRawData(canonical.nodes, canonical.edges, isDirected, topology === 'Bipartite');
     const inferredCustomAttributes = [...inferCustomNodeAttributes(canonical.nodes), ...inferCustomEdgeAttributes(canonical.edges)];
     useStore.setState((state) => ({
@@ -260,52 +245,60 @@ export default function SmartUploadWizard() {
   };
 
   const applyParsedNetwork = (parsed: ParsedNetwork, restoreVisualization = Boolean(parsed.workspace)) => {
-    const { nodes, edges } = graphToRaw(parsed.graph);
-    const workspace = parsed.workspace;
-    const inferredCustomAttributes = [...inferCustomNodeAttributes(nodes), ...inferCustomEdgeAttributes(edges)];
-    resetCommunityColorCache();
-    clearStore();
-    const defaultFilters = useStore.getState().filters;
-    const nextFilters = workspace?.filters ? {
-      ...defaultFilters,
-      ...workspace.filters,
-      edgeFilter: migrateWorkspaceFilters(workspace.filters, edges),
-      weightFilters: undefined,
-      communityAttribute: '',
-      nodeColorBase: workspace.filters.nodeColorBase === 'community' ? 'uniform' : workspace.filters.nodeColorBase,
-    } : {
-      ...defaultFilters,
-      communityAttribute: '',
-      nodeColorBase: 'uniform',
-      edgeColorBase: 'uniform',
-      edgeColorNodeMetric: '',
-      edgeColorNodeTarget: 'source' as const,
-    };
-    useStore.setState({
-      rawNodes: nodes,
-      rawEdges: edges,
-      directed: workspace?.graphMode.directed ?? parsed.directed,
-      bipartite: workspace?.graphMode.bipartite ?? parsed.bipartite,
-      importedMetrics: parsed.metrics,
-      restoredVisualization: restoreVisualization,
-      projectName: workspace?.projectName || parsed.projectName || networkFiles[0]?.name.replace(/\.[^.]+$/, '') || 'NEW_PROJECT_NAME',
-      computeEngine: migrateComputationPreference(workspace, nodes.length, edges.length),
-      rendererEngine: workspace ? migrateRendererPreference(workspace) : useStore.getState().rendererEngine,
-      filters: nextFilters,
-      isDarkMode: workspace?.appearance.isDarkMode ?? useStore.getState().isDarkMode,
-      showNodeLabels: workspace?.appearance.showNodeLabels ?? false,
-      showArrowheads: workspace?.appearance.showArrowheads ?? false,
-      communityMap: workspace?.appearance.communityMap || {},
-      legendColorOverrides: workspace?.appearance.legendColorOverrides || {},
-      customAttributes: mergeCustomAttributeMetadata(
-        inferredCustomAttributes,
-        (workspace?.appearance.customAttributes || parsed.metrics?.metadata?.attributeDescriptors)?.map((attribute: any) => ({ ...attribute, drivesCommunity: false })),
-      ),
-      hiddenLegendItems: workspace?.visibility.hiddenLegendItems || [],
-      isolatedLegendItem: workspace?.visibility.isolatedLegendItem || null,
-      isolatedCommunityId: workspace?.visibility.isolatedCommunityId || null,
-    });
-    router.push('/workspace');
+    const previous = useStore.getState();
+    try {
+      const communityRuns = restoreBlockModelRuns(parsed.metrics?.metadata?.communityRuns);
+      const { nodes, edges } = graphToRaw(parsed.graph);
+      const workspace = parsed.workspace;
+      const inferredCustomAttributes = [...inferCustomNodeAttributes(nodes), ...inferCustomEdgeAttributes(edges)];
+      resetCommunityColorCache();
+      clearStore();
+      const defaultFilters = useStore.getState().filters;
+      const nextFilters = workspace?.filters ? {
+        ...defaultFilters,
+        ...workspace.filters,
+        edgeFilter: migrateWorkspaceFilters(workspace.filters, edges),
+        weightFilters: undefined,
+        communityAttribute: '',
+        nodeColorBase: workspace.filters.nodeColorBase === 'community' ? 'uniform' : workspace.filters.nodeColorBase,
+      } : {
+        ...defaultFilters,
+        communityAttribute: '',
+        nodeColorBase: 'uniform',
+        edgeColorBase: 'uniform',
+        edgeColorNodeMetric: '',
+        edgeColorNodeTarget: 'source' as const,
+      };
+      useStore.setState({
+        rawNodes: nodes,
+        rawEdges: edges,
+        directed: workspace?.graphMode.directed ?? parsed.directed,
+        bipartite: workspace?.graphMode.bipartite ?? parsed.bipartite,
+        importedMetrics: parsed.metrics,
+        communityRuns,
+        restoredVisualization: restoreVisualization,
+        projectName: workspace?.projectName || parsed.projectName || networkFiles[0]?.name.replace(/\.[^.]+$/, '') || 'NEW_PROJECT_NAME',
+        computeEngine: migrateComputationPreference(workspace, nodes.length, edges.length),
+        rendererEngine: workspace ? migrateRendererPreference(workspace) : useStore.getState().rendererEngine,
+        filters: nextFilters,
+        isDarkMode: workspace?.appearance.isDarkMode ?? useStore.getState().isDarkMode,
+        showNodeLabels: workspace?.appearance.showNodeLabels ?? false,
+        showArrowheads: workspace?.appearance.showArrowheads ?? false,
+        communityMap: workspace?.appearance.communityMap || {},
+        legendColorOverrides: workspace?.appearance.legendColorOverrides || {},
+        customAttributes: mergeCustomAttributeMetadata(
+          inferredCustomAttributes,
+          (workspace?.appearance.customAttributes || parsed.metrics?.metadata?.attributeDescriptors)?.map((attribute: any) => ({ ...attribute, drivesCommunity: false })),
+        ),
+        hiddenLegendItems: workspace?.visibility.hiddenLegendItems || [],
+        isolatedLegendItem: workspace?.visibility.isolatedLegendItem || null,
+        isolatedCommunityId: workspace?.visibility.isolatedCommunityId || null,
+      });
+      router.push('/workspace');
+    } catch (importError) {
+      useStore.setState(previous);
+      throw importError;
+    }
   };
 
   const handleUnifiedImport = async () => {
@@ -464,6 +457,7 @@ export default function SmartUploadWizard() {
             isDarkMode={isDarkMode}
             topology={topology}
             setTopology={setTopology}
+            onBack={() => { setTopology(null); setError(null); }}
             onNext={() => setStep(2)}
           />
         )}
@@ -511,6 +505,7 @@ export default function SmartUploadWizard() {
             isDarkMode={isDarkMode}
             format={format}
             parsedData={parsedData}
+            setParsedData={setParsedData}
             mapping={mapping}
             setMapping={setMapping}
             previewGraph={previewGraph}

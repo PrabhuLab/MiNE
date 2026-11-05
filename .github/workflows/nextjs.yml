@@ -29,7 +29,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      NEXT_PUBLIC_MINE_IGRAPH_API_URL: ${{ vars.MINE_IGRAPH_API_URL }}
+      NEXT_PUBLIC_MINE_IGRAPH_API_URL: ${{ vars.MINE_IGRAPH_API_URL || 'https://mine-carnegie-backend.cloud.run' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

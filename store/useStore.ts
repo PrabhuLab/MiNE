@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import type { ComputeEnginePreference } from '@/services/cloud/config';
 import { mergeComputeEnginePreference, persistedComputeEnginePreference } from '@/services/cloud/preference';
 import type { RendererPreference } from '@/services/engines/policy';
+import { restoreBlockModelRuns, type BlockModelRun } from '@/services/communities/diagnostics';
 
 export interface RawNode {
   id: string;
@@ -77,6 +78,7 @@ export interface NodeFilter {
 export interface WorkspaceFilters {
   edgeFilter: EdgeFilter | null;
   nodeFilter: NodeFilter | null;
+  communityFilter?: { attribute: string; excludedValues: string[] } | null;
   /** @deprecated Read only during legacy workspace migration. */
   weightFilters?: WeightFilter[];
   searchEdges: boolean;
@@ -121,6 +123,8 @@ interface AppState {
   setCustomAttributes: (attributes: CustomAttributeMetadata[]) => void;
   importedMetrics: ImportedMetricsBundle | null;
   setImportedMetrics: (metrics: ImportedMetricsBundle | null) => void;
+  communityRuns: BlockModelRun[];
+  setCommunityRuns: (runs: BlockModelRun[]) => void;
   restoredVisualization: boolean;
   setRestoredVisualization: (restored: boolean) => void;
 
@@ -138,8 +142,6 @@ interface AppState {
   setSelectedCommunityId: (val: string | null) => void;
   isolatedCommunityId: string | null;
   setIsolatedCommunityId: (val: string | null) => void;
-  hoveredCommunityId: string | null;
-  setHoveredCommunityId: (val: string | null) => void;
   
   hiddenLegendItems: string[];
   setHiddenLegendItems: (val: string[]) => void;
@@ -184,7 +186,9 @@ export const useStore = create<AppState>()(persist<AppState, [], [], { computeEn
   customAttributes: [],
   setCustomAttributes: (customAttributes) => set({ customAttributes }),
   importedMetrics: null,
-  setImportedMetrics: (importedMetrics) => set({ importedMetrics }),
+  setImportedMetrics: (importedMetrics) => set({ importedMetrics, communityRuns: restoreBlockModelRuns(importedMetrics?.metadata?.communityRuns) }),
+  communityRuns: [],
+  setCommunityRuns: (communityRuns) => set({ communityRuns }),
   restoredVisualization: false,
   setRestoredVisualization: (restoredVisualization) => set({ restoredVisualization }),
 
@@ -194,8 +198,6 @@ export const useStore = create<AppState>()(persist<AppState, [], [], { computeEn
   setSelectedCommunityId: (val) => set({ selectedCommunityId: val }),
   isolatedCommunityId: null,
   setIsolatedCommunityId: (val) => set({ isolatedCommunityId: val }),
-  hoveredCommunityId: null,
-  setHoveredCommunityId: (val) => set({ hoveredCommunityId: val }),
 
   hiddenLegendItems: [],
   setHiddenLegendItems: (val) => set({ hiddenLegendItems: val }),
@@ -213,6 +215,7 @@ export const useStore = create<AppState>()(persist<AppState, [], [], { computeEn
   filters: {
     edgeFilter: null,
     nodeFilter: null,
+    communityFilter: null,
     searchEdges: false,
     removedNodes: "",
     resolution: 1.0,
@@ -260,13 +263,13 @@ export const useStore = create<AppState>()(persist<AppState, [], [], { computeEn
     rawEdges: [],
     customAttributes: [],
     importedMetrics: null,
+    communityRuns: [],
     restoredVisualization: false,
     communityMap: {},
     legendColorOverrides: {},
     selectedElement: null,
     selectedCommunityId: null,
     isolatedCommunityId: null,
-    hoveredCommunityId: null,
     hiddenLegendItems: [],
     isolatedLegendItem: null,
     isLegendMinimized: false,
@@ -275,6 +278,7 @@ export const useStore = create<AppState>()(persist<AppState, [], [], { computeEn
     filters: {
       edgeFilter: null,
       nodeFilter: null,
+    communityFilter: null,
       searchEdges: false,
       removedNodes: "",
       resolution: 1.0,

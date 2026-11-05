@@ -6,7 +6,7 @@ MiNE is an interactive network visualization and analysis workspace for scientif
 
 - **Browser computation:** Graphology runs analysis in the client; browser community detection supports Louvain.
 - **Cloud computation:** the Python service performs curated igraph community, metric, and static-layout operations.
-- **Numeric metric filtering:** Degree, numeric uploaded attributes, calculated node centralities, Louvain node terms, and calculated edge metrics can filter the graph and data tables without invalidating the result used as the filter source.
+- **Numeric metric filtering:** Degree, numeric uploaded attributes, calculated node centralities, Louvain node terms, and calculated edge metrics can filter the graph and data tables without invalidating the result used as the filter source. Missing values remain as connection context, including the opposite partition of a bipartite graph; blank values are not treated as zero.
 - **Louvain modularity detail:** Browser and Cloud results include per-node Louvain ΔQ, within-community weight, node/community strength, and an igraph-compatible modularity contribution. The Modularity data view summarizes both communities and nodes, and node contributions sum to the network Q.
 - **Independent rendering:** D3 or Sigma can render either computation mode from the same persistent Graphology model. Live Physics uses the shared D3 force simulation with either renderer.
 - **Large-graph routing policy:** Cloud is recommended at **7,000 or more raw nodes OR 15,000 or more raw edges**, but Browser remains selectable and is the sequential fallback for supported Cloud calculations. Large-graph classification always uses imported raw counts, so filtering cannot change it.
@@ -35,6 +35,24 @@ OpenMindat 0.1.3 does not expose a dedicated chemical-formula search filter, so 
 
 Secondary Weight remains absent unless it was explicitly supplied by the source. An uploaded field named `abundance` is preserved as ordinary numeric metadata; degree is the built-in topology size field.
 
+## Retained SBM/LBM results
+
+Run Sparse SBM (unipartite) or Sparse LBM (bipartite) in Cloud mode. Every successful run retains:
+
+- The fitted block probability matrix, soft node memberships, group proportions, and raw model labels.
+- Candidate group counts, the variational fit score, each penalty term, ICL, and the difference from the selected ICL. Candidates beyond the requested limit remain in the history with `withinLimit: false`.
+- The ordered node identifiers and edge arrays, LBM row/column identifiers and partitions, a SHA-256 fingerprint of the binary network input, requested and fitted settings, and software versions.
+
+Change **Seed** and run again to retain another fit. MiNE keeps earlier runs while the latest controls the graph's colors. Each new run includes adjusted Rand comparisons to earlier fits of the same algorithm on the same input, with separate mineral/row and mode/column comparisons for LBM. This comparison handles arbitrary group numbering. Filtering or editing the input changes its fingerprint and prevents comparisons between different inputs.
+
+Use **Export → Block Model Results JSON** for the complete run archive, or **All-in-One JSON** to save the archive with the network and restore it on import. Graphology JSON, GraphML, GEXF, and CSV ZIP also carry it in metrics metadata. CSV ZIP additionally includes `block_model_candidates.csv`. Save an export before closing or replacing the workspace. Workspace Settings JSON contains settings only.
+
+Arrays in `diagnostics.selectedModel` use zero-based model group indices (`labelBase: 0`). LBM rows follow `input.rowNodeIds` and columns follow `input.columnNodeIds`. `rowSoftMemberships`/`columnSoftMemberships` describe individual nodes, while `rowGroupProportions`/`columnGroupProportions` describe the fitted population proportions. Displayed community labels use one-based numbering.
+
+Selection history records the initial model, every split/merge proposal, early-stop screening fits, fully-refitted candidates, and final retained models. The `phase` field distinguishes provisional scores from fully-refitted scores; compare resolutions using fully-refitted scores. This capture uses local hooks in pinned SparseBM 1.6.7 and has a regression test against the real library. `trainedSuccessfully` reports the library's flag rather than independently verifying EM convergence, and a stable search does not guarantee a global optimum.
+
+These results require the updated backend. Older saved files cannot supply fitted probabilities or selection history that they did not retain.
+
 ## Local development
 
 ### Frontend
@@ -53,7 +71,7 @@ Open [http://localhost:3000](http://localhost:3000). The frontend can run withou
 
 ### Cloud backend
 
-The backend requires Python 3.12.
+The backend requires Python 3.12. Bi-Louvain (`biLouvain`) detects shared communities across both partitions of an undirected bipartite graph using Barber’s modularity. It supports non-negative edge weights, resolution, and a reproducible seed; API requests must include one `partitions` value per node.
 
 ```bash
 cd backend
@@ -64,7 +82,7 @@ pytest
 uvicorn app.main:app --host 0.0.0.0 --port 8080 --workers 1
 ```
 
-Set `NEXT_PUBLIC_MINE_IGRAPH_API_URL=http://127.0.0.1:8080` in `.env.local`, then restart the frontend. Deployment and resource-limit notes are in [backend/README.md](backend/README.md).
+Set `NEXT_PUBLIC_MINE_IGRAPH_API_URL=http://127.0.0.1:8080` in `.env.local`, then restart the frontend. The container configuration is in [backend/Dockerfile](backend/Dockerfile), and resource limits are in [backend/app/config.py](backend/app/config.py).
 
 ## Verification
 

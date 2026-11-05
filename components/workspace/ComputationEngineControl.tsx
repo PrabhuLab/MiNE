@@ -10,7 +10,7 @@ import {
   resolveComputeEngine,
   type CloudBackendStatus,
 } from '@/services/cloud/config';
-import { CLOUD_EDGE_CUTOFF, CLOUD_NODE_CUTOFF, isLargeGraph } from '@/services/engines/policy';
+import { CLOUD_EDGE_CUTOFF, CLOUD_NODE_CUTOFF, SIGMA_EDGE_CUTOFF, SIGMA_NODE_CUTOFF, isLargeGraph } from '@/services/engines/policy';
 import { effectiveRenderer } from '@/services/engines/policy';
 
 interface Props {
@@ -25,7 +25,7 @@ export function ComputationEngineControl({ nodeCount, edgeCount, compact = false
   const edges = edgeCount ?? rawEdges.length;
   const large = isLargeGraph(nodes, edges);
   const resolved = resolveComputeEngine(nodes, edges, computeEngine);
-  const resolvedRenderer = effectiveRenderer(rendererEngine, resolved);
+  const resolvedRenderer = effectiveRenderer(rendererEngine, resolved, nodes, edges);
   const descriptionId = useId();
   const configuredHostname = useMemo(() => cloudBackendHostname(), []);
   const [open, setOpen] = useState(false);
@@ -107,6 +107,7 @@ export function ComputationEngineControl({ nodeCount, edgeCount, compact = false
           <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest"><Cloud size={13} /> {pairing}</div>
           <p className="mt-2 text-[9px] font-mono leading-relaxed opacity-75">Computation and rendering are independent. Browser uses Graphology analysis; Cloud uses Python igraph for heavy operations. D3 or Sigma can render either mode from the same Graphology model.</p>
           <p className="mt-2 text-[9px] font-mono leading-relaxed opacity-75">Live Physics always uses MiNE&apos;s shared D3 force simulation and streams positions to the selected renderer.</p>
+          <p className="mt-2 text-[9px] font-mono leading-relaxed opacity-75">Auto uses Sigma at {SIGMA_NODE_CUTOFF.toLocaleString()} nodes or {SIGMA_EDGE_CUTOFF.toLocaleString()} edges for smoother interaction.</p>
           <p className="mt-2 text-[9px] font-mono leading-relaxed">Cloud is recommended at or above {CLOUD_NODE_CUTOFF.toLocaleString()} raw nodes or {CLOUD_EDGE_CUTOFF.toLocaleString()} raw edges. Browser remains available and is used when a supported Cloud calculation fails. Filtering never changes the large-graph classification.</p>
           {large && <p className="mt-2 text-[9px] font-mono font-bold text-amber-500">Automatic initial Louvain is skipped for this large graph. You can run it manually in Cloud or Browser; Browser may be slower.</p>}
           <div className={`mt-3 flex items-start gap-2 border-t pt-2 text-[9px] font-mono ${border}`}>

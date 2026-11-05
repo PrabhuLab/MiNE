@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="MINE_", env_file=".env", extra="ignore")
 
-    backend_version: str = "0.2.0"
+    backend_version: str = "0.3.0"
     cors_origins: str = "https://prabhulab.github.io,http://localhost:3000,http://127.0.0.1:3000"
     max_nodes: int = 1_000_000
     max_edges: int = 5_000_000

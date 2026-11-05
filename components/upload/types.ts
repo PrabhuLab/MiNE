@@ -5,7 +5,8 @@ export interface WizardFilesState {
   percentagesFile: File | null;
   singleMatrixFile: File | null;
   edgesFile: File | null;
-  nodesFile: File | null;
+  nodeFiles: File[];
+  additionalEdgeFiles: File[];
   adjListFile: File | null;
   jsonFile: File | null;
   hasAdditionalAttributes: boolean;
@@ -33,7 +34,15 @@ export interface BaseStepProps {
   onBack?: () => void;
 }
 
+export interface MetadataTable {
+  name: string;
+  kind: 'nodes' | 'edges';
+  data: any[][];
+  mapping: ColumnMappingState;
+}
+
 export interface ParsedDataState {
+  metadataTables?: MetadataTable[];
   matrix?: any[][];
   counts?: any[][];
   percentages?: any[][];

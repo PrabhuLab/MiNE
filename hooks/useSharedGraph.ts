@@ -5,7 +5,8 @@
 import { useEffect, useCallback, useState, useMemo, useRef } from 'react';
 import Graph from 'graphology';
 import { RawNode, RawEdge } from '@/store/useStore';
-import { computeForceDirectedLayout } from '@/lib/layoutUtils';
+import { computeForceDirectedLayoutAsync } from '@/services/layouts/d3Worker';
+import { updateGraphColors } from '@/services/graphStyles/colors';
 import { isSecondaryNode } from '@/services/graphPresentation/visibility';
 import { computeGraphRevisions } from '@/services/cloud/revision';
 import { shouldUseCloud, type ComputeEngine } from '@/services/cloud/config';
@@ -44,23 +45,25 @@ export function useSharedGraph({
   const revisions = useMemo(() => computeGraphRevisions(nodes, edges, directed, true, weightAttribute), [nodes, edges, directed, weightAttribute]);
   const topologyKey = revisions.graphRevision;
   const cloudRouted = shouldUseCloud(nodes.length, edges.length, computeEngine);
-  const [readyTopologyKey, setReadyTopologyKey] = useState<string | null>(null);
+  const [readyGraph, setReadyGraph] = useState<Graph | null>(null);
   const [layoutRevision, setLayoutRevision] = useState(0);
   const [staticLayoutRevision, setStaticLayoutRevision] = useState(0);
   const [positionSource, setPositionSource] = useState<PositionSource>('local-static');
   const [positioningError, setPositioningError] = useState<string | null>(null);
   const lastStaticForceStrengthRef = useRef<number | null>(null);
+  const layoutAbortRef = useRef<AbortController | null>(null);
   const positionCacheRef = useRef(new Map<string, { x: number; y: number }>());
   const cacheGraphRevisionRef = useRef(graphRevision);
   const topologyRevisionRef = useRef(topologyKey);
   const committedTopologyRef = useRef<string | null>(null);
-  const isReady = readyTopologyKey === topologyKey && positionSource !== 'pending-cloud';
+  const isReady = readyGraph === graph && positionSource !== 'pending-cloud';
 
   useEffect(() => {
     topologyRevisionRef.current = topologyKey;
     if (cacheGraphRevisionRef.current !== graphRevision) {
       positionCacheRef.current.clear();
       cacheGraphRevisionRef.current = graphRevision;
+      committedTopologyRef.current = null;
     }
   }, [graphRevision, topologyKey]);
 
@@ -70,19 +73,33 @@ export function useSharedGraph({
     });
     setPositionSource(source);
     committedTopologyRef.current = topologyRevisionRef.current;
-    setReadyTopologyKey(topologyRevisionRef.current);
+    setReadyGraph(graph);
     setLayoutRevision((revision) => revision + 1);
     if (source === 'local-static' || source === 'cloud-static' || source === 'imported') setStaticLayoutRevision((revision) => revision + 1);
   }, [graph]);
 
   const applyD3StaticLayout = useCallback((graphInst: Graph) => {
-    const posMap = computeForceDirectedLayout(nodes, edges, directed, forceStrength);
-    graphInst.updateEachNodeAttributes((nodeId: string, attrs: any) => {
-      const pos = posMap.get(nodeId);
-      return pos ? { ...attrs, x: pos.x, y: pos.y } : attrs;
-    }, { attributes: ['x', 'y'] });
-    setTimeout(() => commitPositions('local-static'), 0);
+    layoutAbortRef.current?.abort();
+    const controller = new AbortController();
+    layoutAbortRef.current = controller;
+    const revision = topologyRevisionRef.current;
+    setPositioningError(null);
+    void computeForceDirectedLayoutAsync(nodes, edges, directed, forceStrength, controller.signal).then((posMap) => {
+      if (controller.signal.aborted || topologyRevisionRef.current !== revision) return;
+      graphInst.updateEachNodeAttributes((nodeId: string, attrs: any) => {
+        const pos = posMap.get(nodeId);
+        return pos ? { ...attrs, x: pos.x, y: pos.y } : attrs;
+      }, { attributes: ['x', 'y'] });
+      commitPositions('local-static');
+    }).catch((cause) => {
+      if (!controller.signal.aborted) setPositioningError(cause instanceof Error ? cause.message : String(cause));
+    }).finally(() => {
+      if (layoutAbortRef.current === controller) layoutAbortRef.current = null;
+    });
+    return controller;
   }, [nodes, edges, directed, forceStrength, commitPositions]);
+
+  useEffect(() => () => layoutAbortRef.current?.abort(), [graph]);
 
   const applyExternalPositions = useCallback((result: LayoutResult, expectedRevision: string): void => {
     if (topologyRevisionRef.current !== expectedRevision || result.filterRevision !== expectedRevision) return;
@@ -119,8 +136,9 @@ export function useSharedGraph({
       if (!graph.hasNode(node.id)) {
         if (!supplied) addedUnpositionedNode = true;
         graph.addNode(node.id, presentation);
-      } else graph.mergeNodeAttributes(node.id, presentation);
+      } else Object.assign(graph.getNodeAttributes(node.id), presentation);
     });
+    graph.updateEachNodeAttributes((_id, attrs) => attrs, { attributes: ['x', 'y', 'size', 'opacity', 'shape'] });
 
     const existingEdges = new Set(graph.edges());
     const targetEdgeKeys = new Set<string>();
@@ -132,31 +150,41 @@ export function useSharedGraph({
         path: directed ? 'curved' : 'straight', curvature: directed ? 0.3 : 0,
         head: getShouldShowArrowhead(edge) ? 'arrow' : 'none', rawEdge: edge,
       };
-      if (existingKey) { targetEdgeKeys.add(existingKey); graph.mergeEdgeAttributes(existingKey, attrs); }
+      if (existingKey) { targetEdgeKeys.add(existingKey); Object.assign(graph.getEdgeAttributes(existingKey), attrs); }
       else { try { targetEdgeKeys.add(graph.addEdge(edge.source, edge.target, attrs)); } catch { /* retain first simple edge */ } }
     });
     existingEdges.forEach((key) => { if (!targetEdgeKeys.has(key) && graph.hasEdge(key)) graph.dropEdge(key); });
+    // Re-index edge slots: hidden edges have no repaint slot in Sigma 4 beta.
+    graph.updateEachEdgeAttributes((_id, attrs) => attrs, { attributes: ['size', 'opacity', 'path', 'head', 'type'] });
     const hasUnpositionedNode = addedUnpositionedNode || graph.someNode((_id, attrs) => !finitePosition(attrs));
 
     setPositioningError(null);
     if (hasUnpositionedNode) {
-      setReadyTopologyKey(null);
+      setReadyGraph(null);
       // Rendering is independent from computation routing. Every unpositioned
       // graph starts from MiNE's familiar local D3-force layout; Cloud layouts
       // replace it only after the user explicitly applies one.
       applyD3StaticLayout(graph);
+      return () => layoutAbortRef.current?.abort();
     } else {
       setPositionSource((current) => current === 'cloud-static' ? current : 'imported');
       const timeout = setTimeout(() => {
-        setReadyTopologyKey(topologyKey);
-        if (committedTopologyRef.current !== topologyKey) {
+        setReadyGraph(graph);
+        if (committedTopologyRef.current === null) {
           committedTopologyRef.current = topologyKey;
           setStaticLayoutRevision((revision) => revision + 1);
         }
       }, 0);
       return () => clearTimeout(timeout);
     }
-  }, [graph, nodes, edges, directed, bipartite, isDarkMode, getNodeColor, getNodeSize, getEdgeColor, getEdgeSize, getEdgeOpacity, getShouldShowArrowhead, nodeOpacity, applyD3StaticLayout, topologyKey]);
+    // Color changes use the batched effect below. Selection-dependent arrowheads
+    // are handled by renderer reducers, so they must not rebuild every edge.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [graph, nodes, edges, directed, bipartite, getNodeSize, getEdgeSize, getEdgeOpacity, nodeOpacity, applyD3StaticLayout, topologyKey, graphRevision]);
+
+  useEffect(() => {
+    updateGraphColors(graph, Boolean(isDarkMode), getNodeColor, getEdgeColor);
+  }, [graph, nodes, edges, isDarkMode, getNodeColor, getEdgeColor]);
 
   useEffect(() => {
     if (!isReady) return;
@@ -164,12 +192,13 @@ export function useSharedGraph({
     if (livePhysics) { lastStaticForceStrengthRef.current = repulsion; return; }
     if (lastStaticForceStrengthRef.current === null) { lastStaticForceStrengthRef.current = repulsion; return; }
     if (lastStaticForceStrengthRef.current === repulsion) return;
-    const timer = setTimeout(() => { applyD3StaticLayout(graph); lastStaticForceStrengthRef.current = repulsion; }, 180);
-    return () => clearTimeout(timer);
+    let controller: AbortController | undefined;
+    const timer = setTimeout(() => { controller = applyD3StaticLayout(graph); lastStaticForceStrengthRef.current = repulsion; }, 180);
+    return () => { clearTimeout(timer); controller?.abort(); };
   }, [graph, isReady, livePhysics, forceStrength, applyD3StaticLayout]);
 
   const runRefreshLayout = useCallback(() => {
-    setReadyTopologyKey(null);
+    setReadyGraph(null);
     applyD3StaticLayout(graph);
   }, [applyD3StaticLayout, graph]);
 

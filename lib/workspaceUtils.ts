@@ -23,6 +23,11 @@ export function computeMaxRawWeight(rawEdges: any[]): number {
   return max ? Math.ceil(max) : 500;
 }
 
+export function numericFilterValue(value: unknown): number {
+  if (value == null || (typeof value === 'string' && value.trim() === '')) return Number.NaN;
+  return Number(value);
+}
+
 export function computeActiveNetwork(rawNodes: any[], rawEdges: any[], appliedFilters: any) {
   const removedSet = new Set(
     (appliedFilters.removedNodes || '').split(',')
@@ -38,9 +43,9 @@ export function computeActiveNetwork(rawNodes: any[], rawEdges: any[], appliedFi
 
   const filteredEdges = (rawEdges || []).filter(e => {
     const filter = appliedFilters.edgeFilter;
-    const value = filter ? Number(e[filter.attribute]) : 0;
+    const value = filter ? numericFilterValue(e[filter.attribute]) : 0;
     const passesWeightFilter = !filter || filter.source === 'metric'
-      || (Number.isFinite(value) && value >= Number(filter.min) && value <= Number(filter.max));
+      || (!Number.isFinite(value) || (value >= Number(filter.min) && value <= Number(filter.max)));
 
     return passesWeightFilter &&
       !removedSet.has(String(e.source)) &&
@@ -75,12 +80,12 @@ export function filterNetworkByNodeMetric(
 ) {
   if (!filter) return { validNodes: nodes, validEdges: edges };
   const metricsByNode = new Map((networkMetrics || []).map((entry) => [String(entry.id), entry]));
-  const values = nodes.map((node) => Number(metricsByNode.get(String(node.id))?.[filter.attribute] ?? node[filter.attribute]));
+  const values = nodes.map((node) => numericFilterValue(metricsByNode.get(String(node.id))?.[filter.attribute] ?? node[filter.attribute]));
   if (!values.some(Number.isFinite)) return { validNodes: nodes, validEdges: edges };
 
   const validNodes = nodes.filter((node) => {
-    const value = Number(metricsByNode.get(String(node.id))?.[filter.attribute] ?? node[filter.attribute]);
-    return Number.isFinite(value) && value >= Number(filter.min) && value <= Number(filter.max);
+    const value = numericFilterValue(metricsByNode.get(String(node.id))?.[filter.attribute] ?? node[filter.attribute]);
+    return !Number.isFinite(value) || (value >= Number(filter.min) && value <= Number(filter.max));
   });
   const nodeIds = new Set(validNodes.map((node) => String(node.id)));
   const validEdges = edges.filter((edge) => nodeIds.has(String(edge.source)) && nodeIds.has(String(edge.target)));
@@ -104,11 +109,11 @@ export function filterNetworkByEdgeMetric(
     || metricsByEdge.get(`${edge.target}->${edge.source}`)
     || metricsByEdge.get(`${edge.source}--${edge.target}`)
     || metricsByEdge.get(`${edge.target}--${edge.source}`);
-  const hasValues = edges.some((edge) => Number.isFinite(Number(metricFor(edge)?.[filter.attribute])));
+  const hasValues = edges.some((edge) => Number.isFinite(numericFilterValue(metricFor(edge)?.[filter.attribute])));
   if (!hasValues) return { validNodes: nodes, validEdges: edges };
   const validEdges = edges.filter((edge) => {
-    const value = Number(metricFor(edge)?.[filter.attribute]);
-    return Number.isFinite(value) && value >= Number(filter.min) && value <= Number(filter.max);
+    const value = numericFilterValue(metricFor(edge)?.[filter.attribute]);
+    return !Number.isFinite(value) || (value >= Number(filter.min) && value <= Number(filter.max));
   });
   return { validNodes: nodes, validEdges };
 }
@@ -262,4 +267,33 @@ export function computeTableDataEdges(validEdges: any[], edgeMetrics: any[], sea
   }
 
   return data;
+}
+
+/** Filter the presentation without recalculating the communities being filtered. */
+export function filterNetworkByCommunity(
+  nodes: any[], edges: any[],
+  filter: { attribute: string; excludedValues: string[] } | null | undefined,
+  networkMetrics: any[],
+) {
+  if (!filter?.excludedValues.length) return { validNodes: nodes, validEdges: edges };
+  const metrics = new Map(networkMetrics.map((row) => [String(row.id), row]));
+  const excluded = new Set(filter.excludedValues);
+  const validNodes = nodes.filter((node) => {
+    const value = metrics.get(String(node.id))?.[filter.attribute] ?? node[filter.attribute];
+    return value == null || !excluded.has(String(value));
+  });
+  const ids = new Set(validNodes.map((node) => String(node.id)));
+  return { validNodes, validEdges: edges.filter((edge) => ids.has(String(edge.source)) && ids.has(String(edge.target))) };
+}
+
+/** Remove nodes with no surviving incident edges after all filters are combined. */
+export function filterDisconnectedNodes(nodes: any[], edges: any[]) {
+  const nodeIds = new Set(nodes.map((node) => String(node.id)));
+  const validEdges = edges.filter((edge) => nodeIds.has(String(edge.source)) && nodeIds.has(String(edge.target)));
+  const connectedIds = new Set<string>();
+  validEdges.forEach((edge) => {
+    connectedIds.add(String(edge.source));
+    connectedIds.add(String(edge.target));
+  });
+  return { validNodes: nodes.filter((node) => connectedIds.has(String(node.id))), validEdges };
 }

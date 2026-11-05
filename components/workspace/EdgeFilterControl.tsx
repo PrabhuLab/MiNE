@@ -4,9 +4,10 @@ import React, { useMemo } from 'react';
 import { useStore } from '@/store/useStore';
 import { buildAttributeRegistry, edgeWeightDescriptors } from '@/services/attributes/registry';
 import { numericExtent } from '@/lib/utils';
+import { numericFilterValue } from '@/lib/workspaceUtils';
 
 const rangeOf = (values: unknown[]) => {
-  const finite = values.map(Number).filter(Number.isFinite);
+  const finite = values.map(numericFilterValue).filter(Number.isFinite);
   const extent = numericExtent(finite) || [0, 1];
   const [minimum, rawMaximum] = extent;
   const maximum = rawMaximum === minimum ? minimum + 1 : rawMaximum;
@@ -74,6 +75,7 @@ export function EdgeFilterControl({ edgeMetrics = [] }: { edgeMetrics?: any[] })
             <input type="range" aria-label="Maximum edge filter slider" min={selectedRange.minimum} max={selectedRange.maximum} step={selectedRange.step} value={selected.max} onChange={(event) => update(selected.min, Number(event.target.value))} className="mine-range-end absolute left-0 top-2 w-full" />
           </div>
           <div className="flex justify-between text-[9px] font-mono opacity-60"><span>{selectedRange.minimum}</span><span>{selectedRange.maximum}</span></div>
+          <p className="text-[9px] font-mono opacity-55">Missing values stay as connection context.</p>
         </div>
       )}
     </div>

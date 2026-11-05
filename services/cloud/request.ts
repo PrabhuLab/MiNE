@@ -65,7 +65,7 @@ export function buildCloudAnalyzeRequest(options: BuildOptions): CloudAnalyzeReq
   if (options.includeCommunities) {
     request.communities = options.nodes.map((node) => node.community ?? node.louvain ?? '');
   }
-  if (options.layout?.algorithm === 'bipartite' || options.community?.algorithm === 'lbm') {
+  if (options.layout?.algorithm === 'bipartite' || options.community?.algorithm === 'lbm' || options.community?.algorithm === 'biLouvain') {
     request.partitions = options.nodes.map((node) => node.partition ?? node.bipartite ?? node.type ?? 0);
   }
   if (options.includeInitialPositions) {

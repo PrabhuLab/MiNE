@@ -78,7 +78,7 @@ class GraphologyMetricsEngine implements MetricsEngine {
         const normalized = normalize_communities(details.communities as Record<string, number>);
         const communityMap = Object.fromEntries(Object.entries(normalized).map(([node, community]) => [node, String(community)]));
         Object.entries(normalized).forEach(([node, community]) => {
-          const label = `Cluster ${Number(community) + 1}`;
+          const label = `Community ${Number(community) + 1}`;
           metricsByNode[node].louvain = label;
           graph.setNodeAttribute(node, 'community', String(community));
         });

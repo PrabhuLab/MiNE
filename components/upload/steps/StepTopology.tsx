@@ -11,6 +11,7 @@ export const StepTopology: React.FC<StepTopologyProps> = ({
   topology,
   setTopology,
   onNext,
+  onBack,
 }) => {
   return (
     <div>
@@ -35,7 +36,7 @@ export const StepTopology: React.FC<StepTopologyProps> = ({
             <input
               type="radio"
               value={cat}
-              className="hidden"
+              className="sr-only"
               checked={topology === cat}
               onChange={() => setTopology(cat)}
             />
@@ -44,7 +45,8 @@ export const StepTopology: React.FC<StepTopologyProps> = ({
             </span>
           </label>
         ))}
-        <div className="col-span-2 mt-6 flex justify-end">
+        <div className="col-span-2 mt-6 flex justify-between">
+          {topology ? <button type="button" onClick={onBack} className="px-6 py-3 text-[10px] font-bold uppercase tracking-widest underline underline-offset-4">Back to upload options</button> : <span />}
           <button
             onClick={onNext}
             disabled={!topology}

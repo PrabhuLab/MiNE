@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import dynamic from 'next/dynamic';
+import Link from 'next/link';
 import { useStore, RawNode, RawEdge } from '@/store/useStore';
 import * as d3 from 'd3';
 import { Download } from 'lucide-react';
@@ -19,7 +20,7 @@ import { useGraphLayouts } from '@/hooks/useGraphLayouts';
 import { numericExtent } from '@/lib/utils';
 import { resolveComputeEngine } from '@/services/cloud/config';
 import { degreeByNode, logarithmicNodeSize } from '@/services/graphStyles/size';
-import { filterNetworkByEdgeMetric, filterNetworkByNodeMetric } from '@/lib/workspaceUtils';
+import { filterDisconnectedNodes, filterNetworkByCommunity, filterNetworkByEdgeMetric, filterNetworkByNodeMetric } from '@/lib/workspaceUtils';
 import { effectiveRenderer } from '@/services/engines/policy';
 import { WorkspaceStatusCards } from '@/components/workspace/WorkspaceStatusCards';
 
@@ -35,7 +36,7 @@ import { isSecondaryNode } from '@/services/graphPresentation/visibility';
 import { LayoutControls } from '@/components/workspace/LayoutControls';
 
 export default function Workspace() {
-  const { rawNodes, rawEdges, filters, communityMap, customAttributes, directed, bipartite, computeEngine, rendererEngine, isDarkMode, selectedElement, setSelectedElement, projectName } = useStore();
+  const { rawNodes, rawEdges, filters, communityMap, communityRuns, customAttributes, directed, bipartite, computeEngine, rendererEngine, isDarkMode, selectedElement, setSelectedElement, projectName } = useStore();
 
   const {
     appliedFilters,
@@ -58,7 +59,7 @@ export default function Workspace() {
   }), [validNodes]);
 
   const effectiveEngine = resolveComputeEngine(rawNodes.length, rawEdges.length, computeEngine);
-  const activeRenderer = effectiveRenderer(rendererEngine, effectiveEngine);
+  const activeRenderer = effectiveRenderer(rendererEngine, effectiveEngine, rawNodes.length, rawEdges.length);
   const useSigma = activeRenderer === 'sigma';
 
   const {
@@ -86,8 +87,16 @@ export default function Workspace() {
     () => filterNetworkByEdgeMetric(nodeFilteredNetwork.validNodes, nodeFilteredNetwork.validEdges, appliedFilters.edgeFilter, edgeMetrics),
     [appliedFilters.edgeFilter, edgeMetrics, nodeFilteredNetwork.validEdges, nodeFilteredNetwork.validNodes],
   );
-  const displayNodes = edgeMetricFilteredNetwork.validNodes;
-  const displayEdges = edgeMetricFilteredNetwork.validEdges;
+  const communityFilteredNetwork = useMemo(
+    () => filterNetworkByCommunity(edgeMetricFilteredNetwork.validNodes, edgeMetricFilteredNetwork.validEdges, appliedFilters.communityFilter, networkMetrics),
+    [edgeMetricFilteredNetwork, appliedFilters.communityFilter, networkMetrics],
+  );
+  const connectedNetwork = useMemo(
+    () => filterDisconnectedNodes(communityFilteredNetwork.validNodes, communityFilteredNetwork.validEdges),
+    [communityFilteredNetwork],
+  );
+  const displayNodes = connectedNetwork.validNodes;
+  const displayEdges = connectedNetwork.validEdges;
   const edgeMetricMap = useMemo(() => new Map(edgeMetrics.map((metric: any) => [String(metric.key), metric])), [edgeMetrics]);
   const presentationEdges = useMemo(() => displayEdges.map((edge) => {
     const key = String(edge.key ?? `${edge.source}->${edge.target}`);
@@ -105,6 +114,11 @@ export default function Workspace() {
     clearSelection,
   } = useWorkspaceSelection();
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const clearFilters = () => {
+    const next = { ...useStore.getState().filters, nodeFilter: null, edgeFilter: null, communityFilter: null, removedNodes: '' };
+    useStore.setState({ filters: next });
+    setAppliedFilters(next);
+  };
   const sigmaRendererRef = useRef<Sigma | null>(null);
 
   const clickedNodeRef = useRef<RawNode | null>(null);
@@ -238,7 +252,7 @@ export default function Workspace() {
     edges: presentationEdges,
     directed,
     bipartite,
-    forceStrength: appliedFilters.forceStrength || -100,
+    forceStrength: appliedFilters.forceStrength ?? -100,
     livePhysics: appliedFilters.livePhysics,
     graphRevision,
     computeEngine: effectiveEngine,
@@ -273,7 +287,7 @@ export default function Workspace() {
     cloudRouted,
     applyExternalPositions,
     weightAttribute: appliedFilters.metricWeightAttribute || 'weight_raw',
-    forceStrength: appliedFilters.forceStrength || -100,
+    forceStrength: appliedFilters.forceStrength ?? -100,
   });
 
   // Unified live D3-force simulation controller
@@ -285,11 +299,12 @@ export default function Workspace() {
     d3NodesRef,
     d3LinksRef,
     d3NodesMapRef,
+    physicsError,
   } = useSharedPhysics({
     graph,
     topologyKey,
-    livePhysics: appliedFilters.livePhysics,
-    forceStrength: appliedFilters.forceStrength || -100,
+    livePhysics: appliedFilters.livePhysics && isReady,
+    forceStrength: appliedFilters.forceStrength ?? -100,
     activeRenderer: useSigma ? 'sigma' : 'd3',
   });
 
@@ -345,6 +360,7 @@ export default function Workspace() {
       {/* SIDEBAR CONTROL PANEL */}
       
       <WorkspaceSidebar 
+        onClearFilters={clearFilters}
         isSidebarCollapsed={isSidebarCollapsed}
         setIsSidebarCollapsed={setIsSidebarCollapsed}
         handleImportWorkspace={handleImportWorkspace}
@@ -393,8 +409,17 @@ export default function Workspace() {
                 <button className={`px-4 py-2 border-l border-[#141414] dark:border-[#333] ${dataTab === 'modularity' ? 'bg-[#141414] text-white dark:bg-[#333]' : 'text-[#888]'}`} onClick={() => setDataTab('modularity')}>Modularity</button>
               </div>
             )}
-            <div className="relative">
+            <div className="relative"
+              onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setShowExportMenu(false); }}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  setShowExportMenu(false);
+                  event.currentTarget.querySelector('button')?.focus();
+                }
+              }}>
               <button
+                aria-expanded={showExportMenu}
+                aria-controls="workspace-export-options"
                 onClick={() => setShowExportMenu(!showExportMenu)}
                 className={`flex items-center space-x-2 px-4 py-2 border text-[10px] uppercase font-bold tracking-widest transition-colors shadow-sm ${isDarkMode ? "bg-[#141414] border-[#333] text-[#E4E3E0] hover:bg-[#333]" : "bg-white border-[#141414] text-[#141414] hover:bg-black/5"}`}
               >
@@ -403,9 +428,8 @@ export default function Workspace() {
               </button>
               
               {showExportMenu && (
-                <div 
+                <div id="workspace-export-options"
                   className={`absolute right-0 mt-2 w-48 border shadow-lg z-50 flex flex-col text-[10px] uppercase font-bold tracking-widest ${isDarkMode ? 'bg-[#141414] border-[#333]' : 'bg-white border-[#ccc]'}`}
-                  onMouseLeave={() => setShowExportMenu(false)}
                 >
                   {!useSigma && <button onClick={() => handleExport('svg')} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>Export as SVG</button>}
                   <button onClick={() => handleExport('png')} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>Export as PNG</button>
@@ -416,6 +440,7 @@ export default function Workspace() {
                   <button onClick={() => handleExport('graphml')} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>GraphML</button>
                   <button onClick={() => handleExport('gexf')} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>GEXF</button>
                   <button onClick={() => handleExport('csvzip')} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>Node + Edge CSV ZIP</button>
+                  <button onClick={() => handleExport('blockmodels')} disabled={!communityRuns.length} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 disabled:opacity-30 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>Block Model Results JSON ({communityRuns.length} runs)</button>
                   <div className={`h-px w-full ${isDarkMode ? 'bg-[#333]' : 'bg-[#eee]'}`}></div>
                   <button onClick={() => handleExport('settings')} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>Workspace Settings JSON</button>
                   <button onClick={() => handleExport('allinone')} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>All-in-One JSON</button>
@@ -448,8 +473,8 @@ export default function Workspace() {
                   <span>Switching Renderer Engine...</span>
                 </div>
               )}
-              {positioningError && (
-                <div className={`absolute inset-x-4 top-4 z-50 border px-4 py-3 font-mono text-xs ${isDarkMode ? 'bg-red-950 border-red-500 text-red-100' : 'bg-red-50 border-red-500 text-red-900'}`}>{positioningError}</div>
+              {(positioningError || physicsError) && (
+                <div className={`absolute inset-x-4 top-4 z-50 border px-4 py-3 font-mono text-xs ${isDarkMode ? 'bg-red-950 border-red-500 text-red-100' : 'bg-red-50 border-red-500 text-red-900'}`}>{positioningError || physicsError}</div>
               )}
               {useSigma ? (
                 <SigmaGraph 
@@ -474,7 +499,7 @@ export default function Workspace() {
                   nodeOpacity={appliedFilters.nodeOpacity ?? 1}
                   edgeOpacity={appliedFilters.edgeOpacity ?? 0.3}
                   edgeOpacityBase={appliedFilters.edgeOpacityBase || "uniform"}
-                  forceStrength={appliedFilters.forceStrength || -100}
+                  forceStrength={appliedFilters.forceStrength ?? -100}
                   directed={directed}
                   bipartite={bipartite}
                   livePhysics={appliedFilters.livePhysics}
@@ -513,7 +538,7 @@ export default function Workspace() {
                   nodeOpacity={appliedFilters.nodeOpacity ?? 1}
                   edgeOpacity={appliedFilters.edgeOpacity ?? 0.3}
                   edgeOpacityBase={appliedFilters.edgeOpacityBase || "uniform"}
-                  forceStrength={appliedFilters.forceStrength || -100}
+                  forceStrength={appliedFilters.forceStrength ?? -100}
                   directed={directed}
                   bipartite={bipartite}
                   livePhysics={appliedFilters.livePhysics}
@@ -541,12 +566,16 @@ export default function Workspace() {
             <div className={`flex-1 w-full h-full overflow-hidden ${activeTab === "data" ? "block" : "hidden"}`}>
               {dataTab === 'modularity'
                 ? <ModularityTables rows={tableData} graphMetrics={graphMetrics} onNodeDoubleClick={handleElementDoubleClick} />
-                : <WorkspaceDataTable dataTab={dataTab} tableData={tableData} tableDataEdges={tableDataEdges} edgeMetrics={edgeMetrics} handleSort={handleSort} sortConfig={sortConfig} handleElementDoubleClick={handleElementDoubleClick} />}
+                : <WorkspaceDataTable active={activeTab === 'data'} dataTab={dataTab} tableData={tableData} tableDataEdges={tableDataEdges} edgeMetrics={edgeMetrics} handleSort={handleSort} sortConfig={sortConfig} handleElementDoubleClick={handleElementDoubleClick} />}
             </div>
           </>
         ) : (
-          <div className="absolute inset-0 flex flex-col items-center justify-center font-mono text-sm opacity-50">
-            <span>NO DATA // ADJUST FILTERS</span>
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 px-8 text-center">
+            <h2 className="text-lg font-semibold">{rawNodes.length ? 'No connected nodes match these filters' : 'Start with a network'}</h2>
+            <p className="max-w-sm text-sm opacity-70">{rawNodes.length ? 'Try a wider range or clear the filters to restore your network. Nodes without connections are hidden.' : 'Upload a network file or generate a sample network to explore MiNE.'}</p>
+            {rawNodes.length > 0 && (appliedFilters.nodeFilter || appliedFilters.edgeFilter || appliedFilters.communityFilter || appliedFilters.removedNodes)
+              ? <button onClick={clearFilters} className="border border-current px-4 py-2 text-sm font-semibold">Clear filters</button>
+              : <Link href="/upload" className="border border-current px-4 py-2 text-sm font-semibold">Upload a network</Link>}
           </div>
         )}
       </section>

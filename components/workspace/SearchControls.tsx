@@ -54,7 +54,7 @@ export const SearchControls = () => {
       </div>
       <div className="group">
           <input 
-            type="text"
+            type="text" aria-label="Search nodes and edges"
             placeholder={filters.searchEdges ? "Search nodes/edges..." : "Search nodes..."}
             value={searchQuery}
             onChange={(e) => updateSearchSelection(e.target.value)}

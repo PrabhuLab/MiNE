@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useStore } from '@/store/useStore';
 import { computeActiveNetwork } from '@/lib/workspaceUtils';
 import { graphSettings } from '@/services/graphStyles/liveUpdate';
@@ -7,8 +7,18 @@ export function useGraphFilters() {
   const { rawNodes, rawEdges, filters, setFilter } = useStore();
   
   const [appliedFilters, setAppliedFilters] = useState(filters);
-  const activeFilters = graphSettings(filters, appliedFilters);
-  const [network, setNetwork] = useState(() => computeActiveNetwork(rawNodes, rawEdges, filters));
+  const liveFilters = graphSettings(filters, appliedFilters);
+  const [frame, setFrame] = useState({ rawNodes, rawEdges, filters: liveFilters });
+  const frameFilters = frame.rawNodes === rawNodes && frame.rawEdges === rawEdges ? frame.filters : liveFilters;
+  const activeFilters = filters.liveUpdate ? { ...liveFilters,
+    nodeFilter: frameFilters.nodeFilter, edgeFilter: frameFilters.edgeFilter,
+    communityFilter: frameFilters.communityFilter, removedNodes: frameFilters.removedNodes,
+  } : appliedFilters;
+
+  useEffect(() => {
+    const request = requestAnimationFrame(() => setFrame({ rawNodes, rawEdges, filters: liveFilters }));
+    return () => cancelAnimationFrame(request);
+  }, [liveFilters, rawNodes, rawEdges]);
   
   useEffect(() => {
     if (filters.liveUpdate) {
@@ -18,34 +28,24 @@ export function useGraphFilters() {
   }, [filters]);
 
   const removedNodesStr = activeFilters.removedNodes || '';
-  const edgeFilterStr = JSON.stringify(activeFilters.edgeFilter);
-
-  useEffect(() => {
-    const computed = computeActiveNetwork(rawNodes, rawEdges, activeFilters);
-    
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setNetwork(prev => {
-      const nodesEqual = computed.validNodes.length === prev.validNodes.length &&
-        computed.validNodes.every((n, i) => n.id === prev.validNodes[i]?.id);
-        
-      const edgesEqual = computed.validEdges.length === prev.validEdges.length &&
-        computed.validEdges.every((e, i) => 
-          e.source === prev.validEdges[i]?.source && 
-          e.target === prev.validEdges[i]?.target && 
-          e.weight_raw === prev.validEdges[i]?.weight_raw && 
-          e.weight_secondary === prev.validEdges[i]?.weight_secondary
-        );
-
-      if (nodesEqual && edgesEqual) {
-        return prev;
-      }
-      return computed;
-    });
-  }, [rawNodes, rawEdges, removedNodesStr, edgeFilterStr, activeFilters]);
+  const edgeFilter = activeFilters.edgeFilter;
+  const candidate = useMemo(() => computeActiveNetwork(rawNodes, rawEdges, {
+    removedNodes: removedNodesStr, edgeFilter,
+  }), [rawNodes, rawEdges, removedNodesStr, edgeFilter]);
+  const [retained, setRetained] = useState({ candidate, network: candidate });
+  let network = retained.network;
+  if (retained.candidate !== candidate) {
+    // Preserve analysis inputs when a new cutoff retains exactly the same records.
+    network = candidate.validNodes.length === network.validNodes.length
+      && candidate.validEdges.length === network.validEdges.length
+      && candidate.validNodes.every((node, index) => node === network.validNodes[index])
+      && candidate.validEdges.every((edge, index) => edge === network.validEdges[index]) ? network : candidate;
+    setRetained({ candidate, network });
+  }
 
   // Sync missing variables fallback logic (the one with useEffect)
-  const hasType = rawNodes.some(n => n.type !== undefined);
-  const hasSecondaryWeight = rawEdges.some(e => e.weight_secondary !== undefined);
+  const hasType = useMemo(() => rawNodes.some(n => n.type !== undefined), [rawNodes]);
+  const hasSecondaryWeight = useMemo(() => rawEdges.some(e => e.weight_secondary !== undefined), [rawEdges]);
 
   useEffect(() => {
     if (!hasType && filters.nodeColorBase === 'type') setFilter('nodeColorBase', 'community');

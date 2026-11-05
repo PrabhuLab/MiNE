@@ -11,6 +11,7 @@ export function fitSigmaNodeSet(
   duration = SIGMA_CAMERA_MS,
 ) {
   if (!sigma || !graph || !container) return;
+  if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) duration = 0;
   sigma.resize();
   const { width, height } = sigma.getDimensions();
   if (width <= 0 || height <= 0) return;

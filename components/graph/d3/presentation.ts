@@ -9,7 +9,6 @@ export interface D3PresentationContext {
   isolatedLegendItem: string | null;
   selectedCommunityId: string | null;
   isolatedCommunityId: string | null;
-  hoveredCommunityId: string | null;
   displayMap: Record<string, number>;
   clickedNodeId: string | null;
   clickedEdge: RawEdge | null;
@@ -41,9 +40,7 @@ export interface D3EdgePresentation {
 }
 
 export function activeCommunityId(context: D3PresentationContext): string | null {
-  const hoveredCommunity = context.hoveredCommunityId?.startsWith('community:') ? context.hoveredCommunityId : null;
-  return hoveredCommunity
-    || context.selectedCommunityId
+  return (context.selectedCommunityId?.startsWith('community:') ? context.selectedCommunityId : null)
     || context.isolatedCommunityId
     || (context.isolatedLegendItem?.startsWith('community:') ? context.isolatedLegendItem : null);
 }
@@ -119,8 +116,9 @@ export function getD3NodePresentation(node: RawNode, context: D3PresentationCont
     communityMember = String(context.displayMap[node.id] ?? -1) === activeCommunity.replace('community:', '');
     if (!communityMember) dimmed = true;
   }
-  const activeAttribute = (context.hoveredCommunityId?.startsWith('attribute:') ? context.hoveredCommunityId : null)
-    || (context.isolatedLegendItem?.startsWith('attribute:') ? context.isolatedLegendItem : null);
+  const activeAttribute = context.selectedCommunityId && !context.selectedCommunityId.startsWith('community:')
+    ? context.selectedCommunityId
+    : context.isolatedLegendItem?.startsWith('attribute:') ? context.isolatedLegendItem : null;
   if (activeAttribute) {
     const members = context.legendNodeMembership.get(activeAttribute);
     if (members?.size) {
@@ -138,9 +136,7 @@ export function getD3NodePresentation(node: RawNode, context: D3PresentationCont
     else dimmed = true;
   }
 
-  const labelVisible = focused
-    || neighbor
-    || (activeCommunity ? communityMember : context.showNodeLabels);
+  const labelVisible = focused || neighbor || (activeCommunity ? communityMember : context.showNodeLabels);
   return {
     hidden: false,
     dimmed,
@@ -188,11 +184,13 @@ export function getD3EdgePresentation(
       if (sourceCommunity === community && targetCommunity === community) focused = true;
       else if (sourceCommunity !== community && targetCommunity !== community) dimmed = true;
     }
-    const activeAttribute = (context.hoveredCommunityId?.startsWith('attribute:') ? context.hoveredCommunityId : null)
-      || (context.isolatedLegendItem?.startsWith('attribute:') ? context.isolatedLegendItem : null);
+    const activeAttribute = context.selectedCommunityId && !context.selectedCommunityId.startsWith('community:')
+      ? context.selectedCommunityId
+      : context.isolatedLegendItem?.startsWith('attribute:') ? context.isolatedLegendItem : null;
     const members = activeAttribute ? context.legendNodeMembership.get(activeAttribute) : null;
-    if (members?.size) {
-      if (members.has(source) || members.has(target)) focused = true;
+    const edgeMembers = activeAttribute ? context.legendEdgeMembership.get(activeAttribute) : null;
+    if (members?.size || edgeMembers?.size) {
+      if (members?.has(source) || members?.has(target) || edgeMembers?.has(edgeId)) focused = true;
       else dimmed = true;
     }
   }

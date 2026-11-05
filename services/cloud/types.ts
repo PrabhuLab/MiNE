@@ -1,4 +1,5 @@
 import type { ComputeEngine } from './config';
+import type { BlockModelDiagnostics } from '../communities/diagnostics';
 
 export interface CloudLayoutSpec {
   algorithm: 'auto' | 'drl' | 'fruchtermanReingold' | 'kamadaKawai' | 'circular' | 'random' | 'bipartite' | 'sugiyama';
@@ -7,7 +8,7 @@ export interface CloudLayoutSpec {
   iterations?: number;
 }
 
-export type CommunityAlgorithm = 'louvain' | 'infomap' | 'labelPropagation' | 'walktrap' | 'fastGreedy' | 'sbm' | 'lbm';
+export type CommunityAlgorithm = 'louvain' | 'biLouvain' | 'infomap' | 'labelPropagation' | 'walktrap' | 'fastGreedy' | 'sbm' | 'lbm';
 export type CommunityWeightChannel = 'unweighted' | 'weight_raw' | 'weight_secondary';
 
 export interface CloudCommunitySpec {
@@ -19,6 +20,9 @@ export interface CloudCommunitySpec {
   steps?: number;
   seed?: number;
   clusters?: number;
+  columnClusters?: number;
+  blockSelection?: 'manual' | 'icl';
+  maxClusters?: number;
 }
 
 export interface CloudCommunityResult {
@@ -27,6 +31,7 @@ export interface CloudCommunityResult {
   membership: number[];
   quality?: number | null;
   provenance: Record<string, unknown>;
+  diagnostics?: BlockModelDiagnostics | null;
 }
 
 export interface CloudAnalyzeRequest {

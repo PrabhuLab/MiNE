@@ -3,7 +3,8 @@
 import { useEffect, useRef, useCallback, useMemo } from 'react';
 import * as d3 from 'd3';
 import type Graph from 'graphology';
-import { useStore, RawNode, RawEdge } from '@/store/useStore';
+import type { RawNode, RawEdge } from '@/store/useStore';
+import { edgePath } from '@/components/graph/d3/edgePath';
 import type { TooltipData } from '@/services/graphInteraction/types';
 import {
   getD3EdgePresentation,
@@ -21,38 +22,20 @@ interface UseGraphSimulationProps {
   nodes: RawNode[];
   edges: RawEdge[];
   communityMap: Record<string, string>;
-  networkMetrics?: any[];
-  nodeSizeMult: number;
-  bipartiteNodeSizeMult?: number;
-  nodeSizeBase?: string;
-  nodeColorBase?: string;
-  uniformNodeColor?: string;
-  uniformEdgeColor?: string;
-  edgeWeightMult?: number;
-  edgeWeightBase?: string;
-  edgeColorBase?: string;
-  edgeColorNodeMetric?: string;
-  edgeColorNodeTarget?: 'source' | 'target';
   nodeOpacity?: number;
-  edgeOpacity?: number;
-  edgeOpacityBase?: string;
-  forceStrength: number;
   directed: boolean;
   bipartite: boolean;
   livePhysics?: boolean;
   isDarkMode?: boolean;
   refreshKey?: number;
   layoutRevision?: number;
-  onRefresh?: () => void;
   onElementDoubleClick?: (id: string, type: 'node' | 'edge') => void;
   onClearSelection?: () => void;
   searchQuery?: string;
-  selectedElement?: string | null;
   hiddenItems: Set<string>;
   isolatedLegendItem: string | null;
   selectedCommunityId: string | null;
   isolatedCommunityId: string | null;
-  hoveredCommunityId: string | null;
   showArrowheads: boolean;
   showNodeLabels: boolean;
   getShouldShowArrowhead: (edge: any) => boolean;
@@ -64,8 +47,6 @@ interface UseGraphSimulationProps {
   legendNodeMembership: Map<string, Set<string>>;
   legendEdgeMembership: Map<string, Set<string>>;
   legendVisibility: LegendVisibilityResult;
-  maxRaw: number;
-  maxSec: number;
   clickedNode: RawNode | null;
   setClickedNode: React.Dispatch<React.SetStateAction<RawNode | null>>;
   clickedEdge: RawEdge | null;
@@ -74,13 +55,11 @@ interface UseGraphSimulationProps {
   setClickedEdge: React.Dispatch<React.SetStateAction<RawEdge | null>>;
   setClickedDegree: (deg: number) => void;
   setTooltip: React.Dispatch<React.SetStateAction<TooltipData | null>>;
-  isCalculatingLayout: boolean;
   setIsCalculatingLayout: (val: boolean) => void;
   registerD3TickListener?: (cb: () => void) => () => void;
   beginDrag?: (id: string, x: number, y: number) => void;
   movePinnedNode?: (id: string, x: number, y: number) => void;
   endDrag?: (id: string) => void;
-  d3NodesRef?: React.RefObject<any[]>;
   d3LinksRef?: React.RefObject<any[]>;
   d3NodesMapRef?: React.RefObject<Map<string, any>>;
 }
@@ -92,14 +71,6 @@ export function useGraphSimulation({
   nodes,
   edges,
   communityMap,
-  networkMetrics = [],
-  nodeSizeMult = 3,
-  bipartiteNodeSizeMult = 2,
-  nodeSizeBase = 'degree',
-  edgeWeightMult = 1,
-  edgeWeightBase = 'weight_raw',
-  maxRaw = 1,
-  maxSec = 1,
   nodeOpacity = 1,
   directed,
   bipartite,
@@ -114,7 +85,6 @@ export function useGraphSimulation({
   isolatedLegendItem,
   selectedCommunityId,
   isolatedCommunityId,
-  hoveredCommunityId,
   showArrowheads,
   showNodeLabels,
   getShouldShowArrowhead,
@@ -139,23 +109,25 @@ export function useGraphSimulation({
   beginDrag,
   movePinnedNode,
   endDrag,
-  d3NodesRef,
   d3LinksRef,
   d3NodesMapRef,
 }: UseGraphSimulationProps) {
   const zoomGroupRef = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null);
   const zoomBehaviorRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
-  const nodeGroupRef = useRef<d3.Selection<SVGGElement, any, SVGGElement, unknown> | null>(null);
-  const edgeGroupRef = useRef<d3.Selection<SVGPathElement, any, SVGGElement, unknown> | null>(null);
   const tickDrawRef = useRef<(() => void) | null>(null);
   const lastTopologyKeyRef = useRef<string | null>(null);
   const currentTransformRef = useRef<d3.ZoomTransform>(d3.zoomIdentity);
+  const livePhysicsRef = useRef(livePhysics);
+  useEffect(() => { livePhysicsRef.current = livePhysics; }, [livePhysics]);
+  const tooltipMetadataRef = useRef({ netMap, communityMap });
+  useEffect(() => { tooltipMetadataRef.current = { netMap, communityMap }; }, [netMap, communityMap]);
   const onDoubleClickRef = useRef(onElementDoubleClick);
   useEffect(() => { onDoubleClickRef.current = onElementDoubleClick; }, [onElementDoubleClick]);
   const pendingFitRef = useRef<{ nodeIds: string[]; duration: number } | null>(null);
 
 
   const fitD3NodeSet = useCallback((nodeIds: string[], duration = 450, isAutoReapply = false) => {
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) duration = 0;
     const fitRequest = isAutoReapply
       ? pendingFitRef.current
       : { nodeIds: [...nodeIds], duration };
@@ -199,7 +171,7 @@ export function useGraphSimulation({
     nodeIds.forEach((id) => {
       let x = 0, y = 0;
       const simulationNode = d3NodesMapRef?.current?.get(id);
-      if (livePhysics && simulationNode) {
+      if (livePhysicsRef.current && simulationNode) {
         x = simulationNode.x;
         y = simulationNode.y;
       } else if (graph && graph.hasNode(id)) {
@@ -240,7 +212,7 @@ export function useGraphSimulation({
     const translate = [width / 2 - scale * cx, height / 2 - scale * cy];
 
     applyTransform(d3.zoomIdentity.translate(translate[0], translate[1]).scale(scale));
-  }, [graph, nodes, svgRef, containerRef, livePhysics, d3NodesMapRef]);
+  }, [graph, nodes, svgRef, containerRef, d3NodesMapRef]);
 
   const handleZoomFit = useCallback(() => {
     fitD3NodeSet(fitNodeIds);
@@ -250,6 +222,42 @@ export function useGraphSimulation({
     const revision = computeGraphRevisions(nodes, edges, directed, false).graphRevision;
     return `${revision}:${layoutRevision}:${refreshKey}`;
   }, [directed, edges, layoutRevision, nodes, refreshKey]);
+
+  const presentationContext = useMemo<D3PresentationContext>(() => {
+    const selectedNeighborSet = new Set<string>();
+    if (clickedNode && graph?.hasNode(clickedNode.id)) {
+      graph.neighbors(clickedNode.id).forEach((id) => selectedNeighborSet.add(String(id)));
+    }
+    const normalizedSearch = searchQuery.trim().toLowerCase();
+    const searchMatchSet = new Set<string>();
+    if (normalizedSearch) {
+      nodes.forEach((node: any) => {
+        if (String(node.id).toLowerCase().includes(normalizedSearch)
+          || String(node.label || node.name || '').toLowerCase().includes(normalizedSearch)) {
+          searchMatchSet.add(String(node.id));
+        }
+      });
+    }
+    return {
+      bipartite,
+      directed,
+      hiddenItems,
+      isolatedLegendItem,
+      selectedCommunityId,
+      isolatedCommunityId,
+      displayMap,
+      clickedNodeId: clickedNode?.id || null,
+      clickedEdge,
+      selectedNeighborSet,
+      searchMatchSet,
+      focusedEdgeNodeSet,
+      showNodeLabels,
+      nodeOpacity,
+      legendNodeMembership,
+      legendEdgeMembership,
+      legendVisibility,
+    };
+  }, [graph, nodes, clickedNode, clickedEdge, searchQuery, bipartite, directed, hiddenItems, isolatedLegendItem, selectedCommunityId, isolatedCommunityId, displayMap, focusedEdgeNodeSet, showNodeLabels, nodeOpacity, legendNodeMembership, legendEdgeMembership, legendVisibility]);
 
   // Main D3 SVG Rendering Pipeline
   useEffect(() => {
@@ -293,6 +301,7 @@ export function useGraphSimulation({
       .zoom<SVGSVGElement, unknown>()
       .extent([[0, 0], [width, height]])
       .scaleExtent([0.02, 100])
+      .clickDistance(4)
       .filter((event) => event.type === 'wheel' || event.type === 'touchstart' || event.button === 0)
       .on('start', (event) => {
         if (event.sourceEvent) {
@@ -309,18 +318,13 @@ export function useGraphSimulation({
     svg.call(zoomBehavior as any);
     svg.on('dblclick.zoom', null);
 
-    zoomGroup
-      .append('rect')
-      .attr('width', width * 100000)
-      .attr('height', height * 100000)
-      .attr('x', -width * 50000)
-      .attr('y', -height * 50000)
-      .style('fill', 'transparent')
-      .on('click', () => {
-        setClickedNode(null);
-        setClickedEdge(null);
-        if (onClearSelection) onClearSelection();
-      });
+    // Listen on the viewport: oversized background rectangles are clipped at high zoom.
+    svg.on('click.selection', (event) => {
+      if (event.defaultPrevented) return;
+      setClickedNode(null);
+      setClickedEdge(null);
+      onClearSelection?.();
+    });
     // O(1) Map lookup for shared simulation node objects
     const sharedD3NodesMap = d3NodesMapRef?.current;
     const graphNodes = nodes.map((d) => {
@@ -408,40 +412,6 @@ export function useGraphSimulation({
           }))
           .filter((edge) => edge.source && edge.target);
 
-    const selectedNeighborSet = new Set<string>();
-    if (clickedNode && graph?.hasNode(clickedNode.id)) {
-      graph.neighbors(clickedNode.id).forEach((id) => selectedNeighborSet.add(String(id)));
-    }
-    const normalizedSearch = searchQuery.trim().toLowerCase();
-    const searchMatchSet = new Set<string>();
-    if (normalizedSearch) {
-      graphNodes.forEach((node: any) => {
-        if (String(node.id).toLowerCase().includes(normalizedSearch)
-          || String(node.label || node.name || '').toLowerCase().includes(normalizedSearch)) {
-          searchMatchSet.add(String(node.id));
-        }
-      });
-    }
-    const presentationContext: D3PresentationContext = {
-      bipartite,
-      directed,
-      hiddenItems,
-      isolatedLegendItem,
-      selectedCommunityId,
-      isolatedCommunityId,
-      hoveredCommunityId,
-      displayMap,
-      clickedNodeId: clickedNode?.id || null,
-      clickedEdge,
-      selectedNeighborSet,
-      searchMatchSet,
-      focusedEdgeNodeSet,
-      showNodeLabels,
-      nodeOpacity,
-      legendNodeMembership,
-      legendEdgeMembership,
-      legendVisibility,
-    };
     const nodePresentation = new Map(graphNodes.map((node: any) => [
       String(node.id),
       getD3NodePresentation(node as RawNode, presentationContext),
@@ -522,7 +492,6 @@ export function useGraphSimulation({
         setTooltip(null);
       });
 
-    edgeGroupRef.current = link as any;
 
     const nodeGroup = zoomGroup
       .append('g')
@@ -533,7 +502,6 @@ export function useGraphSimulation({
       .style('display', (d: any) => nodePresentation.get(String(d.id))?.hidden ? 'none' : null)
       .attr('transform', (d: any) => `translate(${d.x},${d.y})`);
 
-    nodeGroupRef.current = nodeGroup as any;
 
     const strokeColor = isDarkMode ? '#444444' : '#141414';
 
@@ -583,8 +551,8 @@ export function useGraphSimulation({
     });
 
     nodeGroup.on('mouseenter', (e: any, d: any) => {
-      const net = netMap.get(d.id);
-      const comm = communityMap[d.id] ?? d.community ?? net?.community;
+      const net = tooltipMetadataRef.current.netMap.get(d.id);
+      const comm = tooltipMetadataRef.current.communityMap[d.id] ?? d.community ?? net?.community;
       setTooltip({
         x: e.clientX,
         y: e.clientY,
@@ -624,6 +592,7 @@ export function useGraphSimulation({
     nodeGroup.call(
       d3
         .drag<any, any>()
+        .clickDistance(4)
         .on('start', (e: any, d: any) => {
           if (beginDrag) beginDrag(d.id, d.x, d.y);
         })
@@ -639,52 +608,7 @@ export function useGraphSimulation({
     const tickDraw = () => {
       nodeGroup.attr('transform', (d: any) => `translate(${d.x},${d.y})`);
 
-      link.attr('d', (d: any) => {
-        const sx = d.source.x;
-        const sy = d.source.y;
-        const tx = d.target.x;
-        const ty = d.target.y;
-
-        if (directed) {
-          const dx = tx - sx;
-          const dy = ty - sy;
-          const dist = Math.hypot(dx, dy);
-          if (dist > 0) {
-            // A quadratic curve gives a stable tangent at each endpoint. Trim
-            // both ends along those tangents so the arrow tip terminates at
-            // the target node boundary instead of its center.
-            const normalX = -dy / dist;
-            const normalY = dx / dist;
-            const bend = Math.min(80, Math.max(12, dist * 0.2));
-            const controlX = (sx + tx) / 2 + normalX * bend;
-            const controlY = (sy + ty) / 2 + normalY * bend;
-
-            const sourceTangentX = controlX - sx;
-            const sourceTangentY = controlY - sy;
-            const sourceTangentLength = Math.hypot(sourceTangentX, sourceTangentY) || 1;
-            const targetTangentX = tx - controlX;
-            const targetTangentY = ty - controlY;
-            const targetTangentLength = Math.hypot(targetTangentX, targetTangentY) || 1;
-            const boundaryDistance = (node: any, tangentX: number, tangentY: number, tangentLength: number) => {
-              const radius = Math.max(0, Number(node.currentRadius) || 0) + 1;
-              const isSquare = isSecondaryNode(node, bipartite);
-              if (!isSquare) return radius;
-              const unitX = Math.abs(tangentX / tangentLength);
-              const unitY = Math.abs(tangentY / tangentLength);
-              return radius / Math.max(unitX, unitY, 0.0001);
-            };
-            const sourceRadius = boundaryDistance(d.source, sourceTangentX, sourceTangentY, sourceTangentLength);
-            const targetRadius = boundaryDistance(d.target, targetTangentX, targetTangentY, targetTangentLength);
-            const startX = sx + (sourceTangentX / sourceTangentLength) * sourceRadius;
-            const startY = sy + (sourceTangentY / sourceTangentLength) * sourceRadius;
-            const endX = tx - (targetTangentX / targetTangentLength) * targetRadius;
-            const endY = ty - (targetTangentY / targetTangentLength) * targetRadius;
-
-            return `M${startX},${startY}Q${controlX},${controlY} ${endX},${endY}`;
-          }
-        }
-        return `M${sx},${sy}L${tx},${ty}`;
-      });
+      link.attr('d', (d: any) => edgePath(d, directed, bipartite));
     };
 
     tickDrawRef.current = tickDraw;
@@ -703,81 +627,100 @@ export function useGraphSimulation({
     return () => {
       svg.interrupt();
       svg.on('.zoom', null);
+      svg.on('.selection', null);
     };
 
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
-  }, [
-    graph,
-    nodes,
-    edges,
-    communityMap,
-    directed,
-    bipartite,
-    livePhysics,
-    refreshKey,
-    renderTopologyKey,
-    layoutRevision,
-    containerRef,
-    svgRef,
-    fitD3NodeSet,
-    nodeOpacity,
-    isDarkMode,
-    searchQuery,
-    hiddenItems,
-    isolatedLegendItem,
-    selectedCommunityId,
-    isolatedCommunityId,
-    hoveredCommunityId,
-    showArrowheads,
-    showNodeLabels,
-    getShouldShowArrowhead,
-    getNodeColor,
-    getEdgeColor,
-    getEdgeOpacity,
-    displayMap,
-    legendNodeMembership,
-    legendEdgeMembership,
-    legendVisibility,
-    clickedNode,
-    clickedEdge,
-    focusedEdgeNodeSet,
-    fitNodeIds,
-  ]);
+  }, [graph, nodes, edges, directed, bipartite, refreshKey, renderTopologyKey, layoutRevision, containerRef, svgRef, fitD3NodeSet]);
+
+  // Selection, search and legend filters repaint existing elements without rebuilding SVG.
+  useEffect(() => {
+    if (!svgRef.current) return;
+    const svg = d3.select(svgRef.current);
+    const nodePresentation = new Map(nodes.map((node) => [String(node.id), getD3NodePresentation(node, presentationContext)]));
+    svg.selectAll<SVGGElement, any>('.node-group')
+      .style('display', (node) => nodePresentation.get(String(node.id))?.hidden ? 'none' : null);
+    svg.selectAll<SVGElement, any>('.node-shape')
+      .attr('opacity', (node) => nodePresentation.get(String(node.id))?.opacity ?? nodeOpacity)
+      .attr('stroke-width', (node) => {
+        const state = nodePresentation.get(String(node.id));
+        return state?.focused ? 2.5 : state?.neighbor || state?.communityMember ? 2 : 1;
+      });
+    svg.selectAll<SVGTextElement, any>('.node-label')
+      .style('display', (node) => nodePresentation.get(String(node.id))?.labelVisible ? 'block' : 'none');
+    svg.selectAll<SVGPathElement, any>('.graph-link').each(function (edge) {
+      const source = String(typeof edge.source === 'object' ? edge.source.id : edge.source);
+      const target = String(typeof edge.target === 'object' ? edge.target.id : edge.target);
+      const raw = edge.rawEdge || edge;
+      const state = getD3EdgePresentation(source, target, raw, getEdgeOpacity(raw), presentationContext, nodePresentation);
+      d3.select(this).style('display', () => state.hidden ? 'none' : null)
+        .attr('stroke-opacity', state.opacity)
+        .attr('marker-end', () => directed && getShouldShowArrowhead(raw) ? 'url(#arrowhead)' : null);
+    });
+  }, [svgRef, nodes, renderTopologyKey, presentationContext, nodeOpacity, directed, getEdgeOpacity, getShouldShowArrowhead]);
+
+  // Colors do not change topology: preserve SVG elements, handlers, and camera.
+  useEffect(() => {
+    if (!svgRef.current) return;
+    const svg = d3.select(svgRef.current);
+    svg.selectAll<SVGElement, any>('.node-shape')
+      .attr('fill', (node) => getNodeColor(node))
+      .attr('stroke', isDarkMode ? '#444444' : '#141414');
+    svg.selectAll<SVGPathElement, any>('.graph-link')
+      .attr('stroke', (edge) => getEdgeColor(edge.rawEdge || edge));
+    svg.selectAll('.node-label')
+      .attr('fill', (node: any) => node.currentRadius >= 14 ? (isDarkMode ? '#222' : '#fff') : isDarkMode ? '#ddd' : '#141414');
+    svg.selectAll('#arrowhead path')
+      .attr('fill', isDarkMode ? '#eeeeee' : '#141414')
+      .attr('opacity', isDarkMode ? 0.9 : 0.6);
+  }, [svgRef, isDarkMode, getNodeColor, getEdgeColor]);
 
   // Fast Node Sizing & Edge Thickness Update
   // Updates SVG attributes directly without tearing down the DOM, preventing visual snap on slider changes.
   useEffect(() => {
     if (!svgRef.current || !d3NodesMapRef?.current) return;
-    const svg = d3.select(svgRef.current);
+    const resize = () => {
+      const svg = d3.select(svgRef.current);
 
-    d3NodesMapRef.current.forEach((node: any) => {
-      const graphSize = graph?.hasNode(node.id) ? Number(graph.getNodeAttribute(node.id, 'size')) : Number.NaN;
-      node.currentRadius = Number.isFinite(graphSize) ? graphSize : 5;
-    });
+      d3NodesMapRef.current.forEach((node: any) => {
+        const graphSize = graph?.hasNode(node.id) ? Number(graph.getNodeAttribute(node.id, 'size')) : Number.NaN;
+        node.currentRadius = Number.isFinite(graphSize) ? graphSize : 5;
+      });
 
-    svg
-      .selectAll<SVGRectElement, any>('rect.node-shape')
-      .attr('x', (d: any) => -d.currentRadius)
-      .attr('y', (d: any) => -d.currentRadius)
-      .attr('width', (d: any) => d.currentRadius * 2)
-      .attr('height', (d: any) => d.currentRadius * 2);
+      svg
+        .selectAll<SVGRectElement, any>('rect.node-shape')
+        .attr('x', (d: any) => -d.currentRadius)
+        .attr('y', (d: any) => -d.currentRadius)
+        .attr('width', (d: any) => d.currentRadius * 2)
+        .attr('height', (d: any) => d.currentRadius * 2);
 
-    svg.selectAll<SVGCircleElement, any>('circle.node-shape').attr('r', (d: any) => d.currentRadius);
+      svg.selectAll<SVGCircleElement, any>('circle.node-shape').attr('r', (d: any) => d.currentRadius);
 
-    svg
-      .selectAll<SVGTextElement, any>('.node-label')
-      .attr('text-anchor', (d: any) => d.currentRadius >= 14 ? 'middle' : 'start')
-      .attr('dx', (d: any) => d.currentRadius >= 14 ? 0 : d.currentRadius + 4)
-      .attr('fill', (d: any) => d.currentRadius >= 14 ? (isDarkMode ? '#222' : '#fff') : isDarkMode ? '#ddd' : '#141414');
+      svg
+        .selectAll<SVGTextElement, any>('.node-label')
+        .attr('text-anchor', (d: any) => d.currentRadius >= 14 ? 'middle' : 'start')
+        .attr('dx', (d: any) => d.currentRadius >= 14 ? 0 : d.currentRadius + 4)
+        .attr('fill', (d: any) => d.currentRadius >= 14 ? (isDarkMode ? '#222' : '#fff') : isDarkMode ? '#ddd' : '#141414');
 
-    svg.selectAll<SVGPathElement, any>('.graph-link').style('stroke-width', (d: any) => {
-      const source = String(typeof d.source === 'object' ? d.source.id : d.source);
-      const target = String(typeof d.target === 'object' ? d.target.id : d.target);
-      if (!graph?.hasEdge(source, target)) return '2px';
-      const size = Number(graph.getEdgeAttribute(graph.edge(source, target), 'size'));
-      return `${Number.isFinite(size) ? Math.max(0.5, size) : 2}px`;
-    });
-  }, [graph, isDarkMode, svgRef, d3NodesMapRef]);
+      svg.selectAll<SVGPathElement, any>('.graph-link').style('stroke-width', (d: any) => {
+        const source = String(typeof d.source === 'object' ? d.source.id : d.source);
+        const target = String(typeof d.target === 'object' ? d.target.id : d.target);
+        if (!graph?.hasEdge(source, target)) return '2px';
+        const size = Number(graph.getEdgeAttribute(graph.edge(source, target), 'size'));
+        return `${Number.isFinite(size) ? Math.max(0.5, size) : 2}px`;
+      });
+    };
+    const onSizeUpdate = (event: { hints?: { attributes?: (string | number)[] } }) => {
+      if (!event.hints?.attributes || event.hints.attributes.includes('size')) resize();
+    };
+    resize();
+    graph?.on('eachNodeAttributesUpdated', onSizeUpdate);
+    graph?.on('eachEdgeAttributesUpdated', onSizeUpdate);
+    return () => {
+      graph?.off('eachNodeAttributesUpdated', onSizeUpdate);
+      graph?.off('eachEdgeAttributesUpdated', onSizeUpdate);
+    };
+  }, [graph, isDarkMode, svgRef, d3NodesMapRef, renderTopologyKey]);
 
   // Subscribe to direct D3 physics ticks for fast SVG DOM updates
   useEffect(() => {

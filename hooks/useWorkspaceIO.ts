@@ -54,7 +54,7 @@ export function useWorkspaceIO(options: WorkspaceIOOptions) {
       rendererEngine: state.rendererEngine,
       enginePolicyVersion: ENGINE_POLICY_VERSION,
       effectiveEngine: effectiveComputationEngine(options.rawNodes.length, options.rawEdges.length, state.computeEngine),
-      effectiveRenderer: effectiveRenderer(state.rendererEngine, effectiveComputationEngine(options.rawNodes.length, options.rawEdges.length, state.computeEngine)),
+      effectiveRenderer: effectiveRenderer(state.rendererEngine, effectiveComputationEngine(options.rawNodes.length, options.rawEdges.length, state.computeEngine), options.rawNodes.length, options.rawEdges.length),
       graphMode: {
         directed: options.directed,
         bipartite: options.bipartite,
@@ -146,13 +146,20 @@ export function useWorkspaceIO(options: WorkspaceIOOptions) {
 
   const handleExport = async (format: string) => {
     options.closeExportMenu();
+    if (format === 'blockmodels') {
+      downloadStringAsFile(JSON.stringify({
+        format: 'mine-block-model-runs', version: 1, projectName: options.projectName,
+        runs: useStore.getState().communityRuns,
+      }, null, 2), `${options.projectName}_block_models.json`, 'application/json');
+      return;
+    }
     if (format === 'svg') {
       exportSvg(document.getElementById('network-graph-svg') as SVGSVGElement | null, `${options.projectName}.svg`);
       return;
     }
     if (format === 'legend') {
       try {
-        await exportElementAsImage(document.getElementById('graph-legend'), `${options.projectName}_legend.png`, options.isDarkMode);
+        await exportElementAsImage(document.getElementById('graph-legend'), `${options.projectName}_legend.png`);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         console.error('Legend image export failed:', error);
@@ -169,16 +176,25 @@ export function useWorkspaceIO(options: WorkspaceIOOptions) {
           const pixelRatio = window.devicePixelRatio || 1;
           const rasterDimensions = viewportRasterDimensions(dimensions.width, dimensions.height, pixelRatio);
           const { toBlob } = await import('@sigma/export-image');
-          const blob = await toBlob(renderer, {
-            format,
-            fileName: options.projectName,
-            backgroundColor: options.isDarkMode ? '#141414' : '#ffffff',
-            // Sigma applies the device pixel ratio internally. Scale its
-            // temporary viewport so the final raster is at least 10×.
-            width: rasterDimensions.exportWidth / pixelRatio,
-            height: rasterDimensions.exportHeight / pixelRatio,
-            cameraState,
-          });
+          let blob: Blob | null = null;
+          for (let attempt = 0; attempt < 4; attempt++) {
+            try {
+              blob = await toBlob(renderer, {
+                format,
+                fileName: options.projectName,
+                backgroundColor: format === 'png' ? 'transparent' : options.isDarkMode ? '#141414' : '#ffffff',
+                // Sigma applies device pixel ratio internally; halve each
+                // dimension on retries to reduce canvas memory by 75%.
+                width: Math.max(1, Math.floor(rasterDimensions.exportWidth / 2 ** attempt)) / pixelRatio,
+                height: Math.max(1, Math.floor(rasterDimensions.exportHeight / 2 ** attempt)) / pixelRatio,
+                cameraState,
+              });
+              break;
+            } catch (error) {
+              if (attempt === 3 || (error instanceof DOMException && error.name === 'SecurityError')) throw error;
+            }
+          }
+          if (!blob) throw new Error('The graph image could not be encoded.');
           downloadBlobAsFile(blob, `${options.projectName}.${format === 'jpeg' ? 'jpg' : 'png'}`);
         } else {
           await exportImage(
@@ -201,7 +217,8 @@ export function useWorkspaceIO(options: WorkspaceIOOptions) {
       options.nodeMetrics,
       options.edgeMetrics,
       options.graphMetrics,
-      { selectedMetrics: options.metricsToRun, validity: options.metricValidity, attributeDescriptors: useStore.getState().customAttributes },
+      { selectedMetrics: options.metricsToRun, validity: options.metricValidity, attributeDescriptors: useStore.getState().customAttributes,
+        communityRuns: useStore.getState().communityRuns },
     );
     const exportGraph = canonicalExportGraph(
       options.graph,

@@ -1,5 +1,5 @@
 import * as d3 from 'd3';
-import { RawNode, RawEdge } from '@/store/useStore';
+import type { RawNode, RawEdge } from '@/store/useStore';
 
 /**
  * Pre-computes 2D node positions using D3 force simulation layout offline.
@@ -39,7 +39,7 @@ export function computeForceDirectedLayout(
   const linkDist = Math.max(30, Math.min(100, 1000 / Math.sqrt(count || 1)));
   const ticks = count > 3000 ? 80 : count > 1000 ? 100 : count > 500 ? 140 : 250;
 
-  const manyBody = d3.forceManyBody().strength(forceStrength || -100);
+  const manyBody = d3.forceManyBody().strength(forceStrength);
   if (count > 800) {
     manyBody.theta(0.9);
   }

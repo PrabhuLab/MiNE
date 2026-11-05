@@ -1,3 +1,4 @@
+import { shouldRenderSigmaLabels } from '../components/graph/sigma/labels.ts';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { UndirectedGraph } from 'graphology';
@@ -13,8 +14,9 @@ import { graphSettings, liveNumericValue } from '../services/graphStyles/liveUpd
 import { viewportRasterDimensions } from '../lib/exportUtils.ts';
 import { staleCalculationIds } from '../services/metrics/validity.ts';
 import { degreeByNode, logarithmicNodeSize } from '../services/graphStyles/size.ts';
-import { computeActiveNetwork, computeCommunityMetrics, computeTableDataEdges, computeTableDataNodes, filterNetworkByEdgeMetric, filterNetworkByNodeMetric } from '../lib/workspaceUtils.ts';
+import { numericFilterValue, filterDisconnectedNodes, filterNetworkByCommunity, computeActiveNetwork, computeCommunityMetrics, computeTableDataEdges, computeTableDataNodes, filterNetworkByEdgeMetric, filterNetworkByNodeMetric } from '../lib/workspaceUtils.ts';
 import { detectCustomAttributeType } from '../services/graphIO/customAttributes.ts';
+import { getCommunityDisplayMap } from '../lib/communityUtils.ts';
 
 test('large-graph boundaries prefer Cloud for auto routing without disabling Browser', () => {
   assert.equal(effectiveComputationEngine(6_999, 14_999, 'browser'), 'browser');
@@ -39,6 +41,19 @@ test('rendering is independent from the resolved computation engine', () => {
   assert.equal(effectiveRenderer('d3', 'cloud'), 'd3');
   assert.equal(effectiveRenderer('auto', 'browser'), 'd3');
   assert.equal(effectiveRenderer('auto', 'cloud'), 'sigma');
+  assert.equal(effectiveRenderer('auto', 'browser', 1_000, 0), 'sigma');
+  assert.equal(effectiveRenderer('auto', 'browser', 0, 2_000), 'sigma');
+  assert.equal(effectiveRenderer('auto', 'browser', 999, 1_999), 'd3');
+  assert.equal(effectiveRenderer('d3', 'browser', 5_000, 10_000), 'd3');
+});
+
+test('community display mapping joins metric rows by node id regardless of order', () => {
+  const result = getCommunityDisplayMap(
+    [{ id: 'a' }, { id: 'b' }, { id: 'c' }], {},
+    [{ id: 'c', louvain: 'Community 2' }, { id: 'a', louvain: 'Community 1' }, { id: 'b', louvain: 'Community 1' }],
+    'louvain',
+  );
+  assert.deepEqual(result.displayMap, { a: 0, b: 0, c: 1 });
 });
 
 test('workspace migration maps legacy renderer and first edge filter', () => {
@@ -265,19 +280,24 @@ test('automatic graph updates use every draft setting immediately', () => {
   assert.strictEqual(graphSettings(manualDraft, applied), applied);
 });
 
-test('raster graph exports preserve the client viewport aspect ratio at high resolution', () => {
+test('raster graph exports preserve the viewport ratio within the canvas memory limit', () => {
   assert.deepEqual(viewportRasterDimensions(1200, 675, 1), {
     viewportWidth: 1200,
     viewportHeight: 675,
-    exportWidth: 12000,
-    exportHeight: 6750,
+    exportWidth: 6531,
+    exportHeight: 3674,
   });
   assert.deepEqual(viewportRasterDimensions(800.4, 600.4, 3), {
     viewportWidth: 800,
     viewportHeight: 600,
-    exportWidth: 8000,
-    exportHeight: 6000,
+    exportWidth: 5656,
+    exportHeight: 4242,
   });
+  for (const [width, height] of [[100, 50], [4000, 2000]]) {
+    const { exportWidth, exportHeight } = viewportRasterDimensions(width, height, 1);
+    assert.ok(exportWidth * exportHeight <= 24_000_000);
+    assert.ok(Math.abs(exportWidth / exportHeight - width / height) < 0.001);
+  }
 });
 
 test('metric projections flatten node and edge result records for tables', () => {
@@ -286,4 +306,93 @@ test('metric projections flatten node and edge result records for tables', () =>
   assert.equal(nodes[0].pagerank, 0.4);
   assert.equal(nodes[0].community_leiden, 'Cluster 1');
   assert.equal(edges[0].edgeBetweenness, 0.7);
+});
+
+
+test('community exclusion removes members and incident edges while preserving other nodes', () => {
+  const nodes = [{ id: 'a', community: 0 }, { id: 'b', community: 1 }, { id: 'c', community: 1 }, { id: 'd' }];
+  const edges = [{ source: 'a', target: 'b' }, { source: 'b', target: 'c' }];
+  const result = filterNetworkByCommunity(nodes, edges, { attribute: 'community', excludedValues: ['0'] }, []);
+  assert.deepEqual(result.validNodes.map(n => n.id), ['b', 'c', 'd']);
+  assert.deepEqual(result.validEdges, [edges[1]]);
+  assert.equal(filterNetworkByCommunity(nodes, edges, null, []).validNodes, nodes);
+  assert.equal(filterNetworkByCommunity(nodes, edges, { attribute: 'community', excludedValues: [] }, []).validEdges, edges);
+  const calculated = filterNetworkByCommunity(nodes, edges, { attribute: 'community', excludedValues: ['0', '1'] }, [{ id: 'd', community: 0 }]);
+  assert.deepEqual(calculated, { validNodes: [], validEdges: [] });
+});
+
+test('numeric years can be explicitly interpreted as categories', () => {
+  const nodes = [{ Year: 2023 }, { Year: 2024 }, { Year: 2025 }];
+  const detectedType = detectCustomAttributeType(nodes.map(n => n.Year));
+  assert.equal(detectedType, 'discrete');
+  const [descriptor] = buildAttributeRegistry({ nodes, edges: [], metadata: [{ name: 'Year', scope: 'node', detectedType, selectedType: 'nominal' }] });
+  assert.equal(descriptor.categorical, true);
+  assert.equal(descriptor.numeric, false);
+});
+
+
+test('combined filters exclude nodes that lose their last connection', () => {
+  const nodes = [{ id: 'a', community: 0 }, { id: 'b', community: 1 }, { id: 'c', community: 1 }, { id: 'd', community: 2 }];
+  const edges = [{ source: 'a', target: 'b' }, { source: 'c', target: 'd' }];
+  const filtered = filterNetworkByCommunity(nodes, edges, { attribute: 'community', excludedValues: ['0'] }, []);
+  const connected = filterDisconnectedNodes(filtered.validNodes, filtered.validEdges);
+  assert.deepEqual(connected.validNodes.map(node => node.id), ['c', 'd']);
+  assert.deepEqual(connected.validEdges, [edges[1]]);
+  assert.deepEqual(filterDisconnectedNodes(nodes, []), { validNodes: [], validEdges: [] });
+  assert.deepEqual(filterDisconnectedNodes(nodes, [{ source: 'a', target: 'missing' }]), { validNodes: [], validEdges: [] });
+  assert.deepEqual(filterDisconnectedNodes(nodes, [{ source: 'a', target: 'a' }]).validNodes, [nodes[0]]);
+  assert.deepEqual(filterDisconnectedNodes(nodes, edges).validNodes, nodes);
+});
+
+
+test('Sigma labels remain gated by explicit labels, selection and search', () => {
+  assert.equal(shouldRenderSigmaLabels(false, null, null, ''), false);
+  assert.equal(shouldRenderSigmaLabels(false, null, null, '   '), false);
+  assert.equal(shouldRenderSigmaLabels(true, null, null, ''), true);
+  assert.equal(shouldRenderSigmaLabels(false, 'a', null, ''), true);
+  assert.equal(shouldRenderSigmaLabels(false, null, { id: 'a' }, ''), true);
+  assert.equal(shouldRenderSigmaLabels(false, null, null, 'Alpha'), true);
+});
+
+test('sparse node attributes retain connection context in bipartite and unipartite networks', () => {
+  for (const partitions of [['A', 'B'], [undefined, undefined]]) {
+    const nodes = [{ id: 'a', partition: partitions[0], score: 5 }, { id: 'b', partition: partitions[1] }, { id: 'c', score: 2 }];
+    const edges = [{ source: 'a', target: 'b' }, { source: 'b', target: 'c' }];
+    const filtered = filterNetworkByNodeMetric(nodes, edges, { attribute: 'score', min: 4, max: 6 }, []);
+    const connected = filterDisconnectedNodes(filtered.validNodes, filtered.validEdges);
+    assert.deepEqual(connected.validNodes.map(node => node.id), ['a', 'b']);
+    assert.deepEqual(connected.validEdges, [edges[0]]);
+    assert.deepEqual(filterNetworkByNodeMetric(nodes, edges, { attribute: 'absent', min: 4, max: 6 }, []), { validNodes: nodes, validEdges: edges });
+  }
+});
+
+test('missing node values are context rather than zero and genuine zero is filtered', () => {
+  const nodes = [undefined, null, '', ' ', 0, 5].map((score, id) => ({ id: String(id), score }));
+  const result = filterNetworkByNodeMetric(nodes, [], { attribute: 'score', min: 4, max: 6 }, []);
+  assert.deepEqual(result.validNodes.map(node => node.id), ['0', '1', '2', '3', '5']);
+});
+
+test('sparse and unavailable edge attributes preserve context without retaining out-of-range values', () => {
+  const nodes = ['a', 'b', 'c', 'd'].map(id => ({ id }));
+  const edges = [
+    { source: 'a', target: 'b', score: 5 },
+    { source: 'b', target: 'c', score: null },
+    { source: 'c', target: 'd', score: 0 },
+  ];
+  const attribute = computeActiveNetwork(nodes, edges, { edgeFilter: { attribute: 'score', min: 4, max: 6 } });
+  assert.deepEqual(attribute.validEdges, edges.slice(0, 2));
+  assert.deepEqual(attribute.validNodes.map(node => node.id), ['a', 'b', 'c']);
+  assert.deepEqual(computeActiveNetwork(nodes, edges, { edgeFilter: { attribute: 'absent', min: 4, max: 6 } }).validEdges, edges);
+  const metric = filterNetworkByEdgeMetric(nodes, edges, { attribute: 'score', min: 4, max: 6, source: 'metric' }, [
+    { key: 'a->b', score: 5 }, { key: 'b->c', score: '' }, { key: 'c->d', score: 0 },
+  ]);
+  assert.deepEqual(metric.validEdges, edges.slice(0, 2));
+});
+
+
+test('numeric filter ranges ignore missing values but keep numeric zero and strings', () => {
+  assert.ok([undefined, null, '', ' ', 'missing'].every(value => Number.isNaN(numericFilterValue(value))));
+  assert.equal(numericFilterValue('0'), 0);
+  assert.equal(numericFilterValue(0), 0);
+  assert.equal(numericFilterValue(' 5.5 '), 5.5);
 });

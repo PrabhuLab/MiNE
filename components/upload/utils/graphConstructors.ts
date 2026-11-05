@@ -284,10 +284,10 @@ export function constructGraph(
     } else if (isFormatEdgeList && parsedData.edges) {
       const edgeData = parsedData.edges;
       const eHeaders = edgeData[0] || [];
-      const sIdx = eHeaders.indexOf(sourceCol);
-      const tIdx = eHeaders.indexOf(targetCol);
-      const wrIdx = eHeaders.indexOf(weightRawCol);
-      const wsIdx = eHeaders.indexOf(weightSecCol);
+      const sIdx = (sourceCol ? eHeaders.indexOf(sourceCol) : -1);
+      const tIdx = (targetCol ? eHeaders.indexOf(targetCol) : -1);
+      const wrIdx = (weightRawCol ? eHeaders.indexOf(weightRawCol) : -1);
+      const wsIdx = (weightSecCol ? eHeaders.indexOf(weightSecCol) : -1);
 
       if (sIdx !== -1 && tIdx !== -1) {
         for (let i = 1; i < edgeData.length; i++) {
@@ -344,13 +344,16 @@ export function constructGraph(
       }
     }
 
-    if (parsedData.additionalEdges) {
-      const edgeData = parsedData.additionalEdges;
+    const edgeTables = [
+      ...(parsedData.additionalEdges ? [{ data: parsedData.additionalEdges, mapping }] : []),
+      ...(parsedData.metadataTables || []).filter((table) => table.kind === 'edges'),
+    ];
+    for (const { data: edgeData, mapping: { sourceCol, targetCol, weightRawCol, weightSecCol } } of edgeTables) {
       const eHeaders = edgeData[0] || [];
-      const sIdx = eHeaders.indexOf(sourceCol);
-      const tIdx = eHeaders.indexOf(targetCol);
-      const wrIdx = eHeaders.indexOf(weightRawCol);
-      const wsIdx = eHeaders.indexOf(weightSecCol);
+      const sIdx = (sourceCol ? eHeaders.indexOf(sourceCol) : -1);
+      const tIdx = (targetCol ? eHeaders.indexOf(targetCol) : -1);
+      const wrIdx = (weightRawCol ? eHeaders.indexOf(weightRawCol) : -1);
+      const wsIdx = (weightSecCol ? eHeaders.indexOf(weightSecCol) : -1);
 
       if (sIdx !== -1 && tIdx !== -1) {
         const edgeById = new Map(edges.map((edge) => [
@@ -381,13 +384,16 @@ export function constructGraph(
       }
     }
 
-    if (parsedData.nodes) {
-      const nodeData = parsedData.nodes;
+    const nodeTables = [
+      ...(parsedData.nodes ? [{ data: parsedData.nodes, mapping }] : []),
+      ...(parsedData.metadataTables || []).filter((table) => table.kind === 'nodes'),
+    ];
+    for (const { data: nodeData, mapping: { nodeIdCol, nodeLabelCol, nodePartitionCol, nodeCommunityCol } } of nodeTables) {
       const nHeaders = nodeData[0] || [];
-      const idIdx = nHeaders.indexOf(nodeIdCol);
-      const lblIdx = nHeaders.indexOf(nodeLabelCol);
-      const partitionIdx = nHeaders.indexOf(nodePartitionCol);
-      const commIdx = nHeaders.indexOf(nodeCommunityCol);
+      const idIdx = (nodeIdCol ? nHeaders.indexOf(nodeIdCol) : -1);
+      const lblIdx = (nodeLabelCol ? nHeaders.indexOf(nodeLabelCol) : -1);
+      const partitionIdx = (nodePartitionCol ? nHeaders.indexOf(nodePartitionCol) : -1);
+      const commIdx = (nodeCommunityCol ? nHeaders.indexOf(nodeCommunityCol) : -1);
 
       if (idIdx !== -1) {
         for (let i = 1; i < nodeData.length; i++) {

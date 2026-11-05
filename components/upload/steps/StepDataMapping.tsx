@@ -4,6 +4,7 @@ import { BaseStepProps, ColumnMappingState, ParsedDataState, TopologyType } from
 interface StepDataMappingProps extends BaseStepProps {
   format: string;
   parsedData: ParsedDataState;
+  setParsedData: React.Dispatch<React.SetStateAction<ParsedDataState>>;
   mapping: ColumnMappingState;
   setMapping: React.Dispatch<React.SetStateAction<ColumnMappingState>>;
   previewGraph: { nodes: any[]; edges: any[] };
@@ -17,6 +18,7 @@ export const StepDataMapping: React.FC<StepDataMappingProps> = ({
   isDarkMode,
   format,
   parsedData,
+  setParsedData,
   mapping,
   setMapping,
   previewGraph,
@@ -35,12 +37,12 @@ export const StepDataMapping: React.FC<StepDataMappingProps> = ({
     setMapping((prev) => ({ ...prev, [key]: value }));
   };
 
-  const renderDropdown = (label: string, value: string, key: keyof ColumnMappingState, options: any[]) => (
+  const renderDropdown = (label: string, value: string, key: keyof ColumnMappingState, options: any[], onChange = updateMappingField) => (
     <div>
       <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>{label}</label>
       <select
         value={value}
-        onChange={(e) => updateMappingField(key, e.target.value)}
+        onChange={(e) => onChange(key, e.target.value)}
         className={`w-full border px-3 py-2 text-[10px] font-mono outline-none ${
           isDarkMode ? 'border-[#333] bg-[#1a1a1a] text-[#E4E3E0]' : 'border-[#141414] bg-white text-[#141414]'
         }`}
@@ -65,12 +67,17 @@ export const StepDataMapping: React.FC<StepDataMappingProps> = ({
     return (
       <div className="mb-4">
         <div className={`text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
-          {title} Preview (First 5 Rows)
+          {title} Preview (Indices start at 0)
         </div>
         <div className={`overflow-x-auto border ${isDarkMode ? 'border-[#333]' : 'border-[#141414]'}`}>
           <table className="w-full text-left text-xs font-mono whitespace-nowrap">
             <thead>
+              <tr className="opacity-60">
+                <th scope="col" className="px-2 py-1">Row / Col</th>
+                {data[0].map((_, j) => <th key={j} scope="col" className="px-2 py-1">{j}</th>)}
+              </tr>
               <tr className={isDarkMode ? 'bg-[#333] text-[#E4E3E0]' : 'bg-[#141414] text-[#E4E3E0]'}>
+                <th scope="row" className="px-2 py-1">0</th>
                 {data[0].map((h: any, j: number) => {
                   const isDataStartRow = applyHighlighting && typeof dataStartRow === 'number' && 0 === dataStartRow;
                   const isDataStartCol = applyHighlighting && typeof dataStartCol === 'number' && j === dataStartCol;
@@ -106,6 +113,7 @@ export const StepDataMapping: React.FC<StepDataMappingProps> = ({
                       isDarkMode ? 'border-[#333]/50 bg-[#141414] hover:bg-[#333]' : 'border-[#141414]/20 bg-white hover:bg-gray-50'
                     }`}
                   >
+                    <th scope="row" className="px-2 py-1 opacity-60">{actualRowIndex}</th>
                     {data[0].map((_: any, j: number) => {
                       const isDataStartRow = applyHighlighting && typeof dataStartRow === 'number' && actualRowIndex === dataStartRow;
                       const isDataStartCol = applyHighlighting && typeof dataStartCol === 'number' && j === dataStartCol;
@@ -190,6 +198,28 @@ export const StepDataMapping: React.FC<StepDataMappingProps> = ({
           </div>
         )}
 
+        {parsedData.metadataTables?.map((table, index) => (
+          <div key={index} className="space-y-4 mb-6">
+            {renderTablePreview(table.data, `${table.kind === 'nodes' ? 'Node' : 'Edge'} Attributes: ${table.name}`)}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              {(table.kind === 'nodes'
+                ? [['Node ID Col', 'nodeIdCol'], ['Label Col', 'nodeLabelCol'], ['Partition Col', 'nodePartitionCol'], ['Community Col', 'nodeCommunityCol']]
+                : [['Source Col', 'sourceCol'], ['Target Col', 'targetCol'], ['Weight Col', 'weightRawCol'], ['Weight (Sec)', 'weightSecCol']]
+              ).map(([label, field]) => (
+                <React.Fragment key={field}>
+                  {renderDropdown(label, String(table.mapping[field as keyof ColumnMappingState]), field as keyof ColumnMappingState, table.data[0] || [], (key, value) => {
+                    setParsedData((prev) => ({
+                      ...prev,
+                      metadataTables: prev.metadataTables?.map((entry, i) => i === index ? { ...entry, mapping: { ...entry.mapping, [key]: value } } : entry),
+                    }));
+                  })}
+                </React.Fragment>
+              ))}
+            </div>
+            <p className="text-[10px] font-mono opacity-60">Unused columns are preserved as custom attributes.</p>
+          </div>
+        ))}
+
         {isFormatDualMatrix && (
           <>
             {renderTablePreview(parsedData.counts, 'Counts Matrix', true)}
@@ -210,7 +240,7 @@ export const StepDataMapping: React.FC<StepDataMappingProps> = ({
                   type="number"
                   value={mapping.dataStartRow}
                   onChange={(e) => updateMappingField('dataStartRow', e.target.value === '' ? '' : parseInt(e.target.value))}
-                  min={1}
+                  min={0}
                   className={`w-full border px-3 py-2 font-mono text-[10px] ${isDarkMode ? 'border-[#333] bg-[#1a1a1a] text-[#E4E3E0]' : 'border-[#141414] bg-white text-[#141414]'}`}
                 />
               </div>
@@ -220,7 +250,7 @@ export const StepDataMapping: React.FC<StepDataMappingProps> = ({
                   type="number"
                   value={mapping.dataStartCol}
                   onChange={(e) => updateMappingField('dataStartCol', e.target.value === '' ? '' : parseInt(e.target.value))}
-                  min={1}
+                  min={0}
                   className={`w-full border px-3 py-2 font-mono text-[10px] ${isDarkMode ? 'border-[#333] bg-[#1a1a1a] text-[#E4E3E0]' : 'border-[#141414] bg-white text-[#141414]'}`}
                 />
               </div>
@@ -281,7 +311,7 @@ export const StepDataMapping: React.FC<StepDataMappingProps> = ({
                 type="number"
                 value={mapping.dataStartRow}
                 onChange={(e) => updateMappingField('dataStartRow', e.target.value === '' ? '' : parseInt(e.target.value))}
-                min={1}
+                min={0}
                 className={`w-full border px-3 py-2 font-mono text-[10px] ${isDarkMode ? 'border-[#333] bg-[#1a1a1a] text-[#E4E3E0]' : 'border-[#141414] bg-white text-[#141414]'}`}
               />
             </div>
@@ -291,7 +321,7 @@ export const StepDataMapping: React.FC<StepDataMappingProps> = ({
                 type="number"
                 value={mapping.dataStartCol}
                 onChange={(e) => updateMappingField('dataStartCol', e.target.value === '' ? '' : parseInt(e.target.value))}
-                min={1}
+                min={0}
                 className={`w-full border px-3 py-2 font-mono text-[10px] ${isDarkMode ? 'border-[#333] bg-[#1a1a1a] text-[#E4E3E0]' : 'border-[#141414] bg-white text-[#141414]'}`}
               />
             </div>

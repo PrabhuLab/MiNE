@@ -1,3 +1,4 @@
+import { isLargeGraph } from '@/services/engines/policy';
 import { isCloudMetricSupported, shouldUseCloud, type ComputeEnginePreference } from '@/services/cloud/config';
 import type { MetricsEngine } from './engine';
 import type { MetricsRequest } from './types';
@@ -40,7 +41,7 @@ export async function computeMetricsRouted(request: MetricsRequest, engine: Comp
     return { result: withEngine(await cloudMetricsEngine.compute(request), 'cloud') };
   } catch (error: any) {
     if (error?.name === 'AbortError' || request.signal?.aborted) throw error;
-    const large = request.nodes.length >= 7_000 || request.edges.length >= 15_000;
+    const large = isLargeGraph(request.nodes.length, request.edges.length);
     const performance = large ? ' This graph is large, so the browser fallback may be slower.' : '';
     return {
       result: withEngine(await graphologyMetricsEngine.compute(request), 'browser', true),

@@ -1,5 +1,7 @@
 import gzip
+import math
 import orjson
+import numpy as np
 
 from conftest import request_payload
 
@@ -79,6 +81,134 @@ def test_sparse_lbm_is_available_only_for_valid_bipartite_graphs(client):
     wrong_graph = client.post("/v1/community", json={**payload, "bipartite": False})
     assert wrong_graph.status_code == 422
     assert wrong_graph.json()["detail"]["code"] == "lbm_graph_type"
+
+
+def test_sparse_lbm_accepts_separate_manual_block_counts(client):
+    payload = request_payload(
+        metricIds=[], bipartite=True,
+        nodeIds=["b1", "a1", "a2", "a3", "a4", "b2", "b3"],
+        edgeSources=[1, 1, 2, 2, 3, 4], edgeTargets=[0, 5, 0, 5, 6, 6],
+        edgeWeights=None, edgeKeys=None, partitions=["B", "A", "A", "A", "A", "B", "B"],
+        community={"algorithm": "lbm", "weightChannel": "unweighted", "clusters": 2, "columnClusters": 3, "seed": 42},
+    )
+    response = client.post("/v1/community", json=payload)
+    assert response.status_code == 200, response.text
+    provenance = response.json()["community"]["provenance"]
+    assert provenance["rowClusters"] == 2
+    assert provenance["columnClusters"] == 3
+    assert provenance["rowPartition"] == "A"
+    assert provenance["columnPartition"] == "B"
+
+
+def test_sparse_icl_selection_uses_best_model_and_reports_score(client, monkeypatch):
+    import sparsebm
+
+    calls = []
+
+    class SelectedModel:
+        trained_successfully_ = True
+        n_clusters = 2
+        labels = [0, 1, 1]
+        loglikelihood_ = -12.5 + math.log(3) / 2 + 2 * math.log(6)
+        group_connection_probabilities = np.array([[0.1, 0.2], [0.2, 0.3]])
+        predict_proba = np.array([[1, 0], [0, 1], [0, 1]])
+        group_membership_probability = np.array([1 / 3, 2 / 3])
+
+        def get_params(self):
+            return {"n_clusters": self.n_clusters}
+
+        def get_ICL(self):
+            return -12.5
+
+    class Selection:
+        best = SelectedModel()
+
+        def items(self):
+            return [(2, self.best), (4, self.best)]
+
+    class ModelSelection:
+        def __init__(self, model_type, **kwargs):
+            calls.append((model_type, kwargs))
+
+        def fit(self, graph, **kwargs):
+            calls.append((graph.shape, kwargs))
+            return Selection()
+
+    monkeypatch.setattr(sparsebm, "ModelSelection", ModelSelection)
+    payload = request_payload(
+        metricIds=[], edgeWeights=None, edgeKeys=None,
+        community={"algorithm": "sbm", "weightChannel": "unweighted", "blockSelection": "icl", "maxClusters": 8, "seed": 42},
+    )
+    response = client.post("/v1/community", json=payload)
+    assert response.status_code == 200, response.text
+    body = response.json()["community"]
+    assert body["membership"] == [0, 1, 1]
+    assert body["provenance"]["icl"] == -12.5
+    assert body["provenance"]["selectedClusters"] == 2
+    assert body["provenance"]["exploredModels"] == 2
+    assert calls == [("SBM", {"n_clusters_max": 3, "use_gpu": False, "plot": False}), ((3, 3), {"symmetric": True})]
+
+
+def test_sparse_lbm_icl_selects_partition_counts_within_limit(client, monkeypatch):
+    import sparsebm
+
+    class SelectedModel:
+        trained_successfully_ = True
+        n_row_clusters = 2
+        n_column_clusters = 1
+        row_labels = [0, 0, 1, 1]
+        column_labels = [0, 0, 0]
+        group_connection_probabilities = np.array([[0.5], [0.25]])
+        row_predict_proba = np.array([[1, 0], [1, 0], [0, 1], [0, 1]])
+        column_predict_proba = np.array([[1], [1], [1]])
+        row_group_membership_probability = np.array([0.5, 0.5])
+        column_group_membership_probability = np.array([1])
+
+        @property
+        def loglikelihood_(self):
+            return self.get_ICL() + (self.n_row_clusters - 1) / 2 * math.log(4) + (self.n_column_clusters - 1) / 2 * math.log(3) + self.n_row_clusters * self.n_column_clusters / 2 * math.log(12)
+
+        def get_params(self):
+            return {"n_row_clusters": self.n_row_clusters, "n_column_clusters": self.n_column_clusters}
+
+        def get_ICL(self):
+            return -9.0
+
+    class OverLimitModel(SelectedModel):
+        n_row_clusters = 4
+        n_column_clusters = 3
+
+        def get_ICL(self):
+            return 100.0
+
+    class Selection:
+        def items(self):
+            return [((2, 1), SelectedModel()), ((4, 3), OverLimitModel())]
+
+    class ModelSelection:
+        def __init__(self, model_type, **kwargs):
+            assert model_type == "LBM"
+            assert kwargs["n_clusters_max"] == 5
+
+        def fit(self, graph):
+            assert graph.shape == (4, 3)
+            return Selection()
+
+    monkeypatch.setattr(sparsebm, "ModelSelection", ModelSelection)
+    payload = request_payload(
+        metricIds=[], bipartite=True,
+        nodeIds=["b1", "a1", "a2", "a3", "a4", "b2", "b3"],
+        edgeSources=[1, 1, 2, 2, 3, 4], edgeTargets=[0, 5, 0, 5, 6, 6],
+        edgeWeights=None, edgeKeys=None, partitions=["B", "A", "A", "A", "A", "B", "B"],
+        community={"algorithm": "lbm", "weightChannel": "unweighted", "blockSelection": "icl", "maxClusters": 5, "seed": 42},
+    )
+    response = client.post("/v1/community", json=payload)
+    assert response.status_code == 200, response.text
+    body = response.json()["community"]
+    assert body["provenance"]["rowClusters"] == 2
+    assert body["provenance"]["columnClusters"] == 1
+    assert body["provenance"]["icl"] == -9.0
+    assert body["membership"] == [2, 0, 0, 1, 1, 2, 2]
 
 
 def test_topology_validation_does_not_silently_change_graph(client):

@@ -1,4 +1,5 @@
 import type { CloudAnalyzeRequest, CloudAnalyzeResponse } from './types';
+import { validateBlockModelDiagnostics } from '../communities/diagnostics.ts';
 
 export function validateCloudResponse(request: CloudAnalyzeRequest, response: CloudAnalyzeResponse): void {
   if (response.schemaVersion !== 'mine-igraph-1') throw new Error(`Unsupported cloud schema: ${response.schemaVersion}`);
@@ -11,6 +12,12 @@ export function validateCloudResponse(request: CloudAnalyzeRequest, response: Cl
     if (!response.positions.x.every(Number.isFinite) || !response.positions.y.every(Number.isFinite)) throw new Error('Cloud response contains non-finite coordinates.');
   }
   if (response.community && response.community.membership.length !== response.nodeCount) throw new Error('Cloud community response has the wrong membership length.');
+  if (response.community?.diagnostics) {
+    const diagnostics = response.community.diagnostics;
+    validateBlockModelDiagnostics(diagnostics);
+    if (diagnostics.algorithm !== response.community.algorithm || diagnostics.input.nodeIds.length !== request.nodeIds.length
+      || diagnostics.input.nodeIds.some((id, index) => id !== request.nodeIds[index])) throw new Error('Cloud fitted model node order does not match the request.');
+  }
   Object.entries(response.nodeMetrics || {}).forEach(([id, values]) => {
     if (values.length !== response.nodeCount) throw new Error(`Cloud node metric ${id} has the wrong array length.`);
   });

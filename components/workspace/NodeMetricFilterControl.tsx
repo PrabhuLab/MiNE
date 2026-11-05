@@ -4,6 +4,7 @@ import React, { useMemo } from 'react';
 import { useStore } from '@/store/useStore';
 import { buildAttributeRegistry } from '@/services/attributes/registry';
 import { numericExtent } from '@/lib/utils';
+import { numericFilterValue } from '@/lib/workspaceUtils';
 
 interface NodeMetricFilterControlProps {
   nodes: any[];
@@ -27,7 +28,7 @@ const LABELS: Record<string, string> = {
 };
 
 const rangeOf = (values: unknown[]) => {
-  const finite = values.map(Number).filter(Number.isFinite);
+  const finite = values.map(numericFilterValue).filter(Number.isFinite);
   const extent = numericExtent(finite) || [0, 1];
   const [minimum, rawMaximum] = extent;
   const maximum = rawMaximum === minimum ? minimum + 1 : rawMaximum;
@@ -44,18 +45,18 @@ export function NodeMetricFilterControl({ nodes, networkMetrics }: NodeMetricFil
   const options = useMemo(() => {
     const labels = new Map<string, string>();
     ['degree', 'inDegree', 'outDegree'].forEach((attribute) => {
-      if (records.some((record) => Number.isFinite(Number(record[attribute])))) labels.set(attribute, LABELS[attribute]);
+      if (records.some((record) => Number.isFinite(numericFilterValue(record[attribute])))) labels.set(attribute, LABELS[attribute]);
     });
     registry.filter((descriptor) => descriptor.scope === 'node' && descriptor.numeric).forEach((descriptor) => {
-      if (records.some((record) => Number.isFinite(Number(record[descriptor.name])))) labels.set(descriptor.name, descriptor.label);
+      if (records.some((record) => Number.isFinite(numericFilterValue(record[descriptor.name])))) labels.set(descriptor.name, descriptor.label);
     });
     const metricAttributes = new Set(networkMetrics.flatMap((entry) => Object.keys(entry || {})));
     metricAttributes.forEach((attribute) => {
       if (attribute === 'id' || ['deltaQ', 'k_i_in', 'nodeDegree', 'communityDegree'].includes(attribute)) return;
-      if (records.some((record) => Number.isFinite(Number(record[attribute])))) labels.set(attribute, LABELS[attribute] || labelFallback(attribute));
+      if (records.some((record) => Number.isFinite(numericFilterValue(record[attribute])))) labels.set(attribute, LABELS[attribute] || labelFallback(attribute));
     });
     // Legacy all-in-one files may only contain the original deltaQ column.
-    if (!labels.has('louvainDeltaQ') && records.some((record) => Number.isFinite(Number(record.deltaQ)))) labels.set('deltaQ', 'Louvain ΔQ (Legacy)');
+    if (!labels.has('louvainDeltaQ') && records.some((record) => Number.isFinite(numericFilterValue(record.deltaQ)))) labels.set('deltaQ', 'Louvain ΔQ (Legacy)');
     return Array.from(labels, ([value, label]) => ({ value, label })).sort((a, b) => {
       if (a.value === 'degree') return -1;
       if (b.value === 'degree') return 1;
@@ -105,7 +106,7 @@ export function NodeMetricFilterControl({ nodes, networkMetrics }: NodeMetricFil
             <input type="range" aria-label="Maximum node metric filter slider" min={selectedRange.minimum} max={selectedRange.maximum} step={selectedRange.step} value={selected.max} onChange={(event) => update(selected.min, Number(event.target.value))} className="mine-range-end absolute left-0 top-2 w-full" />
           </div>
           <div className="flex justify-between text-[9px] font-mono opacity-60"><span>{selectedRange.minimum}</span><span>{selectedRange.maximum}</span></div>
-          <p className="text-[9px] font-mono opacity-55">Filters the graph and tables while preserving the metric&apos;s calculation basis.</p>
+          <p className="text-[9px] font-mono opacity-55">Missing values stay as connection context. Calculated metrics keep their calculation basis.</p>
         </div>
       )}
     </div>

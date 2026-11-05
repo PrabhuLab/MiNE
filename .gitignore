@@ -1,5 +1,6 @@
 node_modules/
 .next/
+.next-dev/
 out/
 coverage/
 .DS_Store
@@ -10,3 +11,9 @@ coverage/
 tsconfig.tsbuildinfo
 tsconfig.tsbuildinfo
 *.tsbuildinfo
+
+# Local generated codebase map and extraction cache
+graphify-out/
+/.agents
+/notes
+skills-lock.json
