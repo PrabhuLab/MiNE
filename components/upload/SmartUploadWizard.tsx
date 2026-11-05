@@ -218,9 +218,9 @@ export default function SmartUploadWizard() {
 
   const handleFinalize = () => {
     setIsProcessing(true);
+    const canonical = graphToRaw(graphFromRaw(previewGraph.nodes, previewGraph.edges, isDirected, topology === 'Bipartite'));
     resetCommunityColorCache();
     clearStore();
-    const canonical = graphToRaw(graphFromRaw(previewGraph.nodes, previewGraph.edges, isDirected, topology === 'Bipartite'));
     setRawData(canonical.nodes, canonical.edges, isDirected, topology === 'Bipartite');
     const inferredCustomAttributes = [...inferCustomNodeAttributes(canonical.nodes), ...inferCustomEdgeAttributes(canonical.edges)];
     useStore.setState((state) => ({
@@ -241,54 +241,60 @@ export default function SmartUploadWizard() {
   };
 
   const applyParsedNetwork = (parsed: ParsedNetwork, restoreVisualization = Boolean(parsed.workspace)) => {
-    const communityRuns = restoreBlockModelRuns(parsed.metrics?.metadata?.communityRuns);
-    const { nodes, edges } = graphToRaw(parsed.graph);
-    const workspace = parsed.workspace;
-    const inferredCustomAttributes = [...inferCustomNodeAttributes(nodes), ...inferCustomEdgeAttributes(edges)];
-    resetCommunityColorCache();
-    clearStore();
-    const defaultFilters = useStore.getState().filters;
-    const nextFilters = workspace?.filters ? {
-      ...defaultFilters,
-      ...workspace.filters,
-      edgeFilter: migrateWorkspaceFilters(workspace.filters, edges),
-      weightFilters: undefined,
-      communityAttribute: '',
-      nodeColorBase: workspace.filters.nodeColorBase === 'community' ? 'uniform' : workspace.filters.nodeColorBase,
-    } : {
-      ...defaultFilters,
-      communityAttribute: '',
-      nodeColorBase: 'uniform',
-      edgeColorBase: 'uniform',
-      edgeColorNodeMetric: '',
-      edgeColorNodeTarget: 'source' as const,
-    };
-    useStore.setState({
-      rawNodes: nodes,
-      rawEdges: edges,
-      directed: workspace?.graphMode.directed ?? parsed.directed,
-      bipartite: workspace?.graphMode.bipartite ?? parsed.bipartite,
-      importedMetrics: parsed.metrics,
-      communityRuns,
-      restoredVisualization: restoreVisualization,
-      projectName: workspace?.projectName || parsed.projectName || networkFiles[0]?.name.replace(/\.[^.]+$/, '') || 'NEW_PROJECT_NAME',
-      computeEngine: migrateComputationPreference(workspace, nodes.length, edges.length),
-      rendererEngine: workspace ? migrateRendererPreference(workspace) : useStore.getState().rendererEngine,
-      filters: nextFilters,
-      isDarkMode: workspace?.appearance.isDarkMode ?? useStore.getState().isDarkMode,
-      showNodeLabels: workspace?.appearance.showNodeLabels ?? false,
-      showArrowheads: workspace?.appearance.showArrowheads ?? false,
-      communityMap: workspace?.appearance.communityMap || {},
-      legendColorOverrides: workspace?.appearance.legendColorOverrides || {},
-      customAttributes: mergeCustomAttributeMetadata(
-        inferredCustomAttributes,
-        (workspace?.appearance.customAttributes || parsed.metrics?.metadata?.attributeDescriptors)?.map((attribute: any) => ({ ...attribute, drivesCommunity: false })),
-      ),
-      hiddenLegendItems: workspace?.visibility.hiddenLegendItems || [],
-      isolatedLegendItem: workspace?.visibility.isolatedLegendItem || null,
-      isolatedCommunityId: workspace?.visibility.isolatedCommunityId || null,
-    });
-    router.push('/workspace');
+    const previous = useStore.getState();
+    try {
+      const communityRuns = restoreBlockModelRuns(parsed.metrics?.metadata?.communityRuns);
+      const { nodes, edges } = graphToRaw(parsed.graph);
+      const workspace = parsed.workspace;
+      const inferredCustomAttributes = [...inferCustomNodeAttributes(nodes), ...inferCustomEdgeAttributes(edges)];
+      resetCommunityColorCache();
+      clearStore();
+      const defaultFilters = useStore.getState().filters;
+      const nextFilters = workspace?.filters ? {
+        ...defaultFilters,
+        ...workspace.filters,
+        edgeFilter: migrateWorkspaceFilters(workspace.filters, edges),
+        weightFilters: undefined,
+        communityAttribute: '',
+        nodeColorBase: workspace.filters.nodeColorBase === 'community' ? 'uniform' : workspace.filters.nodeColorBase,
+      } : {
+        ...defaultFilters,
+        communityAttribute: '',
+        nodeColorBase: 'uniform',
+        edgeColorBase: 'uniform',
+        edgeColorNodeMetric: '',
+        edgeColorNodeTarget: 'source' as const,
+      };
+      useStore.setState({
+        rawNodes: nodes,
+        rawEdges: edges,
+        directed: workspace?.graphMode.directed ?? parsed.directed,
+        bipartite: workspace?.graphMode.bipartite ?? parsed.bipartite,
+        importedMetrics: parsed.metrics,
+        communityRuns,
+        restoredVisualization: restoreVisualization,
+        projectName: workspace?.projectName || parsed.projectName || networkFiles[0]?.name.replace(/\.[^.]+$/, '') || 'NEW_PROJECT_NAME',
+        computeEngine: migrateComputationPreference(workspace, nodes.length, edges.length),
+        rendererEngine: workspace ? migrateRendererPreference(workspace) : useStore.getState().rendererEngine,
+        filters: nextFilters,
+        isDarkMode: workspace?.appearance.isDarkMode ?? useStore.getState().isDarkMode,
+        showNodeLabels: workspace?.appearance.showNodeLabels ?? false,
+        showArrowheads: workspace?.appearance.showArrowheads ?? false,
+        communityMap: workspace?.appearance.communityMap || {},
+        legendColorOverrides: workspace?.appearance.legendColorOverrides || {},
+        customAttributes: mergeCustomAttributeMetadata(
+          inferredCustomAttributes,
+          (workspace?.appearance.customAttributes || parsed.metrics?.metadata?.attributeDescriptors)?.map((attribute: any) => ({ ...attribute, drivesCommunity: false })),
+        ),
+        hiddenLegendItems: workspace?.visibility.hiddenLegendItems || [],
+        isolatedLegendItem: workspace?.visibility.isolatedLegendItem || null,
+        isolatedCommunityId: workspace?.visibility.isolatedCommunityId || null,
+      });
+      router.push('/workspace');
+    } catch (importError) {
+      useStore.setState(previous);
+      throw importError;
+    }
   };
 
   const handleUnifiedImport = async () => {
@@ -400,6 +406,7 @@ export default function SmartUploadWizard() {
             isDarkMode={isDarkMode}
             topology={topology}
             setTopology={setTopology}
+            onBack={() => { setTopology(null); setError(null); }}
             onNext={() => setStep(2)}
           />
         )}

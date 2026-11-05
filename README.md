@@ -77,7 +77,7 @@ pytest
 uvicorn app.main:app --host 0.0.0.0 --port 8080 --workers 1
 ```
 
-Set `NEXT_PUBLIC_MINE_IGRAPH_API_URL=http://127.0.0.1:8080` in `.env.local`, then restart the frontend. Deployment and resource-limit notes are in [backend/README.md](backend/README.md).
+Set `NEXT_PUBLIC_MINE_IGRAPH_API_URL=http://127.0.0.1:8080` in `.env.local`, then restart the frontend. The container configuration is in [backend/Dockerfile](backend/Dockerfile), and resource limits are in [backend/app/config.py](backend/app/config.py).
 
 ## Verification
 

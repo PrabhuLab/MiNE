@@ -59,3 +59,9 @@ test('static layout cancellation and worker failure terminate the worker', async
   assert.equal(await completed, positions);
   assert.equal(worker.terminated, true);
 });
+
+test('zero repulsion is preserved by the static layout and worker', () => {
+  const zero = computeForceDirectedLayout(nodes, edges, false, 0);
+  assert.notDeepEqual(zero, computeForceDirectedLayout(nodes, edges, false, -100));
+  assert.deepEqual(command({ type: 'static', nodes, edges, directed: false, forceStrength: 0 }).positions, zero);
+});

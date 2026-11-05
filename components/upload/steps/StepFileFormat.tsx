@@ -1,4 +1,5 @@
 import React from 'react';
+import { FileDropzone } from '../FileDropzone';
 import { BaseStepProps, WizardFilesState } from '../types';
 
 interface StepFileFormatProps extends BaseStepProps {
@@ -65,18 +66,18 @@ export const StepFileFormat: React.FC<StepFileFormatProps> = ({
               <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
                 Standard JSON Upload
               </label>
-              <label className={dropzoneClass}>
+              <FileDropzone className={dropzoneClass} accept=".json" onFiles={(files) => setFilesState((prev) => ({ ...prev, jsonFile: files[0] }))}>
                 <div className="flex flex-col items-center justify-center">
-                  <p className="text-[10px] font-bold tracking-widest uppercase">Select File</p>
+                  <p className="text-[10px] font-bold tracking-widest uppercase">Drop file or click to browse</p>
                   <p className="text-[10px] font-mono opacity-60 mt-1">{filesState.jsonFile?.name || '---'}</p>
                 </div>
                 <input
                   type="file"
-                  className="hidden"
+                  className="sr-only"
                   accept=".json"
                   onChange={(e) => setFilesState((prev) => ({ ...prev, jsonFile: e.target.files?.[0] || null }))}
                 />
-              </label>
+              </FileDropzone>
             </div>
           )}
 
@@ -85,18 +86,18 @@ export const StepFileFormat: React.FC<StepFileFormatProps> = ({
               <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
                 Matrix Dataset (CSV)
               </label>
-              <label className={dropzoneClass}>
+              <FileDropzone className={dropzoneClass} accept=".csv" onFiles={(files) => setFilesState((prev) => ({ ...prev, singleMatrixFile: files[0] }))}>
                 <div className="flex flex-col items-center justify-center">
-                  <p className="text-[10px] font-bold tracking-widest uppercase">Select File</p>
+                  <p className="text-[10px] font-bold tracking-widest uppercase">Drop file or click to browse</p>
                   <p className="text-[10px] font-mono opacity-60 mt-1">{filesState.singleMatrixFile?.name || '---'}</p>
                 </div>
                 <input
                   type="file"
-                  className="hidden"
+                  className="sr-only"
                   accept=".csv"
                   onChange={(e) => setFilesState((prev) => ({ ...prev, singleMatrixFile: e.target.files?.[0] || null }))}
                 />
-              </label>
+              </FileDropzone>
             </div>
           )}
 
@@ -106,35 +107,35 @@ export const StepFileFormat: React.FC<StepFileFormatProps> = ({
                 <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
                   Raw Matrix (CSV)
                 </label>
-                <label className={dropzoneClass}>
+                <FileDropzone className={dropzoneClass} accept=".csv" onFiles={(files) => setFilesState((prev) => ({ ...prev, countsFile: files[0] }))}>
                   <div className="flex flex-col items-center justify-center">
-                    <p className="text-[10px] font-bold tracking-widest uppercase">Select File</p>
+                    <p className="text-[10px] font-bold tracking-widest uppercase">Drop file or click to browse</p>
                     <p className="text-[10px] font-mono opacity-60 mt-1">{filesState.countsFile?.name || '---'}</p>
                   </div>
                   <input
                     type="file"
-                    className="hidden"
+                    className="sr-only"
                     accept=".csv"
                     onChange={(e) => setFilesState((prev) => ({ ...prev, countsFile: e.target.files?.[0] || null }))}
                   />
-                </label>
+                </FileDropzone>
               </div>
               <div>
                 <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
                   Secondary Matrix (CSV)
                 </label>
-                <label className={dropzoneClass}>
+                <FileDropzone className={dropzoneClass} accept=".csv" onFiles={(files) => setFilesState((prev) => ({ ...prev, percentagesFile: files[0] }))}>
                   <div className="flex flex-col items-center justify-center">
-                    <p className="text-[10px] font-bold tracking-widest uppercase">Select File</p>
+                    <p className="text-[10px] font-bold tracking-widest uppercase">Drop file or click to browse</p>
                     <p className="text-[10px] font-mono opacity-60 mt-1">{filesState.percentagesFile?.name || '---'}</p>
                   </div>
                   <input
                     type="file"
-                    className="hidden"
+                    className="sr-only"
                     accept=".csv"
                     onChange={(e) => setFilesState((prev) => ({ ...prev, percentagesFile: e.target.files?.[0] || null }))}
                   />
-                </label>
+                </FileDropzone>
               </div>
             </div>
           )}
@@ -145,18 +146,18 @@ export const StepFileFormat: React.FC<StepFileFormatProps> = ({
                 <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
                   Edges (CSV) *
                 </label>
-                <label className={dropzoneClass}>
+                <FileDropzone className={dropzoneClass} accept=".csv" onFiles={(files) => setFilesState((prev) => ({ ...prev, edgesFile: files[0] }))}>
                   <div className="flex flex-col items-center justify-center">
-                    <p className="text-[10px] font-bold tracking-widest uppercase">Select File</p>
+                    <p className="text-[10px] font-bold tracking-widest uppercase">Drop file or click to browse</p>
                     <p className="text-[10px] font-mono opacity-60 mt-1">{filesState.edgesFile?.name || '---'}</p>
                   </div>
                   <input
                     type="file"
-                    className="hidden"
+                    className="sr-only"
                     accept=".csv"
                     onChange={(e) => setFilesState((prev) => ({ ...prev, edgesFile: e.target.files?.[0] || null }))}
                   />
-                </label>
+                </FileDropzone>
               </div>
             </div>
           )}
@@ -166,18 +167,18 @@ export const StepFileFormat: React.FC<StepFileFormatProps> = ({
               <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`}>
                 Adjacency List (CSV)
               </label>
-              <label className={dropzoneClass}>
+              <FileDropzone className={dropzoneClass} accept=".csv" onFiles={(files) => setFilesState((prev) => ({ ...prev, adjListFile: files[0] }))}>
                 <div className="flex flex-col items-center justify-center">
-                  <p className="text-[10px] font-bold tracking-widest uppercase">Select File</p>
+                  <p className="text-[10px] font-bold tracking-widest uppercase">Drop file or click to browse</p>
                   <p className="text-[10px] font-mono opacity-60 mt-1">{filesState.adjListFile?.name || '---'}</p>
                 </div>
                 <input
                   type="file"
-                  className="hidden"
+                  className="sr-only"
                   accept=".csv"
                   onChange={(e) => setFilesState((prev) => ({ ...prev, adjListFile: e.target.files?.[0] || null }))}
                 />
-              </label>
+              </FileDropzone>
             </div>
           )}
         </div>
@@ -200,9 +201,9 @@ export const StepFileFormat: React.FC<StepFileFormatProps> = ({
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {(['nodeFiles', 'additionalEdgeFiles'] as const).map((key) => (
                     <div key={key}>
-                      <label className={`${dropzoneClass} focus-within:outline focus-within:outline-2`}>
+                      <FileDropzone className={dropzoneClass} accept=".csv" multiple onFiles={(files) => setFilesState((prev) => ({ ...prev, [key]: [...prev[key], ...files] }))}>
                         <span className="text-[10px] font-bold uppercase tracking-widest">
-                          Add {key === 'nodeFiles' ? 'Node' : 'Edge'} Lists (CSV) [Optional]
+                          Drop or add {key === 'nodeFiles' ? 'Node' : 'Edge'} Lists (CSV) [Optional]
                         </span>
                         <input
                           type="file"
@@ -215,7 +216,7 @@ export const StepFileFormat: React.FC<StepFileFormatProps> = ({
                             e.target.value = '';
                           }}
                         />
-                      </label>
+                      </FileDropzone>
                       <ul className="mt-2 space-y-2 text-xs font-mono">
                         {filesState[key].map((file, index) => (
                           <li key={index} className="flex items-center justify-between gap-2">

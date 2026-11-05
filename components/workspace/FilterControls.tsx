@@ -10,6 +10,7 @@ export function FilterControls({ rawNodes }: { rawNodes: any[] }) {
     <div>
       <h3 className="mb-3 text-[10px] font-bold uppercase tracking-widest opacity-70">Manual Node Removal</h3>
       <SyncTextInput
+        ariaLabel="Remove nodes by ID"
         value={filters.removedNodes}
         onChange={(value: string) => setFilter('removedNodes', value)}
         placeholder="e.g. NodeA, NodeB"

@@ -11,6 +11,7 @@ import type { MetricGraphContext, MetricsSelection } from '@/services/metrics/ty
 import type { CommunitySettings } from '@/services/communities/types';
 
 interface WorkspaceSidebarProps {
+  onClearFilters: () => void;
   isSidebarCollapsed: boolean;
   setIsSidebarCollapsed: (v: boolean) => void;
   handleImportWorkspace: (e: React.ChangeEvent<HTMLInputElement>) => void;
@@ -33,6 +34,7 @@ interface WorkspaceSidebarProps {
 }
 
 export const WorkspaceSidebar = ({
+  onClearFilters,
   isSidebarCollapsed,
   setIsSidebarCollapsed,
   handleImportWorkspace,
@@ -81,9 +83,9 @@ export const WorkspaceSidebar = ({
       <div className="flex items-center justify-between">
         <h2 className="text-xs font-bold uppercase tracking-widest">Controls</h2>
         <div className="flex items-center space-x-2">
-          <label className={`p-1.5 rounded-full hover:bg-black/10 dark:hover:bg-white/10 transition-colors cursor-pointer ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`} title="Import Workspace Settings JSON (settings only)">
+          <label className={`relative p-1.5 rounded-full hover:bg-black/10 dark:hover:bg-white/10 transition-colors cursor-pointer ${isDarkMode ? 'text-[#E4E3E0]' : 'text-[#141414]'}`} title="Import Workspace Settings JSON (settings only)">
             <Download size={16} className="rotate-180" />
-            <input type="file" accept=".json" className="hidden" onChange={handleImportWorkspace} />
+            <input type="file" accept=".json" aria-label="Import workspace settings" className="absolute inset-0 w-full opacity-0 cursor-pointer" onChange={handleImportWorkspace} />
           </label>
           <button 
             onClick={() => setIsDarkMode(!isDarkMode)}
@@ -102,7 +104,7 @@ export const WorkspaceSidebar = ({
         </div>
       </div>
 
-      <SimulationControls setAppliedFilters={setAppliedFilters} appliedFilters={appliedFilters} rawNodes={rawNodes} filterNodes={filterNodes} networkMetrics={networkMetrics} edgeMetrics={edgeMetrics} />
+      <SimulationControls onClearFilters={onClearFilters} setAppliedFilters={setAppliedFilters} appliedFilters={appliedFilters} rawNodes={rawNodes} filterNodes={filterNodes} networkMetrics={networkMetrics} edgeMetrics={edgeMetrics} />
          
       <div className={`h-px w-full my-4 ${isDarkMode ? 'bg-[#333]' : 'bg-[#ccc]'}`}></div>
 

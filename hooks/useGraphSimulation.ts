@@ -127,6 +127,7 @@ export function useGraphSimulation({
 
 
   const fitD3NodeSet = useCallback((nodeIds: string[], duration = 450, isAutoReapply = false) => {
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) duration = 0;
     const fitRequest = isAutoReapply
       ? pendingFitRef.current
       : { nodeIds: [...nodeIds], duration };

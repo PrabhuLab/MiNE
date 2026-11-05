@@ -6,7 +6,7 @@ import { CommunityFilterControl } from './CommunityFilterControl';
 import { FilterControls } from './FilterControls';
 import { NodeMetricFilterControl } from './NodeMetricFilterControl';
 
-export const SimulationControls = ({ setAppliedFilters, appliedFilters, rawNodes, filterNodes, networkMetrics, edgeMetrics }: { setAppliedFilters: (val: any) => void; appliedFilters: any; rawNodes: any[]; filterNodes: any[]; networkMetrics: any[]; edgeMetrics: any[] }) => {
+export const SimulationControls = ({ onClearFilters, setAppliedFilters, appliedFilters, rawNodes, filterNodes, networkMetrics, edgeMetrics }: { onClearFilters: () => void; setAppliedFilters: (val: any) => void; appliedFilters: any; rawNodes: any[]; filterNodes: any[]; networkMetrics: any[]; edgeMetrics: any[] }) => {
   const { filters, setFilter, isDarkMode,  } = useStore();
   const pending = JSON.stringify({ ...filters, liveUpdate: appliedFilters.liveUpdate }) !== JSON.stringify(appliedFilters);
 
@@ -53,6 +53,7 @@ export const SimulationControls = ({ setAppliedFilters, appliedFilters, rawNodes
           <NodeMetricFilterControl nodes={filterNodes} networkMetrics={networkMetrics} />
           <CommunityFilterControl nodes={rawNodes} networkMetrics={networkMetrics} />
           <FilterControls rawNodes={rawNodes} />
+          {(filters.nodeFilter || filters.edgeFilter || filters.communityFilter || filters.removedNodes) && <button onClick={onClearFilters} className="w-full border border-current py-2 text-xs font-semibold">Clear filters</button>}
       </div>
     </div>
   );
