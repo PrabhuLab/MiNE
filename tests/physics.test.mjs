@@ -16,6 +16,15 @@ test('static worker preserves the existing force layout and reports invalid endp
   assert.ok(command({ type: 'static', nodes, edges: [{ source: 'a', target: 'missing' }], forceStrength: -100 }).error);
 });
 
+test('ForceAtlas2 uses reproducible finite positions, including isolated nodes', () => {
+  const data = {type: 'static', algorithm: 'forceatlas2', nodes: [...nodes, { id: 'isolated' }], edges};
+  const {positions} = command(data);
+  assert.deepEqual([...positions.keys()], ['a', 'b', 'isolated']);
+  assert.ok([...positions.values()].every(({x, y}) => Number.isFinite(x) && Number.isFinite(y)));
+  assert.notDeepEqual(positions.get('a'), positions.get('b'));
+  assert.deepEqual(command(data).positions, positions);
+});
+
 test('live physics only advances when requested, pins exactly, releases and cools', () => {
   assert.equal(command({ type: 'start', nodes: structuredClone(nodes), links: structuredClone(edges), forceStrength: -100 }), undefined);
   const first = command({ type: 'tick' });

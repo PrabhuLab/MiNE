@@ -160,9 +160,8 @@ export default function SigmaGraph({
   }, [selectedElement, nodes, edges, directed]);
 
   useEffect(() => {
-    setHiddenLegendItems([]);
     setClickedNode(null);
-  }, [refreshKey, setHiddenLegendItems]);
+  }, [refreshKey]);
 
   const {
     customColorMap,
@@ -431,14 +430,14 @@ export default function SigmaGraph({
       sigmaRef.current = null;
     }
 
-    const sigmaInstance = new Sigma(graph, containerRef.current, {
+    const rendererOptions = {
       primitives: SIGMA_PRIMITIVES,
       styles: SIGMA_STYLES as any,
       settings: {
         allowInvalidContainer: true,
-        itemSizesReference: 'screen',
+        itemSizesReference: 'screen' as const,
         zoomToSizeRatioFunction: () => 1,
-        autoRescale: 'once',
+        autoRescale: 'once' as const,
         hideEdgesOnMove: false,
         hideLabelsOnMove: false,
         renderEdgeLabels: false,
@@ -451,10 +450,14 @@ export default function SigmaGraph({
       },
       nodeReducer: createSigmaNodeReducer(styleRefs),
       edgeReducer: createSigmaEdgeReducer(graph, styleRefs),
-    });
+    };
+    const sigmaInstance = new Sigma(graph, containerRef.current, rendererOptions);
 
     sigmaRef.current = sigmaInstance;
-    onRendererReady?.(sigmaInstance);
+    onRendererReady?.(sigmaInstance, (container) => new Sigma(graph, container, {
+      ...rendererOptions,
+      settings: { ...sigmaInstance.getSettings(), enableNodeDrag: false },
+    }));
 
     registerSigmaInteractions({
       sigma: sigmaInstance,

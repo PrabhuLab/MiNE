@@ -15,7 +15,7 @@ def test_seeded_random_layout_is_deterministic_complete_and_finite(client):
 def test_layout_includes_isolated_vertices(client):
     payload = request_payload(
         nodeIds=["a", "b", "isolated"], edgeSources=[0], edgeTargets=[1], edgeWeights=[1], edgeKeys=["e0"],
-        metricIds=[], layout={"algorithm": "circular", "seed": 42, "normalize": True},
+        metricIds=[], layout={"algorithm": "forceatlas2", "seed": 42, "normalize": True},
     )
     response = client.post("/v1/analyze", json=payload)
     assert response.status_code == 200, response.text
@@ -24,18 +24,21 @@ def test_layout_includes_isolated_vertices(client):
     assert all(math.isfinite(value) for value in positions["x"] + positions["y"])
 
 
-def test_bipartite_layout_requires_semantic_partition(client):
-    payload = request_payload(
-        bipartite=True, partitions=[0, 1, 0], metricIds=[],
-        layout={"algorithm": "bipartite", "seed": 42, "normalize": True},
-    )
-    response = client.post("/v1/analyze", json=payload)
-    assert response.status_code == 200, response.text
-    assert len(response.json()["positions"]["x"]) == 3
+def test_sugiyama_preserves_real_node_layers_when_an_edge_skips_a_layer(client):
+    for algorithm in ("sugiyama", "auto"):
+        payload = request_payload(
+            directed=True, metricIds=[], edgeSources=[0, 1, 0], edgeTargets=[1, 2, 2],
+            edgeWeights=[1, 1, 1], edgeKeys=["a", "b", "c"], layout={"algorithm": algorithm},
+        )
+        response = client.post("/v1/analyze", json=payload)
+        assert response.status_code == 200, response.text
+        layers = response.json()["positions"]["y"]
+        assert len(layers) == 3
+        assert layers[1] - layers[0] == layers[2] - layers[1] != 0
 
 
-def test_drl_and_fruchterman_reingold_return_complete_finite_coordinates(client):
-    for algorithm in ("drl", "fruchtermanReingold"):
+def test_force_layouts_return_complete_finite_coordinates(client):
+    for algorithm in ("drl", "fruchtermanReingold", "kamadaKawai", "forceatlas2"):
         payload = request_payload(metricIds=[], layout={"algorithm": algorithm, "seed": 23, "normalize": True})
         response = client.post("/v1/analyze", json=payload)
         assert response.status_code == 200, response.text

@@ -12,11 +12,41 @@ import { computeGraphLegendVisibility, computeLegendVisibility, legendItemId } f
 import { sortLegendEntries } from '../services/graphPresentation/legendOrdering.ts';
 import { graphSettings, liveNumericValue } from '../services/graphStyles/liveUpdate.ts';
 import { viewportRasterDimensions } from '../lib/exportUtils.ts';
+import { DEFAULT_EXPORT_FRAME, exportImageDimensions, frameScale, restoreExportFrame, svgFrameTransform, validExportResolution } from '../services/graphIO/exportFrame.ts';
 import { staleCalculationIds } from '../services/metrics/validity.ts';
 import { degreeByNode, logarithmicNodeSize } from '../services/graphStyles/size.ts';
 import { numericFilterValue, filterDisconnectedNodes, filterNetworkByCommunity, computeActiveNetwork, computeCommunityMetrics, computeTableDataEdges, computeTableDataNodes, filterNetworkByEdgeMetric, filterNetworkByNodeMetric } from '../lib/workspaceUtils.ts';
 import { detectCustomAttributeType } from '../services/graphIO/customAttributes.ts';
-import { getCommunityDisplayMap } from '../lib/communityUtils.ts';
+import { getCommunityColor, getCommunityDisplayMap, resetCommunityColorCache, savedCommunityColors } from '../lib/communityUtils.ts';
+
+test('locked frames round-trip a graph-space camera and use only the export dimensions', () => {
+  const frame = {
+    width: 640, height: 360,
+    camera: { renderer: 'd3', x: 20, y: -10, pixelsPerUnit: 2, angle: 0 },
+  };
+  const restored = restoreExportFrame(JSON.parse(JSON.stringify(frame)));
+  assert.deepEqual(restored, frame);
+  assert.equal(svgFrameTransform(frame), 'translate(280,200) scale(2)');
+  assert.equal(frameScale(frame, { width: 800, height: 600 }), 0.6);
+  assert.deepEqual(restoreExportFrame(), DEFAULT_EXPORT_FRAME);
+  assert.deepEqual(restoreExportFrame({ ...frame, camera: { ...frame.camera, pixelsPerUnit: 0 } }), { width: 640, height: 360 });
+  const highResolution = { ...frame, resolutionScale: 4 };
+  assert.deepEqual(exportImageDimensions(highResolution), { width: 2560, height: 1440 });
+  assert.equal(svgFrameTransform(highResolution), svgFrameTransform(frame));
+  assert.deepEqual(restoreExportFrame(highResolution), highResolution);
+  assert.equal(validExportResolution({ ...highResolution, width: 4096, height: 4096 }), false);
+});
+
+test('workspace palettes restore generated community and attribute colors regardless of lookup order', () => {
+  resetCommunityColorCache();
+  const community = getCommunityColor('Community 1');
+  const attribute = getCommunityColor('attribute:kind=primary');
+  const palette = JSON.parse(JSON.stringify(savedCommunityColors()));
+  resetCommunityColorCache(palette);
+  assert.equal(getCommunityColor('attribute:kind=primary'), attribute);
+  assert.equal(getCommunityColor('Community 1'), community);
+  resetCommunityColorCache();
+});
 
 test('large-graph boundaries prefer Cloud for auto routing without disabling Browser', () => {
   assert.equal(effectiveComputationEngine(6_999, 14_999, 'browser'), 'browser');

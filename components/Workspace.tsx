@@ -16,6 +16,8 @@ import { useSharedGraph } from '@/hooks/useSharedGraph';
 import { useSharedPhysics } from '@/hooks/useSharedPhysics';
 import { useWorkspaceSelection } from '@/hooks/useWorkspaceSelection';
 import { useWorkspaceIO } from '@/hooks/useWorkspaceIO';
+import { ExportFrameDialog } from '@/components/workspace/ExportFrameDialog';
+import type { CreateSigmaExportRenderer } from '@/lib/fixedFrameExport';
 import { useGraphLayouts } from '@/hooks/useGraphLayouts';
 import { numericExtent } from '@/lib/utils';
 import { resolveComputeEngine } from '@/services/cloud/config';
@@ -35,15 +37,16 @@ import { ModularityTables } from '@/components/workspace/ModularityTables';
 import { isSecondaryNode } from '@/services/graphPresentation/visibility';
 import { LayoutControls } from '@/components/workspace/LayoutControls';
 
-export default function Workspace() {
-  const { rawNodes, rawEdges, filters, communityMap, communityRuns, customAttributes, directed, bipartite, computeEngine, rendererEngine, isDarkMode, selectedElement, setSelectedElement, projectName } = useStore();
+export default function Workspace({ showIsolates: comparisonWorkspace = false }: { showIsolates?: boolean }) {
+  const { rawNodes, rawEdges, filters, communityMap, communityRuns, customAttributes, directed, bipartite, computeEngine, rendererEngine, isDarkMode, selectedElement, setSelectedElement, projectName, showIsolates: savedShowIsolates } = useStore();
+  const showIsolates = comparisonWorkspace || savedShowIsolates;
 
   const {
     appliedFilters,
     setAppliedFilters,
     validNodes,
     validEdges,
-  } = useGraphFilters();
+  } = useGraphFilters(showIsolates);
 
   const [isSwitchingRenderer, setIsSwitchingRenderer] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -75,6 +78,7 @@ export default function Workspace() {
     metricsToRun,
     setMetricsToRun,
     metricsLoading,
+    cancelCalculations,
     runSelectedMetrics,
     runCommunity,
     invalidateLayoutMetrics,
@@ -92,8 +96,8 @@ export default function Workspace() {
     [edgeMetricFilteredNetwork, appliedFilters.communityFilter, networkMetrics],
   );
   const connectedNetwork = useMemo(
-    () => filterDisconnectedNodes(communityFilteredNetwork.validNodes, communityFilteredNetwork.validEdges),
-    [communityFilteredNetwork],
+    () => showIsolates ? communityFilteredNetwork : filterDisconnectedNodes(communityFilteredNetwork.validNodes, communityFilteredNetwork.validEdges),
+    [communityFilteredNetwork, showIsolates],
   );
   const displayNodes = connectedNetwork.validNodes;
   const displayEdges = connectedNetwork.validEdges;
@@ -114,12 +118,14 @@ export default function Workspace() {
     clearSelection,
   } = useWorkspaceSelection();
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [showExportFrame, setShowExportFrame] = useState(false);
   const clearFilters = () => {
     const next = { ...useStore.getState().filters, nodeFilter: null, edgeFilter: null, communityFilter: null, removedNodes: '' };
     useStore.setState({ filters: next });
     setAppliedFilters(next);
   };
   const sigmaRendererRef = useRef<Sigma | null>(null);
+  const createSigmaExportRendererRef = useRef<CreateSigmaExportRenderer | null>(null);
 
   const clickedNodeRef = useRef<RawNode | null>(null);
   const clickedEdgeRef = useRef<RawEdge | null>(null);
@@ -247,7 +253,8 @@ export default function Workspace() {
   }, [appliedFilters.edgeWeight, edgeSizeDomain, edgeSizeValue]);
 
   // Unified persistent Graphology instance (using D3 static layout pre-rendering)
-  const { graph, isReady, layoutRevision, staticLayoutRevision, topologyKey, positioningError, cloudRouted, runRefreshLayout, notifyLayoutChange, applyExternalPositions } = useSharedGraph({
+  const graphGeneration = useStore(state => state.graphGeneration);
+  const { graph, isReady, layoutRevision, staticLayoutRevision, topologyKey, positioningError, runRefreshLayout, notifyLayoutChange, applyLayoutPositions } = useSharedGraph({
     nodes: displayNodes,
     edges: presentationEdges,
     directed,
@@ -255,7 +262,7 @@ export default function Workspace() {
     forceStrength: appliedFilters.forceStrength ?? -100,
     livePhysics: appliedFilters.livePhysics,
     graphRevision,
-    computeEngine: effectiveEngine,
+    graphGeneration,
     weightAttribute: appliedFilters.metricWeightAttribute || 'weight_raw',
     isDarkMode,
     getNodeColor,
@@ -273,19 +280,18 @@ export default function Workspace() {
   const layoutController = useGraphLayouts({
     graph,
     nodes: displayNodes,
-    edges: displayEdges,
     topologyKey,
     livePhysics: appliedFilters.livePhysics,
     setLivePhysics: (enabled) => {
       useStore.getState().setFilter('livePhysics', enabled);
       setAppliedFilters((current: typeof appliedFilters) => ({ ...current, livePhysics: enabled }));
     },
-    notifyLayoutChange,
-    onLayoutStarted: invalidateLayoutMetrics,
+    onLayoutApplied: invalidateLayoutMetrics,
     directed,
     bipartite,
-    cloudRouted,
-    applyExternalPositions,
+    cloudRouted: effectiveEngine === 'cloud',
+    ready: isReady && displayNodes.length > 0,
+    applyLayoutPositions,
     weightAttribute: appliedFilters.metricWeightAttribute || 'weight_raw',
     forceStrength: appliedFilters.forceStrength ?? -100,
   });
@@ -310,6 +316,7 @@ export default function Workspace() {
 
   const handleRefresh = useCallback(() => {
     setIsSwitchingRenderer(true);
+    useStore.getState().setHiddenLegendItems([]);
     runRefreshLayout();
     setRefreshKey((k) => k + 1);
     setTimeout(() => {
@@ -324,7 +331,7 @@ export default function Workspace() {
       .map(n => n.name || n.id);
   }, [displayNodes, rawNodes]);
 
-  const { handleImportWorkspace, handleExport } = useWorkspaceIO({
+  const { handleImportWorkspace, handleExport, captureFrame, buildFrameImage } = useWorkspaceIO({
     graph,
     rawNodes,
     rawEdges,
@@ -334,6 +341,10 @@ export default function Workspace() {
     projectName,
     useSigma,
     sigmaRendererRef,
+    createSigmaExportRendererRef,
+    showIsolates,
+    appliedFilters,
+    getLivePosition: appliedFilters.livePhysics && !useSigma ? id => d3NodesMapRef.current.get(id) : undefined,
     communityMap,
     networkMetrics,
     nodeMetrics,
@@ -357,6 +368,7 @@ export default function Workspace() {
 
   return (
     <div className={`flex flex-1 overflow-hidden h-full w-full transition-colors ${isDarkMode ? 'bg-[#141414] text-[#E4E3E0]' : 'bg-[#E4E3E0] text-[#141414]'}`}>
+      {showExportFrame && <ExportFrameDialog captureFrame={captureFrame} buildFrameImage={buildFrameImage} onClose={() => setShowExportFrame(false)} />}
       {/* SIDEBAR CONTROL PANEL */}
       
       <WorkspaceSidebar 
@@ -369,10 +381,11 @@ export default function Workspace() {
         runSelectedMetrics={runSelectedMetrics}
         runCommunity={runCommunity}
         metricsLoading={metricsLoading}
+        cancelCalculations={cancelCalculations}
         metricContext={metricContext}
         staleMetricIds={staleMetricIds}
         metricWarnings={metricWarnings}
-        layoutControls={effectiveEngine === 'cloud' ? <LayoutControls {...layoutController} /> : undefined}
+        layoutControls={<LayoutControls {...layoutController} />}
         rawNodes={rawNodes}
         rawEdges={rawEdges}
         filterNodes={validNodes}
@@ -434,6 +447,7 @@ export default function Workspace() {
                   {!useSigma && <button onClick={() => handleExport('svg')} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>Export as SVG</button>}
                   <button onClick={() => handleExport('png')} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>Export as PNG</button>
                   <button onClick={() => handleExport('jpeg')} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>Export as JPG</button>
+                  <button onClick={() => { setShowExportMenu(false); setShowExportFrame(true); }} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>Fixed-size export…</button>
                   <button onClick={() => handleExport('legend')} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>Export Legend as Image</button>
                   <div className={`h-px w-full ${isDarkMode ? 'bg-[#333]' : 'bg-[#eee]'}`}></div>
                   <button onClick={() => handleExport('json')} className={`text-left px-4 py-3 hover:opacity-100 transition-opacity opacity-70 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>Graphology JSON</button>
@@ -515,7 +529,10 @@ export default function Workspace() {
                   beginDrag={beginDrag}
                   movePinnedNode={movePinnedNode}
                   endDrag={endDrag}
-                  onRendererReady={(renderer) => { sigmaRendererRef.current = renderer; }}
+                  onRendererReady={(renderer, createExportRenderer) => {
+                    sigmaRendererRef.current = renderer;
+                    createSigmaExportRendererRef.current = createExportRenderer ?? null;
+                  }}
                 />
               ) : isReady ? (
                 <D3Graph 
@@ -571,8 +588,8 @@ export default function Workspace() {
           </>
         ) : (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 px-8 text-center">
-            <h2 className="text-lg font-semibold">{rawNodes.length ? 'No connected nodes match these filters' : 'Start with a network'}</h2>
-            <p className="max-w-sm text-sm opacity-70">{rawNodes.length ? 'Try a wider range or clear the filters to restore your network. Nodes without connections are hidden.' : 'Upload a network file or generate a sample network to explore MiNE.'}</p>
+            <h2 className="text-lg font-semibold">{rawNodes.length ? 'No nodes match these filters' : 'Start with a network'}</h2>
+            <p className="max-w-sm text-sm opacity-70">{rawNodes.length ? 'Try a wider range or clear the filters to restore your network.' : 'Upload a network file or generate a sample network to explore MiNE.'}</p>
             {rawNodes.length > 0 && (appliedFilters.nodeFilter || appliedFilters.edgeFilter || appliedFilters.communityFilter || appliedFilters.removedNodes)
               ? <button onClick={clearFilters} className="border border-current px-4 py-2 text-sm font-semibold">Clear filters</button>
               : <Link href="/upload" className="border border-current px-4 py-2 text-sm font-semibold">Upload a network</Link>}

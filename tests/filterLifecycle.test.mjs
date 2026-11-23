@@ -39,6 +39,7 @@ function hookHarness(path, overrides) {
     },
   };
   const source = readFileSync(new URL(path, import.meta.url), 'utf8');
+  react.useLayoutEffect = react.useEffect;
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true } });
   const exports = {};
   new Function('require', 'exports', compiled.outputText)(name => name === 'react' ? react : overrides[name] ?? require(name), exports);
@@ -95,11 +96,11 @@ test('positioned filtering keeps renderer readiness and static layout revision s
   const harness = hookHarness('../hooks/useSharedGraph.ts', {
     '@/services/layouts/d3Worker': { computeForceDirectedLayoutAsync() { throw new Error('Positioned filters must not run layout'); } },
     '@/services/graphStyles/colors': { updateGraphColors }, '@/services/graphPresentation/visibility': { isSecondaryNode },
-    '@/services/cloud/revision': { computeGraphRevisions }, '@/services/cloud/config': { shouldUseCloud: () => false },
+    '@/services/cloud/revision': { computeGraphRevisions },
   });
   const nodes = [{ id: 'a', x: 0, y: 0 }, { id: 'b', x: 10, y: 10 }, { id: 'c', x: 20, y: 20 }];
   const edges = [{ source: 'a', target: 'b' }, { source: 'b', target: 'c' }];
-  const props = { nodes, edges, graphRevision: 'raw', directed: false, bipartite: false, getNodeColor: () => '#000', getNodeSize: () => 5, getEdgeColor: () => '#000', getEdgeSize: () => 1, getEdgeOpacity: () => 1, getShouldShowArrowhead: () => false };
+  const props = { nodes, edges, graphGeneration: 1, graphRevision: 'raw', directed: false, bipartite: false, getNodeColor: () => '#000', getNodeSize: () => 5, getEdgeColor: () => '#000', getEdgeSize: () => 1, getEdgeOpacity: () => 1, getShouldShowArrowhead: () => false };
   try {
     harness.render(props);
     await new Promise(resolve => setTimeout(resolve, 0));
@@ -115,9 +116,17 @@ test('positioned filtering keeps renderer readiness and static layout revision s
     await new Promise(resolve => setTimeout(resolve, 0));
     assert.equal(harness.render(props).staticLayoutRevision, initial.staticLayoutRevision);
     assert.equal(initial.graph.order, 3);
-    const replacement = { ...props, graphRevision: 'replacement' };
+    initial.applyLayoutPositions({ filterRevision: initial.topologyKey, positions: {
+      a: { x: 1, y: 2 }, b: { x: 3, y: 4 }, c: { x: 5, y: 6 },
+    } }, true);
+    const styled = harness.render({ ...props, getNodeSize: () => 7 });
+    assert.equal(styled.graph.getNodeAttribute('b', 'x'), 3);
+    assert.equal(styled.staticLayoutRevision, initial.staticLayoutRevision + 1);
+    const replacement = { ...props, graphGeneration: 2 };
     harness.render(replacement);
     await new Promise(resolve => setTimeout(resolve, 0));
-    assert.equal(harness.render(replacement).staticLayoutRevision, initial.staticLayoutRevision + 1);
+    const imported = harness.render(replacement);
+    assert.equal(imported.graph.getNodeAttribute('b', 'x'), 10);
+    assert.equal(imported.staticLayoutRevision, initial.staticLayoutRevision + 2);
   } finally { harness.close(); }
 });

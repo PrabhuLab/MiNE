@@ -1,11 +1,12 @@
 'use client';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useStore } from '@/store/useStore';
-import { Sun, Moon } from 'lucide-react';
+import { Moon, Shuffle, Sun } from 'lucide-react';
 import { ComputationEngineControl } from '@/components/workspace/ComputationEngineControl';
 import { MiNEWordmark } from '@/components/MiNEWordmark';
+import { isSecondaryNode, orderPartitionValues } from '@/services/graphPresentation/visibility';
 
 export default function Header() {
   useEffect(() => {
@@ -19,6 +20,28 @@ export default function Header() {
 
   const rawNodes = useStore(state => state.rawNodes);
   const rawEdges = useStore(state => state.rawEdges);
+  const directed = useStore(state => state.directed);
+  const bipartite = useStore(state => state.bipartite);
+  const secondaryCount = useMemo(() => {
+    if (!bipartite) return null;
+    const partitions = orderPartitionValues(rawNodes.flatMap(node => {
+      const value = node.partition ?? node.bipartite ?? node.set;
+      return value == null || value === '' ? [] : [value];
+    }));
+    const secondaryLabel = partitions.length === 2 ? partitions[1] : undefined;
+    return rawNodes.filter(node => {
+      const value = node.partition ?? node.bipartite ?? node.set;
+      const partitionIndex = node.partitionIndex ?? (secondaryLabel !== undefined && String(value) === secondaryLabel ? 1 : undefined);
+      return isSecondaryNode({ ...node, partitionIndex }, true);
+    }).length;
+  }, [bipartite, rawNodes]);
+  const comparison = new URLSearchParams({
+    randomNodes: String(rawNodes.length),
+    randomEdges: String(rawEdges.length),
+    ...(secondaryCount !== null ? { secondary: String(secondaryCount) } : {}),
+    ...(directed ? { directed: '1' } : {}),
+    source: projectName,
+  });
 
   return (
     <header className={`h-14 border-b flex items-center px-6 justify-between shrink-0 transition-colors ${isDarkMode ? 'bg-[#141414] border-[#333] text-[#E4E3E0]' : 'bg-[#E4E3E0] border-[#141414] text-[#141414]'}`}>
@@ -53,6 +76,20 @@ export default function Header() {
             title="Edit Project Name"
           />
         </div>
+
+        {pathname?.replace(/\/$/, '') === '/workspace' && rawNodes.length > 0 && (
+          <Link
+            href={{ pathname: '/workspace', hash: comparison.toString() }}
+            target="_blank"
+            rel="noopener noreferrer"
+            prefetch={false}
+            className="flex items-center gap-2 rounded border border-current/30 px-2 py-1.5 text-xs font-medium hover:bg-current/10"
+            title="Generate an igraph network with matching counts in a new tab"
+          >
+            <Shuffle size={14} aria-hidden="true" />
+            <span>Random comparison</span>
+          </Link>
+        )}
 
         <ComputationEngineControl nodeCount={rawNodes.length} edgeCount={rawEdges.length} compact />
 

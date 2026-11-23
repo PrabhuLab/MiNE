@@ -138,10 +138,14 @@ export function canonicalExportGraph(
   metrics: ImportedMetricsBundle,
   directed: boolean,
   bipartite: boolean,
+  getLivePosition?: (id: string) => { x: number; y: number } | undefined,
 ): Graph {
   const graph = graphFromRaw(rawNodes, rawEdges, directed, bipartite);
   const sourcePositions = new Map<string, { x?: number; y?: number }>();
-  sourceGraph.forEachNode((node, attrs) => sourcePositions.set(node, { x: attrs.x, y: attrs.y }));
+  sourceGraph.forEachNode((node, attrs) => {
+    const { x, y } = getLivePosition?.(node) ?? attrs;
+    sourcePositions.set(node, { x, y });
+  });
 
   graph.forEachNode((node) => {
     const pos = sourcePositions.get(node);

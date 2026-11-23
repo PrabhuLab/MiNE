@@ -3,6 +3,7 @@ import type { SerializedGraph } from 'graphology-types';
 import type { CustomAttributeMetadata, ImportedMetricsBundle, WorkspaceFilters } from '@/store/useStore';
 import type { ComputeEngine } from '@/services/cloud/config';
 import type { ComputationEngine, Renderer, RendererPreference } from '@/services/engines/policy';
+import type { ExportFrame } from './exportFrame';
 
 export const NETWORK_WORKSPACE_FORMAT = 'network-workspace' as const;
 export const WORKSPACE_SETTINGS_FORMAT = 'workspace-settings' as const;
@@ -24,6 +25,7 @@ export interface WorkspaceSettingsDocument {
     showNodeLabels: boolean;
     showArrowheads: boolean;
     communityMap: Record<string, string>;
+    communityColors?: Record<string, string>;
     customAttributes?: CustomAttributeMetadata[];
     legendColorOverrides?: Record<string, string>;
     isLegendMinimized?: boolean;
@@ -34,7 +36,8 @@ export interface WorkspaceSettingsDocument {
     isolatedCommunityId: string | null;
   };
   calculations: { selected: Record<string, boolean> };
-  layout: { livePhysics: boolean; forceStrength: number };
+  layout: { livePhysics: boolean; forceStrength: number; showIsolates?: boolean };
+  exportFrame?: ExportFrame;
 }
 
 export interface AllInOneDocument {

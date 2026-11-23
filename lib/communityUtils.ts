@@ -93,9 +93,18 @@ export function oklchToHex(l: number, c: number, hDeg: number): string {
 /**
  * Resets community color cache and picks a fresh random starting hue for new network imports.
  */
-export function resetCommunityColorCache() {
+export function resetCommunityColorCache(colors?: Record<string, string>) {
   communityColorRegistry.clear();
+  if (colors && typeof colors === 'object') {
+    Object.entries(colors).forEach(([key, color]) => {
+      if (typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color)) communityColorRegistry.set(key, color);
+    });
+  }
   startHue = Math.floor(Math.random() * 360);
+}
+
+export function savedCommunityColors(): Record<string, string> {
+  return Object.fromEntries(communityColorRegistry);
 }
 
 /**

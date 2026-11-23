@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { useStore } from '@/store/useStore';
 import { restoreBlockModelRuns } from '@/services/communities/diagnostics';
 import { resetCommunityColorCache } from '@/lib/communityUtils';
+import { restoreExportFrame } from '@/services/graphIO/exportFrame';
 import { TopologyType, WizardFilesState, ColumnMappingState, ParsedDataState } from './types';
 import { parseCSVFile } from './utils/parseHelpers';
 import { constructGraph } from './utils/graphConstructors';
@@ -246,8 +247,9 @@ export default function SmartUploadWizard() {
       const communityRuns = restoreBlockModelRuns(parsed.metrics?.metadata?.communityRuns);
       const { nodes, edges } = graphToRaw(parsed.graph);
       const workspace = parsed.workspace;
+      const exportFrame = restoreExportFrame(workspace?.exportFrame);
       const inferredCustomAttributes = [...inferCustomNodeAttributes(nodes), ...inferCustomEdgeAttributes(edges)];
-      resetCommunityColorCache();
+      resetCommunityColorCache(workspace?.appearance?.communityColors);
       clearStore();
       const defaultFilters = useStore.getState().filters;
       const nextFilters = workspace?.filters ? {
@@ -255,8 +257,6 @@ export default function SmartUploadWizard() {
         ...workspace.filters,
         edgeFilter: migrateWorkspaceFilters(workspace.filters, edges),
         weightFilters: undefined,
-        communityAttribute: '',
-        nodeColorBase: workspace.filters.nodeColorBase === 'community' ? 'uniform' : workspace.filters.nodeColorBase,
       } : {
         ...defaultFilters,
         communityAttribute: '',
@@ -275,16 +275,20 @@ export default function SmartUploadWizard() {
         restoredVisualization: restoreVisualization,
         projectName: workspace?.projectName || parsed.projectName || networkFiles[0]?.name.replace(/\.[^.]+$/, '') || 'NEW_PROJECT_NAME',
         computeEngine: migrateComputationPreference(workspace, nodes.length, edges.length),
-        rendererEngine: workspace ? migrateRendererPreference(workspace) : useStore.getState().rendererEngine,
+        rendererEngine: exportFrame.camera?.renderer ?? (workspace ? migrateRendererPreference(workspace) : useStore.getState().rendererEngine),
         filters: nextFilters,
         isDarkMode: workspace?.appearance.isDarkMode ?? useStore.getState().isDarkMode,
         showNodeLabels: workspace?.appearance.showNodeLabels ?? false,
         showArrowheads: workspace?.appearance.showArrowheads ?? false,
         communityMap: workspace?.appearance.communityMap || {},
         legendColorOverrides: workspace?.appearance.legendColorOverrides || {},
+        exportFrame,
+        showIsolates: workspace?.layout?.showIsolates === true,
+        isLegendMinimized: workspace?.appearance.isLegendMinimized ?? false,
         customAttributes: mergeCustomAttributeMetadata(
           inferredCustomAttributes,
-          (workspace?.appearance.customAttributes || parsed.metrics?.metadata?.attributeDescriptors)?.map((attribute: any) => ({ ...attribute, drivesCommunity: false })),
+          workspace?.appearance.customAttributes
+            ?? parsed.metrics?.metadata?.attributeDescriptors?.map((attribute: any) => ({ ...attribute, drivesCommunity: false })),
         ),
         hiddenLegendItems: workspace?.visibility.hiddenLegendItems || [],
         isolatedLegendItem: workspace?.visibility.isolatedLegendItem || null,

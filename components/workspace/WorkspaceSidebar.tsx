@@ -20,6 +20,7 @@ interface WorkspaceSidebarProps {
   runSelectedMetrics: (metricIds?: string[]) => void;
   runCommunity: (settings: CommunitySettings) => void;
   metricsLoading: boolean;
+  cancelCalculations: () => void;
   metricContext: MetricGraphContext;
   staleMetricIds: string[];
   metricWarnings: Record<string, string>;
@@ -43,6 +44,7 @@ export const WorkspaceSidebar = ({
   runSelectedMetrics,
   runCommunity,
   metricsLoading,
+  cancelCalculations,
   metricContext,
   staleMetricIds,
   metricWarnings,
@@ -122,6 +124,7 @@ export const WorkspaceSidebar = ({
         runSelectedMetrics={runSelectedMetrics}
         runCommunity={runCommunity}
         metricsLoading={metricsLoading}
+        cancelCalculations={cancelCalculations}
         metricContext={metricContext}
         staleMetricIds={staleMetricIds}
         metricWarnings={metricWarnings}

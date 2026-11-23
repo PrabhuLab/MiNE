@@ -2,13 +2,13 @@ import type { ComputeEngine } from './config';
 import type { BlockModelDiagnostics } from '../communities/diagnostics';
 
 export interface CloudLayoutSpec {
-  algorithm: 'auto' | 'drl' | 'fruchtermanReingold' | 'kamadaKawai' | 'circular' | 'random' | 'bipartite' | 'sugiyama';
+  algorithm: 'auto' | 'drl' | 'fruchtermanReingold' | 'kamadaKawai' | 'random' | 'sugiyama' | 'forceatlas2';
   seed?: number;
   normalize?: boolean;
   iterations?: number;
 }
 
-export type CommunityAlgorithm = 'louvain' | 'infomap' | 'labelPropagation' | 'walktrap' | 'fastGreedy' | 'sbm' | 'lbm';
+export type CommunityAlgorithm = 'louvain' | 'walktrap' | 'fastGreedy' | 'sbm' | 'lbm';
 export type CommunityWeightChannel = 'unweighted' | 'weight_raw' | 'weight_secondary';
 
 export interface CloudCommunitySpec {
@@ -16,7 +16,6 @@ export interface CloudCommunitySpec {
   weightChannel: CommunityWeightChannel;
   resolution?: number;
   iterations?: number;
-  trials?: number;
   steps?: number;
   seed?: number;
   clusters?: number;

@@ -2,6 +2,7 @@ import type Graph from 'graphology';
 import type Sigma from 'sigma';
 import type { RawEdge, RawNode } from '@/store/useStore';
 import type { GraphFocusRequest } from '@/services/workspace/types';
+import type { CreateSigmaExportRenderer } from '@/lib/fixedFrameExport';
 
 export type { GraphFocusRequest } from '@/services/workspace/types';
 
@@ -44,5 +45,5 @@ export interface SigmaGraphProps {
   beginDrag?: (id: string, x: number, y: number) => void;
   movePinnedNode?: (id: string, x: number, y: number) => void;
   endDrag?: (id: string) => void;
-  onRendererReady?: (renderer: Sigma | null) => void;
+  onRendererReady?: (renderer: Sigma | null, createExportRenderer?: CreateSigmaExportRenderer) => void;
 }

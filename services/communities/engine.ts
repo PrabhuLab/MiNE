@@ -1,4 +1,4 @@
-import { createMetricsGraph, graphologyMetricsEngine } from '@/services/metrics/graphologyEngine';
+import { createMetricsGraph, graphologyMetricsEngine, undirectedLouvainGraph } from '@/services/metrics/graphologyEngine';
 import { requestCloudAnalysis } from '@/services/cloud/coordinator';
 import { buildCloudAnalyzeRequest } from '@/services/cloud/request';
 import type { CommunityComputationResult, CommunityRequest } from './types';
@@ -7,12 +7,11 @@ import { communityMembershipLabels } from './labels';
 
 const resultIdOf = (algorithm: string) => `community_${algorithm}`;
 const labelOf = (algorithm: string) => ({
-  louvain: 'Louvain', infomap: 'Infomap', labelPropagation: 'Label Propagation', walktrap: 'Walktrap', fastGreedy: 'Fast Greedy', sbm: 'Sparse SBM', lbm: 'Sparse LBM',
+  louvain: 'Louvain', walktrap: 'Walktrap', fastGreedy: 'Fast Greedy', sbm: 'Sparse SBM', lbm: 'Sparse LBM',
 } as Record<string, string>)[algorithm] || algorithm;
 
 export async function computeCommunityInBrowser(request: CommunityRequest): Promise<CommunityComputationResult> {
   if (request.settings.algorithm !== 'louvain') throw new Error('Browser mode supports Louvain only. Select Cloud for this algorithm.');
-  if (request.directed) throw new Error('Browser Louvain requires an undirected graph.');
   const result = await graphologyMetricsEngine.compute({
     nodes: request.nodes,
     edges: request.edges,
@@ -70,11 +69,11 @@ export async function computeCommunityInCloud(request: CommunityRequest): Promis
     const graph = createMetricsGraph({
       nodes: request.nodes,
       edges: request.edges,
-      directed: false,
+      directed: request.directed,
       weightAttribute: request.settings.weightChannel === 'unweighted' ? '__unweighted' : request.settings.weightChannel,
     });
     const rawMemberships = Object.fromEntries(legacyRequest.nodeIds.map((id, index) => [id, String(memberships[index])]));
-    const localNodeMetrics = computeCommunityMetrics(graph, rawMemberships, false, request.settings.resolution);
+    const localNodeMetrics = computeCommunityMetrics(undirectedLouvainGraph(graph), rawMemberships, false, request.settings.resolution);
     return {
       resultId: resultIdOf('louvain'),
       algorithm: 'louvain',
@@ -98,7 +97,6 @@ export async function computeCommunityInCloud(request: CommunityRequest): Promis
       weightChannel: request.settings.weightChannel,
       resolution: request.settings.resolution,
       iterations: request.settings.iterations,
-      trials: request.settings.trials,
       steps: request.settings.steps,
       seed: request.settings.seed,
       ...(['sbm', 'lbm'].includes(request.settings.algorithm) ? {

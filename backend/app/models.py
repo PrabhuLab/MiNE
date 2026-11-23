@@ -11,15 +11,22 @@ class ApiModel(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="forbid")
 
 
+class RandomNetworkRequest(ApiModel):
+    node_count: int = Field(ge=1)
+    edge_count: int = Field(ge=0)
+    secondary_count: int | None = Field(default=None, ge=0)
+    directed: bool = False
+
+
 class LayoutSpec(ApiModel):
-    algorithm: Literal["auto", "drl", "fruchtermanReingold", "kamadaKawai", "bipartite", "sugiyama", "circular", "random"]
+    algorithm: Literal["auto", "drl", "fruchtermanReingold", "kamadaKawai", "sugiyama", "random", "forceatlas2"]
     seed: int = 42
     normalize: bool = True
     iterations: int = Field(default=500, ge=1, le=10000)
 
 
 class CommunitySpec(ApiModel):
-    algorithm: Literal["louvain", "infomap", "labelPropagation", "walktrap", "fastGreedy", "sbm", "lbm"]
+    algorithm: Literal["louvain", "walktrap", "fastGreedy", "sbm", "lbm"]
     weight_channel: Literal["unweighted", "weight_raw", "weight_secondary"] = "unweighted"
     resolution: float = Field(default=1.0, gt=0)
     iterations: int = Field(default=2, ge=-1, le=1000)

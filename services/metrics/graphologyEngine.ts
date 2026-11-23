@@ -46,6 +46,15 @@ export function calculateTopologyMetrics(nodes: any[], edges: any[], directed: b
   return { nodeIds: graph.nodes(), degreeByNode, declaredCommunities };
 }
 
+/** Retain both arcs of a reciprocal pair as undirected edge contributions. */
+export function undirectedLouvainGraph(graph: Graph): Graph {
+  if (graph.type === 'undirected') return graph;
+  const undirected = new Graph({ type: 'undirected', multi: true, allowSelfLoops: false });
+  graph.forEachNode((id) => undirected.addNode(id));
+  graph.forEachEdge((_id, { weight }, source, target) => undirected.addEdge(source, target, { weight }));
+  return undirected;
+}
+
 function graphContext(graph: any, request: MetricsRequest): MetricGraphContext {
   const weights = graph.mapEdges((_edge: string, attributes: any) => Number(attributes.weight)).filter(Number.isFinite);
   const weighted = weights.some((weight: number) => weight !== 1);
@@ -74,7 +83,8 @@ class GraphologyMetricsEngine implements MetricsEngine {
 
     if (request.runLouvain && graph.size > 0) {
       try {
-        const details = louvain.detailed(graph, { rng: seedrandom(request.louvainSeed), resolution: request.resolution, getEdgeWeight: 'weight', fastLocalMoves: true });
+        const undirected = undirectedLouvainGraph(graph);
+        const details = louvain.detailed(undirected, { rng: seedrandom(request.louvainSeed), resolution: request.resolution, getEdgeWeight: 'weight', fastLocalMoves: true });
         const normalized = normalize_communities(details.communities as Record<string, number>);
         const communityMap = Object.fromEntries(Object.entries(normalized).map(([node, community]) => [node, String(community)]));
         Object.entries(normalized).forEach(([node, community]) => {
@@ -82,7 +92,7 @@ class GraphologyMetricsEngine implements MetricsEngine {
           metricsByNode[node].louvain = label;
           graph.setNodeAttribute(node, 'community', String(community));
         });
-        const nodeMetrics = computeCommunityMetrics(graph, communityMap, request.directed, request.resolution);
+        const nodeMetrics = computeCommunityMetrics(undirected, communityMap, false, request.resolution);
         nodeMetrics.forEach((entry: any) => Object.assign(metricsByNode[String(entry.id)], entry));
         louvainResult = { nodeMetrics, modularity: details.modularity };
         graphMetrics.louvainModularity = details.modularity;

@@ -3,6 +3,7 @@ name = "mine-igraph-backend"
 version = "0.3.0"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+  "fa2==1.1.2",
   "fastapi==0.116.1",
   "igraph==0.11.9",
   "orjson==3.11.1",

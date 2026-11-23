@@ -23,10 +23,6 @@ export const CLOUD_METRIC_IDS = new Set([
   'eigenvector', 'hits', 'pagerank', 'louvain', 'modularity',
 ]);
 
-export const CLOUD_LAYOUT_IDS = new Set([
-  'auto', 'drl', 'fruchtermanReingold', 'kamadaKawai', 'cloudCircular', 'cloudRandom', 'bipartite', 'sugiyama',
-]);
-
 export const MINE_IGRAPH_API_URL = (process.env.NEXT_PUBLIC_MINE_IGRAPH_API_URL || '').replace(/\/$/, '');
 
 export type CloudBackendState = 'not-configured' | 'idle' | 'checking' | 'available' | 'unavailable';
@@ -115,10 +111,6 @@ export function resolveComputeEngine(
 
 export function isCloudMetricSupported(metricId: string): boolean {
   return CLOUD_METRIC_IDS.has(metricId);
-}
-
-export function isCloudLayoutSupported(layoutId: string): boolean {
-  return CLOUD_LAYOUT_IDS.has(layoutId);
 }
 
 export function requireCloudUrl(): string {

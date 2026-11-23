@@ -180,9 +180,8 @@ export default function D3Graph({
   }, [selectedElement, nodes, edges, directed]);
 
   useEffect(() => {
-    setHiddenLegendItems([]);
     setClickedNode(null);
-  }, [refreshKey, setHiddenLegendItems]);
+  }, [refreshKey]);
 
   const {
     customColorMap,

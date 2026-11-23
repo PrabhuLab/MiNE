@@ -6,6 +6,17 @@ import numpy as np
 from conftest import request_payload
 
 
+def test_random_network_matches_bipartite_counts(client):
+    request = {"nodeCount": 15, "edgeCount": 20, "secondaryCount": 5}
+    response = client.post("/v1/random-network", json=request)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["types"] == [False] * 10 + [True] * 5
+    assert len(body["edges"]) == len({tuple(edge) for edge in body["edges"]}) == 20
+    assert all(body["types"][source] != body["types"][target] for source, target in body["edges"])
+    assert client.post("/v1/random-network", json={**request, "edgeCount": 51}).status_code == 422
+
+
 def test_health_and_capabilities(client):
     assert client.get("/health").json()["status"] == "ok"
     capabilities = client.get("/v1/capabilities").json()
@@ -13,14 +24,14 @@ def test_health_and_capabilities(client):
     assert "pagerank" in capabilities["supportedMetricIds"]
     assert "drl" in capabilities["supportedLayoutIds"]
     algorithm_ids = {item["id"] for item in capabilities["communityAlgorithms"]}
-    assert algorithm_ids >= {"louvain", "infomap", "labelPropagation", "walktrap"}
-    assert "leiden" not in algorithm_ids
+    assert algorithm_ids >= {"louvain", "walktrap"}
+    assert algorithm_ids.isdisjoint({"leiden", "infomap", "labelPropagation"})
     assert capabilities["limits"]["maxNodes"] > 0
     assert capabilities["exactMetricThresholds"]["edgeBetweenness"]["maxNodes"] < capabilities["limits"]["maxNodes"]
 
 
 def test_gzip_contract_is_compact_and_revision_aligned(client):
-    payload = request_payload(metricIds=["degree", "pagerank"], layout={"algorithm": "circular", "seed": 42, "normalize": True})
+    payload = request_payload(metricIds=["degree", "pagerank"], layout={"algorithm": "forceatlas2", "seed": 42, "normalize": True})
     response = client.post(
         "/v1/analyze",
         content=gzip.compress(orjson.dumps(payload)),
@@ -44,6 +55,20 @@ def test_community_contract_preserves_node_order(client):
     body = response.json()
     assert body["community"]["algorithm"] == "louvain"
     assert len(body["community"]["membership"]) == len(payload["nodeIds"])
+
+
+def test_louvain_on_directed_bipartite_graph_retains_reciprocal_weights(client):
+    payload = request_payload(
+        directed=True, bipartite=True, metricIds=["louvain"],
+        edgeSources=[0, 1, 1], edgeTargets=[1, 0, 2], edgeWeights=[2, 3, 7], edgeKeys=["a", "b", "c"],
+        community={"algorithm": "louvain", "weightChannel": "weight_raw"},
+    )
+    response = client.post("/v1/analyze", json=payload)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert len(body["community"]["membership"]) == 3
+    assert body["nodeMetrics"]["nodeStrength"] == [5, 12, 7]
+    assert math.isclose(sum(body["nodeMetrics"]["modularityContribution"]), body["graphMetrics"]["louvainModularity"], abs_tol=1e-12)
 
 
 def test_sparse_sbm_is_available_for_unipartite_graphs(client):

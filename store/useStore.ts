@@ -4,6 +4,7 @@ import type { ComputeEnginePreference } from '@/services/cloud/config';
 import { mergeComputeEnginePreference, persistedComputeEnginePreference } from '@/services/cloud/preference';
 import type { RendererPreference } from '@/services/engines/policy';
 import { restoreBlockModelRuns, type BlockModelRun } from '@/services/communities/diagnostics';
+import { DEFAULT_EXPORT_FRAME, type ExportFrame } from '@/services/graphIO/exportFrame';
 
 export interface RawNode {
   id: string;
@@ -148,6 +149,9 @@ interface AppState {
   isolatedLegendItem: string | null;
   setIsolatedLegendItem: (val: string | null) => void;
   isLegendMinimized: boolean;
+  exportFrame: ExportFrame;
+  showIsolates: boolean;
+  setExportFrame: (frame: ExportFrame) => void;
   setIsLegendMinimized: (val: boolean) => void;
   searchQuery: string;
   setSearchQuery: (val: string) => void;
@@ -204,6 +208,9 @@ export const useStore = create<AppState>()(persist<AppState, [], [], { computeEn
   isolatedLegendItem: null,
   setIsolatedLegendItem: (val) => set({ isolatedLegendItem: val }),
   isLegendMinimized: false,
+  exportFrame: DEFAULT_EXPORT_FRAME,
+  showIsolates: false,
+  setExportFrame: (exportFrame) => set({ exportFrame }),
   setIsLegendMinimized: (val) => set({ isLegendMinimized: val }),
   searchQuery: '',
   setSearchQuery: (val) => set({ searchQuery: val }),
@@ -273,6 +280,8 @@ export const useStore = create<AppState>()(persist<AppState, [], [], { computeEn
     hiddenLegendItems: [],
     isolatedLegendItem: null,
     isLegendMinimized: false,
+    exportFrame: DEFAULT_EXPORT_FRAME,
+    showIsolates: false,
     showArrowheads: false,
     showNodeLabels: false,
     filters: {

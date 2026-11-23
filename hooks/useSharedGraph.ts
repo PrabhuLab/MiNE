@@ -2,14 +2,13 @@
 
 /* eslint-disable react-hooks/set-state-in-effect */
 
-import { useEffect, useCallback, useState, useMemo, useRef } from 'react';
+import { useEffect, useLayoutEffect, useCallback, useState, useMemo, useRef } from 'react';
 import Graph from 'graphology';
 import { RawNode, RawEdge } from '@/store/useStore';
 import { computeForceDirectedLayoutAsync } from '@/services/layouts/d3Worker';
 import { updateGraphColors } from '@/services/graphStyles/colors';
 import { isSecondaryNode } from '@/services/graphPresentation/visibility';
 import { computeGraphRevisions } from '@/services/cloud/revision';
-import { shouldUseCloud, type ComputeEngine } from '@/services/cloud/config';
 import type { LayoutResult } from '@/services/layouts/types';
 
 export type PositionSource = 'imported' | 'local-static' | 'local-live' | 'cloud-static' | 'pending-cloud';
@@ -21,7 +20,7 @@ interface UseSharedGraphProps {
   bipartite: boolean;
   forceStrength?: number;
   livePhysics?: boolean;
-  computeEngine?: ComputeEngine;
+  graphGeneration: number;
   graphRevision?: string;
   weightAttribute?: string;
   isDarkMode?: boolean;
@@ -38,13 +37,16 @@ const finitePosition = (value: any): value is { x: number; y: number } => Number
 
 export function useSharedGraph({
   nodes, edges, directed, bipartite, forceStrength = -100, livePhysics = false,
-  computeEngine = 'auto', graphRevision, weightAttribute = 'weight_raw', isDarkMode, getNodeColor, getNodeSize, getEdgeColor,
+  graphGeneration, graphRevision, weightAttribute = 'weight_raw', isDarkMode, getNodeColor, getNodeSize, getEdgeColor,
   getEdgeSize, getEdgeOpacity, getShouldShowArrowhead, nodeOpacity = 1,
 }: UseSharedGraphProps) {
-  const graph: Graph = useMemo(() => new (Graph as any)({ type: directed ? 'directed' : 'undirected', multi: false }), [directed]);
+  // A fresh import can have identical topology and different saved positions.
+  const graph: Graph = useMemo(() => {
+    return new Graph({ type: directed ? 'directed' : 'undirected', multi: false });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [directed, graphGeneration]);
   const revisions = useMemo(() => computeGraphRevisions(nodes, edges, directed, true, weightAttribute), [nodes, edges, directed, weightAttribute]);
   const topologyKey = revisions.graphRevision;
-  const cloudRouted = shouldUseCloud(nodes.length, edges.length, computeEngine);
   const [readyGraph, setReadyGraph] = useState<Graph | null>(null);
   const [layoutRevision, setLayoutRevision] = useState(0);
   const [staticLayoutRevision, setStaticLayoutRevision] = useState(0);
@@ -58,14 +60,16 @@ export function useSharedGraph({
   const committedTopologyRef = useRef<string | null>(null);
   const isReady = readyGraph === graph && positionSource !== 'pending-cloud';
 
-  useEffect(() => {
+  const cacheGraphRef = useRef(graph);
+  useLayoutEffect(() => {
     topologyRevisionRef.current = topologyKey;
-    if (cacheGraphRevisionRef.current !== graphRevision) {
+    if (cacheGraphRevisionRef.current !== graphRevision || cacheGraphRef.current !== graph) {
       positionCacheRef.current.clear();
       cacheGraphRevisionRef.current = graphRevision;
+      cacheGraphRef.current = graph;
       committedTopologyRef.current = null;
     }
-  }, [graphRevision, topologyKey]);
+  }, [graph, graphRevision, topologyKey]);
 
   const commitPositions = useCallback((source: PositionSource) => {
     graph.forEachNode((id, attrs) => {
@@ -101,17 +105,16 @@ export function useSharedGraph({
 
   useEffect(() => () => layoutAbortRef.current?.abort(), [graph]);
 
-  const applyExternalPositions = useCallback((result: LayoutResult, expectedRevision: string): void => {
-    if (topologyRevisionRef.current !== expectedRevision || result.filterRevision !== expectedRevision) return;
+  const applyLayoutPositions = useCallback((result: LayoutResult, cloud: boolean): void => {
+    if (topologyRevisionRef.current !== result.filterRevision) return;
     const ids = graph.nodes();
-    if (ids.length !== nodes.length || ids.some((id) => !finitePosition(result.positions[id]))) throw new Error('Cloud layout did not return one finite coordinate pair for every current node.');
-    const applyStarted = performance.now();
+    if (ids.length !== nodes.length || ids.some((id) => !finitePosition(result.positions[id]))) throw new Error('The layout did not return one finite coordinate pair for every current node.');
+    layoutAbortRef.current?.abort();
     graph.updateEachNodeAttributes((nodeId: string, attrs: any) => {
       const position = result.positions[nodeId];
       return { ...attrs, x: position.x, y: position.y };
     }, { attributes: ['x', 'y'] });
-    console.info(JSON.stringify({ event: 'mine_cloud_positions_applied', nodes: ids.length, frontendApplicationMs: Number((performance.now() - applyStarted).toFixed(3)) }));
-    commitPositions('cloud-static');
+    commitPositions(cloud ? 'cloud-static' : 'local-static');
   }, [commitPositions, graph, nodes.length]);
 
   useEffect(() => {
@@ -126,8 +129,9 @@ export function useSharedGraph({
 
     let addedUnpositionedNode = false;
     nodes.forEach((node) => {
-      const cached = positionCacheRef.current.get(String(node.id));
-      const supplied = finitePosition(node) ? { x: Number(node.x), y: Number(node.y) } : cached;
+      const current = graph.hasNode(node.id) ? graph.getNodeAttributes(node.id) : undefined;
+      const position = finitePosition(current) ? current : positionCacheRef.current.get(String(node.id)) ?? node;
+      const supplied = finitePosition(position) ? { x: Number(position.x), y: Number(position.y) } : undefined;
       const presentation = {
         ...node, ...(supplied || {}), size: getNodeSize(node), color: getNodeColor(node), opacity: nodeOpacity,
         borderColor: strokeColor, labelColor: strokeColor, label: node.name || node.label || node.id, rawNode: node,
@@ -206,6 +210,6 @@ export function useSharedGraph({
 
   return {
     graph, isReady, layoutRevision, staticLayoutRevision, topologyKey, positionSource,
-    positioningError, cloudRouted, runRefreshLayout, notifyLayoutChange, applyExternalPositions,
+    positioningError, runRefreshLayout, notifyLayoutChange, applyLayoutPositions,
   };
 }

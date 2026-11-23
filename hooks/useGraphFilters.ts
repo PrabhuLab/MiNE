@@ -3,7 +3,7 @@ import { useStore } from '@/store/useStore';
 import { computeActiveNetwork } from '@/lib/workspaceUtils';
 import { graphSettings } from '@/services/graphStyles/liveUpdate';
 
-export function useGraphFilters() {
+export function useGraphFilters(showIsolates = false) {
   const { rawNodes, rawEdges, filters, setFilter } = useStore();
   
   const [appliedFilters, setAppliedFilters] = useState(filters);
@@ -31,7 +31,7 @@ export function useGraphFilters() {
   const edgeFilter = activeFilters.edgeFilter;
   const candidate = useMemo(() => computeActiveNetwork(rawNodes, rawEdges, {
     removedNodes: removedNodesStr, edgeFilter,
-  }), [rawNodes, rawEdges, removedNodesStr, edgeFilter]);
+  }, showIsolates), [rawNodes, rawEdges, removedNodesStr, edgeFilter, showIsolates]);
   const [retained, setRetained] = useState({ candidate, network: candidate });
   let network = retained.network;
   if (retained.candidate !== candidate) {

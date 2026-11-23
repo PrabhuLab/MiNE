@@ -1,182 +1,108 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type Graph from 'graphology';
-import { graphologyLayoutEngine, isContinuousLayout, type LayoutController } from '@/services/layouts/engine';
-import { cloudLayoutEngine } from '@/services/layouts/cloudEngine';
-import type { LayoutAlgorithm, LayoutSettings } from '@/services/layouts/types';
-import { isCloudLayoutSupported } from '@/services/cloud/config';
+import type { RawEdge, RawNode } from '@/store/useStore';
+import { computeCloudLayout } from '@/services/layouts/cloudEngine';
+import type { LayoutAlgorithm, LayoutResult, LayoutSettings } from '@/services/layouts/types';
 import { computeForceDirectedLayoutAsync } from '@/services/layouts/d3Worker';
-
-const DEFAULT_SETTINGS: LayoutSettings = {
-  random: { center: 0, scale: 100 },
-  circular: { center: 0, scale: 100 },
-  circlepack: { center: 0, scale: 100, hierarchyAttributes: ['community'] },
-  noverlap: { gridSize: 20, margin: 5, expansion: 1.1, ratio: 1, speed: 3, maxIterations: 500 },
-  forceatlas2: { adjustSizes: false, barnesHutOptimize: true, barnesHutTheta: 0.5, edgeWeightInfluence: 1, gravity: 1, linLogMode: false, outboundAttractionDistribution: false, scalingRatio: 1, slowDown: 1, strongGravityMode: false },
-  d3Force: {},
-  drl: { seed: 42, normalize: true },
-  auto: { seed: 42, normalize: true },
-  fruchtermanReingold: { seed: 42, normalize: true, iterations: 500 },
-  kamadaKawai: { seed: 42, normalize: true },
-  cloudCircular: { normalize: true },
-  cloudRandom: { seed: 42, normalize: true },
-  bipartite: { normalize: true },
-  sugiyama: { normalize: true },
-};
 
 interface UseGraphLayoutsOptions {
   graph: Graph;
-  nodes: any[];
-  edges: any[];
+  nodes: RawNode[];
   topologyKey: string;
   livePhysics: boolean;
   setLivePhysics: (enabled: boolean) => void;
-  notifyLayoutChange: () => void;
-  onLayoutStarted?: () => void;
-  onLayoutStopped?: () => void;
+  onLayoutApplied: () => void;
   directed: boolean;
   bipartite: boolean;
   cloudRouted: boolean;
-  applyExternalPositions: (result: any, expectedRevision: string) => void;
+  ready: boolean;
+  applyLayoutPositions: (result: LayoutResult, cloud: boolean) => void;
   weightAttribute: string;
   forceStrength: number;
 }
 
 export function useGraphLayouts(options: UseGraphLayoutsOptions) {
-  const [algorithm, setAlgorithm] = useState<LayoutAlgorithm>('d3Force');
-  const [settings, setSettings] = useState<LayoutSettings>(DEFAULT_SETTINGS);
+  const [selection, setAlgorithm] = useState<LayoutAlgorithm>('d3Force');
+  const [settings, setSettings] = useState<Partial<Record<LayoutAlgorithm, LayoutSettings>>>({});
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const controllerRef = useRef<LayoutController | null>(null);
-  const cloudAbortRef = useRef<AbortController | null>(null);
-  const startTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
+  const pending = useRef<AbortController | null>(null);
+  const algorithm = (!options.cloudRouted && selection !== 'd3Force' && selection !== 'forceatlas2')
+    || (!options.directed && selection === 'sugiyama') ? 'd3Force' : selection;
 
-  const stop = useCallback(() => {
-    if (startTimerRef.current !== null) clearTimeout(startTimerRef.current);
-    startTimerRef.current = null;
-    controllerRef.current?.stop();
-    controllerRef.current = null;
-    cloudAbortRef.current?.abort();
-    cloudAbortRef.current = null;
+  const cancel = useCallback(() => {
+    pending.current?.abort();
+    pending.current = null;
     setRunning(false);
-    options.notifyLayoutChange();
-  }, [options]);
-
-  const kill = useCallback(() => {
-    if (startTimerRef.current !== null) clearTimeout(startTimerRef.current);
-    startTimerRef.current = null;
-    controllerRef.current?.kill();
-    controllerRef.current = null;
-    cloudAbortRef.current?.abort();
-    cloudAbortRef.current = null;
-    setRunning(false);
+    setWarning(null);
   }, []);
 
-  const start = useCallback(() => {
+  useLayoutEffect(() => {
+    setRunning(false);
     setError(null);
-    kill();
-    options.onLayoutStarted?.();
+    setWarning(null);
+    return () => {
+      pending.current?.abort();
+      pending.current = null;
+    };
+  }, [options.graph, options.topologyKey, options.cloudRouted, options.directed, options.bipartite]);
+
+  useEffect(() => {
+    if (options.livePhysics && pending.current) cancel();
+  }, [options.livePhysics, cancel]);
+
+  const start = async () => {
+    if (!options.ready || pending.current) return;
+    const controller = new AbortController();
+    pending.current = controller;
+    setError(null);
+    setWarning(null);
+    setRunning(true);
     options.setLivePhysics(false);
-    const request = {
-      graph: options.graph,
-      nodes: options.nodes,
-      edges: options.edges,
-      algorithm,
-      settings,
-      directed: options.directed,
-      bipartite: options.bipartite,
-      graphRevision: options.topologyKey,
-      filterRevision: options.topologyKey,
-      weightAttribute: options.weightAttribute,
-      onTick: options.notifyLayoutChange,
-      onStop: () => {
-        controllerRef.current = null;
-        setRunning(false);
-        options.notifyLayoutChange();
-        options.onLayoutStopped?.();
-      },
-    };
-    const begin = () => {
-      startTimerRef.current = null;
-      try {
-        if (algorithm === 'd3Force') {
-          const controller = new AbortController();
-          cloudAbortRef.current = controller;
-          setRunning(true);
-          void computeForceDirectedLayoutAsync(options.nodes, options.edges, options.directed, options.forceStrength, controller.signal).then((forcePositions) => {
-            if (controller.signal.aborted) return;
-            options.graph.updateEachNodeAttributes((nodeId, attributes) => {
-              const position = forcePositions.get(nodeId);
-              return position ? { ...attributes, ...position } : attributes;
-            }, { attributes: ['x', 'y'] });
-            options.notifyLayoutChange();
-            options.onLayoutStopped?.();
-          }).catch((cause) => {
-            if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause));
-          }).finally(() => {
-            if (cloudAbortRef.current === controller) { cloudAbortRef.current = null; setRunning(false); }
-          });
-          return;
+    try {
+      const edges = options.graph.mapEdges((key, { rawEdge }, source, target): RawEdge => {
+        const weight = Number(rawEdge?.[options.weightAttribute] ?? 1);
+        return { key, source, target, weight_raw: Number.isFinite(weight) ? weight : 1 };
+      }).filter(({ source, target }) => source !== target);
+      const cloud = options.cloudRouted && algorithm !== 'd3Force';
+      let result: LayoutResult;
+      if (cloud) {
+        result = await computeCloudLayout(options.nodes, edges, options.directed, options.bipartite, options.topologyKey,
+          { algorithm, ...settings[algorithm] }, controller.signal);
+      } else {
+        if (algorithm === 'forceatlas2' && edges.some((edge) => edge.weight_raw <= 0)) {
+          edges.forEach((edge) => { edge.weight_raw = 1; });
+          setWarning('ForceAtlas2 used equal edge weights because the selected weights include zero or negative values.');
         }
-        const serverAlgorithm = isCloudLayoutSupported(algorithm);
-        if (!options.cloudRouted && serverAlgorithm) {
-          setError(`${algorithm} requires Cloud API, but the resolved computation engine is Browser.`);
-          return;
-        }
-        if (options.cloudRouted) {
-          const cloudAlgorithm: LayoutAlgorithm = serverAlgorithm ? algorithm : 'd3Force';
-          const controller = new AbortController();
-          cloudAbortRef.current = controller;
-          setRunning(true);
-          void cloudLayoutEngine.compute({ ...request, algorithm: cloudAlgorithm, signal: controller.signal }).then((result) => {
-            if (controller.signal.aborted) return;
-            options.applyExternalPositions(result, options.topologyKey);
-            options.onLayoutStopped?.();
-          }).catch((cause) => {
-            if (cause?.name !== 'AbortError') setError(cause instanceof Error ? cause.message : String(cause));
-          }).finally(() => {
-            if (cloudAbortRef.current === controller) { cloudAbortRef.current = null; setRunning(false); }
-          });
-        } else if (isContinuousLayout(algorithm)) {
-          const controller = graphologyLayoutEngine.createController(request);
-          controllerRef.current = controller;
-          controller.start();
-          setRunning(true);
-        } else {
-          void graphologyLayoutEngine.compute(request).catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
-        }
-      } catch (cause) {
-        setRunning(false);
-        setError(cause instanceof Error ? cause.message : String(cause));
+        const positions = await computeForceDirectedLayoutAsync(
+          options.nodes, edges, options.directed, options.forceStrength, controller.signal,
+          algorithm === 'forceatlas2' ? 'forceatlas2' : 'd3Force',
+        );
+        result = { positions: Object.fromEntries(positions), filterRevision: options.topologyKey };
       }
-    };
-    startTimerRef.current = setTimeout(begin, 0);
-  }, [algorithm, kill, options, settings]);
+      if (controller.signal.aborted) return;
+      options.applyLayoutPositions(result, cloud);
+      options.onLayoutApplied();
+      if (result.warnings && Object.keys(result.warnings).length) setWarning(Object.values(result.warnings).join(' '));
+    } catch (cause) {
+      if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      if (pending.current === controller) {
+        pending.current = null;
+        setRunning(false);
+      }
+    }
+  };
 
-  const inferForceAtlas2 = useCallback(() => {
-    setSettings((current) => ({ ...current, forceatlas2: graphologyLayoutEngine.inferForceAtlas2(options.graph) }));
-  }, [options.graph]);
+  function updateAlgorithmSettings(values: LayoutSettings) {
+    setSettings((current) => ({ ...current, [algorithm]: { ...current[algorithm], ...values } }));
+  }
 
-  const updateAlgorithmSettings = useCallback((values: Record<string, any>) => {
-    setSettings((current) => ({ ...current, [algorithm]: { ...(current[algorithm] || {}), ...values } }));
-  }, [algorithm]);
-
-  useEffect(() => {
-    if (options.livePhysics && (controllerRef.current || cloudAbortRef.current || startTimerRef.current !== null)) kill();
-  }, [options.livePhysics, kill]);
-
-  useEffect(() => {
-    kill();
-  }, [kill, options.cloudRouted]);
-
-  useEffect(() => () => kill(), [kill]);
-  useLayoutEffect(() => { kill(); }, [kill, options.topologyKey]);
-  useEffect(() => {
-    if (algorithm === 'auto') setAlgorithm('d3Force');
-    else if (options.cloudRouted && !['d3Force', 'drl', 'fruchtermanReingold', 'kamadaKawai', 'cloudCircular', 'cloudRandom', 'bipartite', 'sugiyama'].includes(algorithm)) setAlgorithm('d3Force');
-    else if (!options.cloudRouted && isCloudLayoutSupported(algorithm)) setAlgorithm('d3Force');
-  }, [algorithm, options.cloudRouted]);
-
-  return useMemo(() => ({ algorithm, setAlgorithm, settings, updateAlgorithmSettings, running, error, start, stop, inferForceAtlas2, cloudRouted: options.cloudRouted, bipartite: options.bipartite, directed: options.directed }), [algorithm, error, inferForceAtlas2, running, settings, start, stop, updateAlgorithmSettings, options.cloudRouted, options.bipartite, options.directed]);
+  return {
+    algorithm, setAlgorithm, settings, updateAlgorithmSettings, running, error, warning, start, cancel,
+    cloudRouted: options.cloudRouted, directed: options.directed, ready: options.ready,
+  };
 }

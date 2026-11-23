@@ -1,5 +1,6 @@
 import * as d3 from 'd3';
 import { computeForceDirectedLayout } from '../../lib/layoutUtils.ts';
+import { computeForceAtlas2 } from './engine.ts';
 
 let simulation: d3.Simulation<any, any> | null = null;
 let nodes: any[] = [];
@@ -14,7 +15,9 @@ const charge = (strength: number) => {
 self.onmessage = ({ data }) => {
   try {
     if (data.type === 'static') {
-      const positions = computeForceDirectedLayout(data.nodes, data.edges, data.directed, data.forceStrength);
+      const positions = data.algorithm === 'forceatlas2'
+        ? computeForceAtlas2(data.nodes, data.edges)
+        : computeForceDirectedLayout(data.nodes, data.edges, data.directed, data.forceStrength);
       self.postMessage({ positions });
       return;
     }

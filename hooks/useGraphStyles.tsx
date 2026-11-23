@@ -88,6 +88,7 @@ export function useGraphStyles({
   const customNodeSizeAttribute = useStore((state) => state.filters.customNodeSizeAttribute);
   const customAttributes = useStore((state) => state.customAttributes);
   const legendColorOverrides = useStore((state) => state.legendColorOverrides);
+  const rawNodes = useStore((state) => state.rawNodes);
   const selectedCustomMetadata = customAttributes.find((attribute) => attribute.scope === 'node' && attribute.name === customNodeAttribute);
   const customIsNumeric = Boolean(selectedCustomMetadata && ['discrete', 'continuous'].includes(selectedCustomMetadata.selectedType));
   const {
@@ -118,9 +119,9 @@ export function useGraphStyles({
       nodes,
       communityMap,
       networkMetrics,
-      'louvain',
+      nodeColorBase === 'community' ? 'community' : 'louvain',
     ),
-    [nodes, communityMap, networkMetrics]
+    [nodes, communityMap, networkMetrics, nodeColorBase]
   );
 
   const displayMap = communityDisplay.displayMap; // nodeId -> displayInt (e.g. 0, 1, 2, or -1)
@@ -140,7 +141,11 @@ export function useGraphStyles({
   const customColorMap = communityColorMap;
   const nodeById = useMemo(() => new Map(nodes.map((node) => [String(node.id), node])), [nodes]);
 
-  const typeColorScale = useMemo(() => d3.scaleOrdinal(d3.schemeCategory10), []);
+  const typeColorScale = useMemo(() => {
+    const types = new Set(rawNodes.map((node) => String(node.type || (node.group ?? ''))));
+    types.delete('');
+    return d3.scaleOrdinal(d3.schemeCategory10).domain(Array.from(types).sort());
+  }, [rawNodes]);
 
   const getShouldShowArrowhead = useCallback(
     (d: any) => {

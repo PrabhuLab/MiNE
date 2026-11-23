@@ -18,9 +18,11 @@ async function encodeRequest(request: CloudAnalyzeRequest): Promise<{ body: Body
 }
 
 export async function analyzeInCloud(request: CloudAnalyzeRequest, signal?: AbortSignal): Promise<CloudAnalyzeResponse> {
+  signal?.throwIfAborted();
   const url = requireCloudUrl();
   const encodeStarted = performance.now();
   const encoded = await encodeRequest(request);
+  signal?.throwIfAborted();
   const encodeMs = performance.now() - encodeStarted;
   const transferStarted = performance.now();
   const controller = new AbortController();

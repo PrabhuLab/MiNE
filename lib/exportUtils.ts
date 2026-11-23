@@ -1,3 +1,5 @@
+import { exportImageDimensions, MAX_RASTER_PIXELS, MAX_RASTER_SIDE, svgFrameTransform, type ExportCamera, type ExportFrame } from '../services/graphIO/exportFrame.ts';
+
 export const downloadStringAsFile = (content: string, filename: string, type: string = 'text/plain') => {
   const blob = new Blob([content], { type });
   const url = URL.createObjectURL(blob);
@@ -142,8 +144,8 @@ export const viewportRasterDimensions = (width: number, height: number, pixelRat
   // canvas memory before the browser can encode the image.
   const scale = Math.min(
     Math.max(10, pixelRatio || 1),
-    16384 / Math.max(viewportWidth, viewportHeight),
-    Math.sqrt(24_000_000 / (viewportWidth * viewportHeight)),
+    MAX_RASTER_SIDE / Math.max(viewportWidth, viewportHeight),
+    Math.sqrt(MAX_RASTER_PIXELS / (viewportWidth * viewportHeight)),
   );
   return {
     viewportWidth,
@@ -153,16 +155,24 @@ export const viewportRasterDimensions = (width: number, height: number, pixelRat
   };
 };
 
-export const exportImage = async (svgElement: SVGSVGElement | null, format: 'png' | 'jpeg', filename: string, isDarkMode: boolean = false) => {
+export const rasterizeGraphSvg = async (svgElement: SVGSVGElement | null, format: 'png' | 'jpeg', isDarkMode = false, frame?: ExportFrame & { camera: ExportCamera }) => {
   if (!svgElement) throw new Error('The graph viewport is not available.');
 
   const bounds = svgElement.getBoundingClientRect();
-  const { viewportWidth, viewportHeight, exportWidth, exportHeight } = viewportRasterDimensions(
+  const output = frame ? exportImageDimensions(frame) : null;
+  const { viewportWidth, viewportHeight, exportWidth, exportHeight } = frame && output ? {
+    viewportWidth: frame.width, viewportHeight: frame.height, exportWidth: output.width, exportHeight: output.height,
+  } : viewportRasterDimensions(
     bounds.width || svgElement.clientWidth,
     bounds.height || svgElement.clientHeight,
     window.devicePixelRatio || 1,
   );
   const clone = svgElement.cloneNode(true) as SVGSVGElement;
+  if (frame) {
+    const zoomGroup = clone.querySelector('.zoom-group');
+    if (!zoomGroup) throw new Error('The graph is still rendering.');
+    zoomGroup.setAttribute('transform', svgFrameTransform(frame));
+  }
 
   // Keep the zoom group's current transform and rasterize the exact visible
   // SVG viewport. Output resolution is increased without changing framing.
@@ -217,15 +227,20 @@ export const exportImage = async (svgElement: SVGSVGElement | null, format: 'png
       blob = await new Promise<Blob | null>((resolve) => {
         canvas.toBlob(resolve, `image/${format}`, 0.95);
       });
-      if (blob) break;
+      if (blob || frame) break;
       // Re-render from the source at lower resolution if encoding runs out of memory.
       canvas.width = Math.max(1, Math.floor(canvas.width / 2));
       canvas.height = Math.max(1, Math.floor(canvas.height / 2));
     }
     canvas.width = canvas.height = 0;
-    if (!blob) throw new Error(`The graph could not be encoded as ${format.toUpperCase()}. Try a smaller browser window or export SVG.`);
-    downloadBlobAsFile(blob, filename);
+    if (!blob) throw new Error(`The graph could not be encoded as ${format.toUpperCase()}. Try smaller export dimensions.`);
+    return blob;
   } finally {
     URL.revokeObjectURL(url);
   }
+};
+
+
+export const exportImage = async (svgElement: SVGSVGElement | null, format: 'png' | 'jpeg', filename: string, isDarkMode = false) => {
+  downloadBlobAsFile(await rasterizeGraphSvg(svgElement, format, isDarkMode), filename);
 };

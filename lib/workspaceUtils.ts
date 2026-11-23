@@ -28,7 +28,7 @@ export function numericFilterValue(value: unknown): number {
   return Number(value);
 }
 
-export function computeActiveNetwork(rawNodes: any[], rawEdges: any[], appliedFilters: any) {
+export function computeActiveNetwork(rawNodes: any[], rawEdges: any[], appliedFilters: any, showIsolates = false) {
   const removedSet = new Set(
     (appliedFilters.removedNodes || '').split(',')
       .map((s: string) => s.trim())
@@ -56,6 +56,8 @@ export function computeActiveNetwork(rawNodes: any[], rawEdges: any[], appliedFi
   const strictlyValidEdges = filteredEdges.filter(e =>
     eligibleNodeIds.has(String(e.source)) && eligibleNodeIds.has(String(e.target))
   );
+
+  if (showIsolates) return { validNodes: eligibleNodes, validEdges: strictlyValidEdges };
 
   const nodesWithEdges = new Set<string>();
   strictlyValidEdges.forEach(e => {

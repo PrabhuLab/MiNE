@@ -2,6 +2,7 @@ import asyncio
 import gzip
 import logging
 import os
+import random
 import resource
 import sys
 import threading
@@ -9,6 +10,7 @@ import time
 import zlib
 from typing import Any
 
+import igraph as ig
 import orjson
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -20,7 +22,7 @@ from .errors import ApiError, too_large
 from .graph_builder import build_graph
 from .layouts import SUPPORTED_LAYOUTS, compute_layout
 from .metrics import REGISTRY, capabilities, compute_metrics
-from .models import AnalyzeRequest, AnalyzeResponse, Positions
+from .models import AnalyzeRequest, AnalyzeResponse, Positions, RandomNetworkRequest
 from .communities import COMMUNITY_CAPABILITIES, compute_community
 
 settings = get_settings()
@@ -161,6 +163,36 @@ def perform_analysis(request: AnalyzeRequest, decode_ms: float) -> AnalyzeRespon
 def perform_with_slot(request: AnalyzeRequest, decode_ms: float) -> AnalyzeResponse:
     try:
         return perform_analysis(request, decode_ms)
+    finally:
+        analysis_slot.release()
+
+
+@app.post("/v1/random-network")
+def random_network(request: RandomNetworkRequest):
+    n, m = request.node_count, request.edge_count
+    secondary = request.secondary_count
+    if n > settings.max_nodes or m > settings.max_edges:
+        raise too_large("graph_size", "Network exceeds the configured node or edge limit.")
+    if secondary is not None and secondary > n:
+        raise ApiError(422, "invalid_partition_size", "The secondary partition exceeds the node count.")
+
+    possible = n * (n - 1) // 2 if secondary is None else (n - secondary) * secondary
+    if request.directed:
+        possible *= 2
+    if m > possible:
+        raise ApiError(422, "invalid_edge_count", f"A simple random network with this topology supports at most {possible} edges.")
+
+    if not analysis_slot.acquire(blocking=False):
+        raise ApiError(429, "container_busy", "This container already has an active analysis. Try again shortly.")
+    try:
+        ig.set_random_number_generator(random.Random())
+        if secondary is None:
+            graph = ig.Graph.Erdos_Renyi(n=n, m=m, directed=request.directed, loops=False)
+            types = None
+        else:
+            graph = ig.Graph.Random_Bipartite(n1=n - secondary, n2=secondary, m=m, directed=request.directed)
+            types = graph.vs["type"]
+        return json_response({"types": types, "edges": graph.get_edgelist()})
     finally:
         analysis_slot.release()
 

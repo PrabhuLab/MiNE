@@ -45,7 +45,7 @@ DEFINITIONS = (
     MetricDefinition(
         "louvain",
         ("louvain", "louvainDeltaQ", "modularityContribution", "withinCommunityWeight", "nodeStrength", "communityStrength", "louvainModularity"),
-        False, True, True, True, True, True, None, None, "strength",
+        True, True, True, True, True, True, None, None, "strength",
         "igraph multilevel membership and sparse per-node modularity-matrix terms; seeded RNG",
     ),
     MetricDefinition("modularity", ("modularity",), True, True, True, True, True, True, None, None, "strength", "MiNE parity: provided membership at resolution 1.0"),
@@ -246,10 +246,11 @@ def compute_metrics(graph: ig.Graph, request: AnalyzeRequest, settings: Settings
             if weights is not None and any(weight < 0 for weight in weights):
                 raise incompatible("invalid_metric_weights", "Louvain requires non-negative strength weights.")
             ig.set_random_number_generator(random.Random(request.random_seed))
-            clustering = graph.community_multilevel(weights=weights, resolution=request.resolution)
+            undirected = graph.as_undirected(mode="each") if graph.is_directed() else graph
+            clustering = undirected.community_multilevel(weights=weights, resolution=request.resolution)
             membership = list(clustering.membership)
             node_metrics["louvain"] = membership
-            node_metrics.update(_louvain_node_modularity_terms(graph, membership, weights, request.resolution))
+            node_metrics.update(_louvain_node_modularity_terms(undirected, membership, weights, request.resolution))
             graph_metrics["louvainModularity"] = finite_or_none(clustering.modularity)
         elif metric_id == "modularity":
             values = membership if membership is not None else _communities(request)

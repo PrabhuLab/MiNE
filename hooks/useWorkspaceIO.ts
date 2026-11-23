@@ -1,8 +1,10 @@
 import type { ChangeEvent, RefObject } from 'react';
 import type Graph from 'graphology';
 import type Sigma from 'sigma';
-import { resetCommunityColorCache } from '@/lib/communityUtils';
+import { resetCommunityColorCache, savedCommunityColors } from '@/lib/communityUtils';
 import { downloadBlobAsFile, downloadStringAsFile, exportElementAsImage, exportImage, exportSvg, viewportRasterDimensions } from '@/lib/exportUtils';
+import { captureExportCamera, rasterizeFixedFrame, type CreateSigmaExportRenderer } from '@/lib/fixedFrameExport';
+import { restoreExportFrame, type ExportFrame } from '@/services/graphIO/exportFrame';
 import {
   buildAllInOne,
   buildCsvZip,
@@ -30,6 +32,10 @@ interface WorkspaceIOOptions {
   projectName: string;
   useSigma: boolean;
   sigmaRendererRef: RefObject<Sigma | null>;
+  createSigmaExportRendererRef: RefObject<CreateSigmaExportRenderer | null>;
+  showIsolates: boolean;
+  appliedFilters: WorkspaceFilters;
+  getLivePosition?: (id: string) => { x: number; y: number } | undefined;
   communityMap: Record<string, string>;
   networkMetrics: any[];
   nodeMetrics: any[];
@@ -44,8 +50,17 @@ interface WorkspaceIOOptions {
 }
 
 export function useWorkspaceIO(options: WorkspaceIOOptions) {
+  const graphSvg = () => document.getElementById('network-graph-svg') as SVGSVGElement | null;
+  const captureFrame = (frame: ExportFrame) => captureExportCamera(frame, graphSvg(), options.sigmaRendererRef.current);
+  const buildFrameImage = (frame: ExportFrame, format: 'png' | 'jpeg' = 'png') => rasterizeFixedFrame(
+    { ...frame, camera: frame.camera ?? captureFrame(frame) }, format, options.isDarkMode,
+    graphSvg(), options.createSigmaExportRendererRef.current,
+  );
+
   const createWorkspaceSettings = (): WorkspaceSettingsDocument => {
     const state = useStore.getState();
+    const filters = state.exportFrame.camera && !state.filters.liveUpdate ? options.appliedFilters : state.filters;
+    const livePhysics = !state.exportFrame.camera && filters.livePhysics;
     return {
       format: 'workspace-settings',
       version: 1,
@@ -60,12 +75,13 @@ export function useWorkspaceIO(options: WorkspaceIOOptions) {
         bipartite: options.bipartite,
         weighted: options.rawEdges.some((edge) => Number(edge.weight_raw) !== 1 || (edge.weight_secondary !== undefined && Number(edge.weight_secondary) !== 1)),
       },
-      filters: state.filters,
+      filters: { ...filters, livePhysics },
       appearance: {
         isDarkMode: options.isDarkMode,
         showNodeLabels: state.showNodeLabels,
         showArrowheads: state.showArrowheads,
         communityMap: options.communityMap,
+        communityColors: savedCommunityColors(),
         customAttributes: state.customAttributes,
         legendColorOverrides: state.legendColorOverrides,
         isLegendMinimized: state.isLegendMinimized,
@@ -76,7 +92,8 @@ export function useWorkspaceIO(options: WorkspaceIOOptions) {
         isolatedCommunityId: state.isolatedCommunityId,
       },
       calculations: { selected: options.metricsToRun },
-      layout: { livePhysics: state.filters.livePhysics, forceStrength: state.filters.forceStrength },
+      layout: { livePhysics, forceStrength: filters.forceStrength, showIsolates: options.showIsolates },
+      exportFrame: state.exportFrame,
     };
   };
 
@@ -90,7 +107,6 @@ export function useWorkspaceIO(options: WorkspaceIOOptions) {
         const currentSettings = json.format === 'workspace-settings' && json.version === 1;
         const legacySettings = json.type === 'workspace_state';
         if (!currentSettings && !legacySettings) throw new Error('Invalid Workspace Settings JSON.');
-        resetCommunityColorCache();
         const settings: any = currentSettings ? json : {
           projectName: json.projectName,
           rendererEngine: json.rendererEngine || json.renderer,
@@ -112,13 +128,15 @@ export function useWorkspaceIO(options: WorkspaceIOOptions) {
           edgeFilter: migrateWorkspaceFilters(settings.filters, options.rawEdges),
           weightFilters: undefined,
         };
+        resetCommunityColorCache(settings.appearance?.communityColors);
+        const exportFrame = restoreExportFrame(settings.exportFrame);
         useStore.setState({
           projectName: settings.projectName || options.projectName,
           directed: settings.graphMode?.directed ?? options.directed,
           bipartite: settings.graphMode?.bipartite ?? options.bipartite,
           isDarkMode: settings.appearance?.isDarkMode ?? useStore.getState().isDarkMode,
           computeEngine: migrateComputationPreference(settings, options.rawNodes.length, options.rawEdges.length),
-          rendererEngine: migrateRendererPreference(settings),
+          rendererEngine: exportFrame.camera?.renderer ?? migrateRendererPreference(settings),
           filters: nextFilters,
           communityMap: settings.appearance?.communityMap || {},
           customAttributes: mergeCustomAttributeMetadata(
@@ -126,6 +144,8 @@ export function useWorkspaceIO(options: WorkspaceIOOptions) {
             settings.appearance?.customAttributes || useStore.getState().customAttributes,
           ),
           legendColorOverrides: settings.appearance?.legendColorOverrides || {},
+          exportFrame,
+          showIsolates: settings.layout?.showIsolates ?? useStore.getState().showIsolates,
           showNodeLabels: settings.appearance?.showNodeLabels ?? useStore.getState().showNodeLabels,
           showArrowheads: settings.appearance?.showArrowheads ?? useStore.getState().showArrowheads,
           hiddenLegendItems: settings.visibility?.hiddenLegendItems || [],
@@ -169,7 +189,11 @@ export function useWorkspaceIO(options: WorkspaceIOOptions) {
     }
     if (format === 'png' || format === 'jpeg') {
       try {
-        if (options.useSigma && options.sigmaRendererRef.current) {
+        const frame = useStore.getState().exportFrame;
+        if (frame.camera) {
+          const extension = format === 'jpeg' ? 'jpg' : format;
+          downloadBlobAsFile(await buildFrameImage(frame, format), `${options.projectName}.${extension}`);
+        } else if (options.useSigma && options.sigmaRendererRef.current) {
           const renderer = options.sigmaRendererRef.current;
           const dimensions = renderer.getDimensions();
           const cameraState = renderer.getCamera().getState();
@@ -227,6 +251,7 @@ export function useWorkspaceIO(options: WorkspaceIOOptions) {
       metrics,
       options.directed,
       options.bipartite,
+      format === 'allinone' ? options.getLivePosition : undefined,
     );
     if (format === 'json') downloadStringAsFile(JSON.stringify(exportGraph.export(), null, 2), `${options.projectName}.json`, 'application/json');
     else if (format === 'graphml') downloadStringAsFile(writeGraphML(exportGraph), `${options.projectName}.graphml`, 'application/graphml+xml');
@@ -236,5 +261,5 @@ export function useWorkspaceIO(options: WorkspaceIOOptions) {
     else if (format === 'allinone') downloadStringAsFile(JSON.stringify(buildAllInOne(exportGraph, metrics, createWorkspaceSettings()), null, 2), `${options.projectName}_all_in_one.json`, 'application/json');
   };
 
-  return { handleImportWorkspace, handleExport };
+  return { handleImportWorkspace, handleExport, captureFrame, buildFrameImage };
 }

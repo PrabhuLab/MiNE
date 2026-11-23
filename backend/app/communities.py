@@ -10,9 +10,7 @@ from .block_model_diagnostics import fit_selection, fitted_diagnostics
 
 
 COMMUNITY_CAPABILITIES: list[dict[str, Any]] = [
-    {"id": "louvain", "label": "Louvain", "directed": False, "weighted": True, "parameters": ["resolution", "seed"]},
-    {"id": "infomap", "label": "Infomap", "directed": True, "weighted": True, "parameters": ["trials", "seed"]},
-    {"id": "labelPropagation", "label": "Label Propagation", "directed": True, "weighted": True, "parameters": ["seed"]},
+    {"id": "louvain", "label": "Louvain", "directed": True, "weighted": True, "parameters": ["resolution", "seed"]},
     {"id": "walktrap", "label": "Walktrap", "directed": False, "weighted": True, "parameters": ["steps", "seed"]},
     {"id": "sbm", "label": "Sparse SBM", "directed": False, "weighted": False, "bipartite": False, "parameters": ["clusters", "blockSelection", "maxClusters", "seed"]},
     {"id": "lbm", "label": "Sparse LBM", "directed": False, "weighted": False, "bipartite": True, "parameters": ["clusters", "columnClusters", "blockSelection", "maxClusters", "seed"]},
@@ -133,7 +131,7 @@ def compute_community(graph: ig.Graph, request: AnalyzeRequest) -> tuple[Communi
         return None, 0.0
     if graph.ecount() == 0:
         raise incompatible("community_edges", "Community detection requires at least one edge.")
-    if request.directed and spec.algorithm in {"louvain", "walktrap", "fastGreedy", "sbm", "lbm"}:
+    if request.directed and spec.algorithm in {"walktrap", "fastGreedy", "sbm", "lbm"}:
         raise incompatible("community_direction", f"{spec.algorithm} requires an undirected graph.")
     weights = request.edge_weights if spec.weight_channel != "unweighted" else None
     if spec.algorithm in {"sbm", "lbm"} and spec.weight_channel != "unweighted":
@@ -153,11 +151,8 @@ def compute_community(graph: ig.Graph, request: AnalyzeRequest) -> tuple[Communi
             memberships, sparse_provenance, diagnostics = _compute_sparse_lbm(request)
             clustering = None
         elif spec.algorithm == "louvain":
-            clustering = graph.community_multilevel(weights=weights, resolution=spec.resolution)
-        elif spec.algorithm == "infomap":
-            clustering = graph.community_infomap(edge_weights=weights, trials=spec.trials)
-        elif spec.algorithm == "labelPropagation":
-            clustering = graph.community_label_propagation(weights=weights)
+            undirected = graph.as_undirected(mode="each") if graph.is_directed() else graph
+            clustering = undirected.community_multilevel(weights=weights, resolution=spec.resolution)
         elif spec.algorithm == "walktrap":
             clustering = graph.community_walktrap(weights=weights, steps=spec.steps).as_clustering()
         elif spec.algorithm == "fastGreedy" and hasattr(graph, "community_fastgreedy"):
@@ -187,7 +182,6 @@ def compute_community(graph: ig.Graph, request: AnalyzeRequest) -> tuple[Communi
             "weightChannel": spec.weight_channel,
             "resolution": spec.resolution,
             "iterations": spec.iterations,
-            "trials": spec.trials,
             "steps": spec.steps,
             "seed": spec.seed,
             "clusters": spec.clusters,

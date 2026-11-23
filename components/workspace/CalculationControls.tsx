@@ -16,6 +16,7 @@ interface CalculationControlsProps {
   runSelectedMetrics: (metricIds?: string[]) => void;
   runCommunity: (settings: CommunitySettings) => void;
   metricsLoading: boolean;
+  cancelCalculations: () => void;
   metricContext: MetricGraphContext;
   staleMetricIds: string[];
   metricWarnings: Record<string, string>;
@@ -26,9 +27,7 @@ interface CalculationControlsProps {
 }
 
 const COMMUNITY_OPTIONS: Array<{ id: CommunityAlgorithm; label: string; directed: boolean; graphType?: 'unipartite' | 'bipartite' }> = [
-  { id: 'louvain', label: 'Louvain', directed: false },
-  { id: 'infomap', label: 'Infomap', directed: true },
-  { id: 'labelPropagation', label: 'Label Propagation', directed: true },
+  { id: 'louvain', label: 'Louvain', directed: true },
   { id: 'walktrap', label: 'Walktrap', directed: false },
   { id: 'fastGreedy', label: 'Fast Greedy', directed: false },
   { id: 'sbm', label: 'Sparse SBM', directed: false, graphType: 'unipartite' },
@@ -71,6 +70,8 @@ export function CalculationControls(props: CalculationControlsProps) {
         {props.staleMetricIds.length > 0 && <span className="border border-amber-500/30 bg-amber-500/20 px-2 py-0.5 text-[9px] font-bold uppercase text-amber-500">{props.staleMetricIds.length} stale</span>}
       </div>
       {props.metricWarnings.fallback && <div className="mb-3 border border-amber-500/30 bg-amber-500/10 p-2 text-[9px] font-mono text-amber-600">{props.metricWarnings.fallback}</div>}
+      {props.metricsLoading && <button type="button" onClick={props.cancelCalculations} className="mb-3 w-full border py-2 text-[9px] font-bold uppercase tracking-widest">Cancel calculation</button>}
+      {props.metricsLoading && cloudResolved && <p className="mb-3 text-[9px] opacity-70">Cloud processing may continue after you cancel.</p>}
       <div className="mb-4 flex border-b">
         {tabs.map((tab) => <button key={tab} className={`flex-1 border-b-2 py-2 text-[9px] font-bold uppercase tracking-widest ${displayedTab === tab ? (isDarkMode ? 'border-[#E4E3E0]' : 'border-[#141414]') : 'border-transparent text-[#888]'}`} onClick={() => setActiveControlTab(tab)}>{tab}</button>)}
       </div>
@@ -79,7 +80,7 @@ export function CalculationControls(props: CalculationControlsProps) {
         <div className="space-y-4">
           {props.metricWarnings.community && <div className="border border-red-500/40 bg-red-500/10 p-2 text-[9px] font-mono text-red-500">{props.metricWarnings.community}</div>}
           <label className="block text-[9px] font-bold uppercase tracking-widest">Algorithm
-            <select value={selectedCommunityAlgorithm} onChange={(event) => updateCommunity('algorithm', event.target.value as CommunityAlgorithm)} className={`mt-2 w-full border bg-transparent p-2 text-[10px] font-mono ${isDarkMode ? 'border-[#444] [&>option]:bg-[#181818]' : 'border-[#141414] [&>option]:bg-white'}`}>
+            <select aria-label="Community algorithm" value={selectedCommunityAlgorithm} onChange={(event) => updateCommunity('algorithm', event.target.value as CommunityAlgorithm)} className={`mt-2 w-full border bg-transparent p-2 text-[10px] font-mono ${isDarkMode ? 'border-[#444] [&>option]:bg-[#181818]' : 'border-[#141414] [&>option]:bg-white'}`}>
               {communityOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
             </select>
           </label>
@@ -89,7 +90,11 @@ export function CalculationControls(props: CalculationControlsProps) {
             </select>
           </label>
           {selectedCommunityAlgorithm === 'louvain' && <NumberField label="Resolution" value={communitySettings.resolution} min={0.01} step={0.1} onChange={(value) => updateCommunity('resolution', value)} />}
-          {selectedCommunityAlgorithm === 'infomap' && <NumberField label="Trials" value={communitySettings.trials} min={1} onChange={(value) => updateCommunity('trials', value)} />}
+          {selectedCommunityAlgorithm === 'louvain' && (directed || bipartite) && (
+            <p role="status" className="border border-amber-500/30 bg-amber-500/10 p-2 text-[9px] font-mono text-amber-600">
+              This version of Louvain is designed for unipartite, undirected networks. It treats every node as part of one set and ignores edge direction when finding communities.
+            </p>
+          )}
           {selectedCommunityAlgorithm === 'walktrap' && <NumberField label="Walk Steps" value={communitySettings.steps} min={1} onChange={(value) => updateCommunity('steps', value)} />}
           {['sbm', 'lbm'].includes(selectedCommunityAlgorithm) && <>
             <label className="block text-[9px] font-bold uppercase tracking-widest">Block selection

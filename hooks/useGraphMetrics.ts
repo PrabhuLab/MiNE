@@ -59,8 +59,20 @@ export function useGraphMetrics(
   const [metricsLoading, setMetricsLoading] = useState(false);
   const importedForRevision = useRef<string | null>(null);
   const activeRequestRef = useRef<AbortController | null>(null);
+  const automaticRequestRef = useRef<{ key: string; controller: AbortController } | null>(null);
   const lastGraphRevisionRef = useRef<string | null>(null);
   const automaticCommitRef = useRef<string | null>(null);
+  const cancelCalculations = useCallback(() => {
+    activeRequestRef.current?.abort();
+    activeRequestRef.current = null;
+    const automatic = automaticRequestRef.current;
+    if (automatic) {
+      automaticCommitRef.current = automatic.key;
+      automatic.controller.abort();
+      automaticRequestRef.current = null;
+    }
+    setMetricsLoading(false);
+  }, []);
 
   const metricWeightAttribute = appliedFilters?.metricWeightAttribute || 'weight_raw';
   const graphRevision = useMemo(() => computeGraphRevisions(rawNodes, rawEdges, directed, true, metricWeightAttribute).graphRevision, [directed, metricWeightAttribute, rawEdges, rawNodes]);
@@ -105,7 +117,7 @@ export function useGraphMetrics(
     }
     const graphChanged = lastGraphRevisionRef.current !== null && lastGraphRevisionRef.current !== graphRevision;
     lastGraphRevisionRef.current = graphRevision;
-    setCommunityMap(topology.declaredCommunities);
+    if (!restoredVisualization || communityAttribute) setCommunityMap(topology.declaredCommunities);
     setNetworkMetrics((current) => {
       const previous = graphChanged ? new Map() : new Map(current.map((entry) => [String(entry.id), entry]));
       return topology.nodeIds.map((nodeId) => ({ ...(previous.get(nodeId) || {}), id: nodeId, ...topology.degreeByNode[nodeId] }));
@@ -117,7 +129,7 @@ export function useGraphMetrics(
       setMetricValidity({});
     }
     setMetricWarnings({});
-  }, [filterRevision, graphRevision, setCommunityMap, topology]);
+  }, [communityAttribute, filterRevision, graphRevision, restoredVisualization, setCommunityMap, topology]);
 
   useEffect(() => {
     if (!importedMetrics || !topology) return;
@@ -288,6 +300,7 @@ export function useGraphMetrics(
     const expectedRequestGeneration = requestGenerationRef.current;
     setMetricsLoading(true);
     setTimeout(() => {
+      if (controller.signal.aborted) return;
       const request = {
         nodes: positionedNodes,
         edges: validEdges,
@@ -342,14 +355,17 @@ export function useGraphMetrics(
           setCustomAttributes(Array.from(byKey.values()));
         }
       }).catch((error) => {
-        if (error?.name !== 'AbortError' && requestGenerationRef.current === expectedRequestGeneration) {
+        if (!controller.signal.aborted && error?.name !== 'AbortError' && requestGenerationRef.current === expectedRequestGeneration) {
           console.error('Failed to run metrics:', error);
           const message = error instanceof Error ? error.message : String(error);
           const errorIds = [...requested, ...(runLouvain ? ['louvain'] : [])];
           setMetricWarnings((current) => ({ ...current, cloud: message, ...Object.fromEntries(errorIds.map((metricId) => [metricId, message])) }));
         }
       }).finally(() => {
-        if (activeRequestRef.current === controller) setMetricsLoading(false);
+        if (activeRequestRef.current === controller) {
+          activeRequestRef.current = null;
+          setMetricsLoading(false);
+        }
       });
     }, 50);
   }, [accessors, appliedFilters?.louvainSeed, appliedFilters?.metricWeightAttribute, appliedFilters?.resolution, bipartite, communityAttribute, customAttributes, directed, effectiveEngine, filterRevision, graphRevision, metricsToRun, setCommunityMap, setCustomAttributes, validEdges, validNodes]);
@@ -367,9 +383,12 @@ export function useGraphMetrics(
       if (controller.signal.aborted || expectedGeneration !== requestGenerationRef.current) return;
       commitCommunityResult(result, { graphRevision, filterRevision }, { fallbackNotice });
     }).catch((error) => {
-      if (error?.name !== 'AbortError') setMetricWarnings({ community: error instanceof Error ? error.message : String(error) });
+      if (!controller.signal.aborted && error?.name !== 'AbortError') setMetricWarnings({ community: error instanceof Error ? error.message : String(error) });
     }).finally(() => {
-      if (activeRequestRef.current === controller) setMetricsLoading(false);
+      if (activeRequestRef.current === controller) {
+        activeRequestRef.current = null;
+        setMetricsLoading(false);
+      }
     });
   }, [bipartite, commitCommunityResult, directed, effectiveEngine, filterRevision, graphRevision, validEdges, validNodes]);
 
@@ -386,9 +405,9 @@ export function useGraphMetrics(
       nodeIds: topology.nodeIds,
       nodes: importedMetrics?.nodes || {},
     });
-    if (savedKey) {
+    if (savedKey || restoredVisualization) {
       automaticCommitRef.current = automaticKey;
-      if (!restoredVisualization) {
+      if (savedKey && !restoredVisualization) {
         const resultId = savedKey === 'louvain' ? 'louvain' : 'community_louvain';
         Object.entries(communityResultStyleSelection(resultId)).forEach(([key, value]) => setFilter(key as any, value as never));
       }
@@ -411,6 +430,9 @@ export function useGraphMetrics(
           : 'unweighted',
     };
     const initialFilterRevision = filterRevision;
+    const previousAutomatic = automaticRequestRef.current;
+    const controller = previousAutomatic?.key === automaticKey ? previousAutomatic.controller : new AbortController();
+    automaticRequestRef.current = { key: automaticKey, controller };
     const request = automaticLouvainOnce<RoutedCommunityResult>(automaticKey, () => computeCommunityRouted({
         nodes: validNodes,
         edges: validEdges,
@@ -419,20 +441,24 @@ export function useGraphMetrics(
         graphRevision,
         filterRevision: initialFilterRevision,
         settings,
+        signal: controller.signal,
       }, effectiveEngine));
     let disposed = false;
     setMetricsLoading(true);
     void request.then(({ result, fallbackNotice }) => {
-      if (!disposed) {
+      if (!disposed && automaticCommitRef.current !== automaticKey) {
         automaticCommitRef.current = automaticKey;
         commitCommunityResult(result, { graphRevision, filterRevision: initialFilterRevision }, { automatic: true, fallbackNotice });
       }
     }).catch((error) => {
-      if (!disposed && error?.name !== 'AbortError') {
+      if (!disposed && automaticCommitRef.current !== automaticKey && error?.name !== 'AbortError') {
         setMetricWarnings((current) => ({ ...current, community: error instanceof Error ? error.message : String(error) }));
       }
     }).finally(() => {
-      if (!disposed) setMetricsLoading(false);
+      if (!disposed && automaticRequestRef.current?.key === automaticKey) {
+        automaticRequestRef.current = null;
+        if (!activeRequestRef.current) setMetricsLoading(false);
+      }
     });
     return () => { disposed = true; };
   }, [appliedFilters?.louvainSeed, appliedFilters?.metricWeightAttribute, appliedFilters?.resolution, bipartite, commitCommunityResult, directed, effectiveEngine, filterRevision, graphGeneration, graphRevision, importedMetrics, rawEdges.length, rawNodes.length, restoredVisualization, setFilter, topology, validEdges, validNodes]);
@@ -472,6 +498,7 @@ export function useGraphMetrics(
     metricsToRun,
     setMetricsToRun,
     metricsLoading,
+    cancelCalculations,
     runSelectedMetrics,
     runCommunity,
     invalidateLayoutMetrics,

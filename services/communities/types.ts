@@ -7,7 +7,6 @@ export interface CommunitySettings {
   weightChannel: CommunityWeightChannel;
   resolution: number;
   iterations: number;
-  trials: number;
   steps: number;
   seed: number;
   clusters: number;
@@ -44,7 +43,6 @@ export const DEFAULT_COMMUNITY_SETTINGS: CommunitySettings = {
   weightChannel: 'unweighted',
   resolution: 1,
   iterations: 2,
-  trials: 10,
   steps: 4,
   seed: 42,
   clusters: 5,
